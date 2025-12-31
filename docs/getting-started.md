@@ -100,19 +100,31 @@ pisecure identity
 
 ### Wallet Management
 ```bash
-# Show wallet overview
-pisecure wallet
+# Create a new wallet
+pisecure create-wallet "my_wallet" --name "Personal Wallet"
 
-# Show specific token
-pisecure wallet 314ST-ABC123-1234567890
+# Show all wallets
+pisecure show-wallet
+
+# Show specific wallet details
+pisecure show-wallet "my_wallet"
+
+# Check wallet balance
+pisecure wallet-balance wallet_address
+
+# View wallet transaction history
+pisecure wallet-history wallet_address
+
+# Transfer tokens between wallets
+pisecure transfer-tokens recipient_address 100 --from-wallet "my_wallet"
 ```
 
 ### Export/Import Wallet
 ```bash
-# Export wallet
+# Export wallet (without private keys)
 pisecure export-wallet backup.json
 
-# Import wallet
+# Import wallet from backup
 pisecure import-wallet backup.json
 ```
 

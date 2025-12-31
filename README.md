@@ -1,4 +1,4 @@
-# PiSecure 🔒⚡
+# PiSecure
 
 **Enterprise-Grade Security Framework for IoT & Embedded Systems**
 
@@ -10,54 +10,54 @@
 
 **PiSecure provides enterprise-grade security for IoT and embedded projects with device identity management, cryptographically secure OTA updates, and optional hardware-verified blockchain mining on Raspberry Pi.**
 
-[🚀 Quick Start](#-quick-start) • [📚 Documentation](#-documentation) • [🔧 Installation](#-installation) • [🛠️ Developer Guide](#-developer-guide) • [🗺️ Roadmap](docs/roadmap.md)
+[Quick Start](#quick-start) • [Documentation](#documentation) • [Installation](#installation) • [Developer Guide](#developer-guide) • [Roadmap](docs/roadmap.md)
 
-## ✨ Features
+## Features
 
-### 🔐 Core Security
+### Core Security
 - **Hardware-Verified Mining**: Proof-of-work mining exclusive to Raspberry Pi hardware
 - **Device Authentication**: Unique device IDs tied to hardware fingerprints
 - **Mutual TLS**: Secure device-to-device and device-to-server communication
 - **Revocable Certificates**: Blockchain-stored certificates and keys
 
-### 📦 OTA Updates
+### OTA Updates
 - **Cryptographic Verification**: RSA/ECDSA signature verification of update packages
 - **Decentralized Distribution**: IPFS-based update distribution with on-chain hashes
 - **Automatic Rollback**: Failsafe rollback to previous versions on verification failure
 - **Secure Boot**: Hardware-verified boot process
 
-### 🎫 Access Control & Licensing
+### Access Control & Licensing
 - **Token-Gated Features**: Require token balance to unlock premium modes
 - **Time-Limited Access**: Subscription-based access via on-chain records
 - **Role-Based Permissions**: Hierarchical permissions (admin/operator/user)
 - **Usage Metering**: Pay-per-use tracking and billing
 
-### 💰 Micropayments & Incentives
+### Micropayments & Incentives
 - **Low-Fee Transfers**: Efficient token micropayments for sensor data sharing
 - **Automated Rewards**: Staking tokens for running relay nodes or providing services
 - **Oracle Integration**: Off-chain triggers and price feeds
 - **Smart Contracts**: Automated payment processing
 
-### 📊 Audit & Monitoring
+### Audit & Monitoring
 - **Immutable Audit Logs**: All events logged on-chain with cryptographic proof
 - **Tamper Detection**: Hardware-binding with TPM/serial verification
 - **Integrity Monitoring**: File hash verification and anomaly detection
 - **Real-time Alerts**: Automated security incident response
 
-### ⚡ Node Architectures
+### Node Architectures
 - **Full Node**: Complete blockchain validation and mining participation
 - **Light Client**: Header-only validation with Merkle proofs
 - **SPV Client**: Minimal trust assumptions, mobile/IoT optimized
 - **Bootstrapping**: Easy setup from trusted peers
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 PiSecure/
 ├── core/                    # Core blockchain engine
 │   ├── blockchain.py       # SignChain implementation
-│   ├── consensus.py        # Proof-of-work & validation
-│   └── crypto.py           # Cryptographic primitives
+│   ├── hardware.py         # Hardware verification & mining
+│   └── wallet.py           # SignWallet implementation
 ├── identity/               # Device identity management
 │   ├── certificates.py     # X.509 certificate handling
 │   ├── fingerprint.py      # Hardware fingerprinting
@@ -84,7 +84,7 @@ PiSecure/
     └── spv_client.py       # Minimal client
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
@@ -113,7 +113,7 @@ secure = PiSecure()
 
 # Check hardware eligibility
 if secure.verify_hardware():
-    print("✅ Raspberry Pi hardware verified")
+    print("Raspberry Pi hardware verified")
 
     # Start mining
     secure.start_mining()
@@ -141,6 +141,14 @@ pisecure create-tx
 
 # Check device identity
 pisecure identity
+
+# Wallet management
+pisecure create-wallet "my_wallet" --name "Personal Wallet"
+pisecure show-wallet                    # List all wallets
+pisecure show-wallet "my_wallet"        # Show specific wallet
+pisecure transfer-tokens addr123 100 --from-wallet "my_wallet"
+pisecure wallet-balance addr123
+pisecure wallet-history addr123
 
 # Verify update package
 pisecure verify-update package.zip
@@ -515,11 +523,23 @@ start_mining() -> bool
 mine_interactive() -> None
 get_chain_info() -> dict
 add_transaction(tx) -> str
+get_wallet_balance(address) -> float
+get_wallet_transactions(address) -> list
 
-# Tokens & Payments
-get_balance() -> float
-transfer_tokens(recipient, amount) -> bool
-stake_tokens(amount, tier) -> bool
+# Wallet Management
+SignWallet.create_wallet(wallet_id, name) -> dict
+SignWallet.load_wallet(wallet_id) -> dict
+SignWallet.sign_transaction(transaction) -> str
+SignWallet.create_transfer_transaction(recipient, amount) -> dict
+SignWallet.create_batch_transaction(transfers) -> dict
+SignWallet.get_balance() -> float
+SignWallet.get_address() -> str
+SignWallet.get_transaction_history() -> list
+
+# Token Operations
+SignToken.from_dict(data) -> SignToken
+SignToken.is_valid() -> bool
+SignToken.has_permission(permission) -> bool
 
 # Updates & Security
 verify_update(package_path) -> bool
