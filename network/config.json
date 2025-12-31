@@ -1,0 +1,63 @@
+{
+  "network": {
+    "name": "PiSecure Mainnet",
+    "version": "0.1.0",
+    "protocol_version": 1,
+    "default_port": 3141,
+    "magic_bytes": "0x50495343"
+  },
+  "bootstrap": {
+    "github_repo": "https://github.com/UnderhillForge/PiSecure",
+    "genesis_url": "https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/blockchain/genesis.json",
+    "config_url": "https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/network/config.json",
+    "checksums_url": "https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/blockchain/checksums.sha256"
+  },
+  "discovery": {
+    "methods": ["github_bootstrap", "mdns", "dht", "ipfs_pubsub"],
+    "dns_seeds": [
+      "seed1.pisecure.io",
+      "seed2.pisecure.io",
+      "seed3.pisecure.io"
+    ],
+    "dht_bootstrap_nodes": [
+      "dht1.pisecure.io:6881",
+      "dht2.pisecure.io:6881"
+    ],
+    "ipfs_topics": [
+      "pisecure/peers",
+      "pisecure/blocks"
+    ]
+  },
+  "peers": {
+    "max_outbound": 8,
+    "max_inbound": 16,
+    "min_required": 3,
+    "connect_timeout": 30,
+    "ping_interval": 300,
+    "peer_timeout": 1800
+  },
+  "sync": {
+    "max_blocks_per_request": 500,
+    "sync_timeout": 300,
+    "max_orphan_blocks": 100,
+    "checkpoint_blocks": [0, 1000, 10000]
+  },
+  "consensus": {
+    "pow_algorithm": "sha256",
+    "target_spacing": 600,
+    "difficulty_adjustment_interval": 2016,
+    "max_future_block_time": 7200
+  },
+  "mining": {
+    "hardware_verification_required": true,
+    "allowed_hardware": ["raspberry_pi_4", "raspberry_pi_5"],
+    "thermal_limits": {
+      "max_temperature": 70,
+      "throttle_threshold": 65
+    },
+    "power_limits": {
+      "max_current_draw": 3.0,
+      "brownout_protection": true
+    }
+  }
+}
