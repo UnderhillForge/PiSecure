@@ -503,6 +503,202 @@ def list_backups():
 
 
 @cli.command()
+@click.argument('wallet_name')
+@click.option('--name', help='Human-readable wallet name')
+def create_wallet(wallet_name, name):
+    """Create a new wallet"""
+    try:
+        from .core.wallet import SignWallet
+
+        wallet = SignWallet()
+
+        console.print(f"[blue]🔐 Creating wallet: {wallet_name}[/blue]")
+
+        result = wallet.create_wallet(wallet_name, name)
+
+        if result['success']:
+            console.print("[green]✅ Wallet created successfully![/green]")
+            console.print(f"   Wallet ID: {result['wallet_id']}")
+            console.print(f"   Address: {result['address']}")
+            console.print(f"   Key file: {result['key_file']}")
+            console.print(f"   Data file: {result['wallet_file']}")
+        else:
+            console.print(f"[red]❌ Wallet creation failed: {result.get('error')}[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Create wallet error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('wallet_name', required=False)
+def show_wallet(wallet_name):
+    """Show wallet information"""
+    try:
+        from .core.wallet import SignWallet
+
+        wallet = SignWallet()
+
+        if wallet_name:
+            # Show specific wallet
+            wallet_data = wallet.load_wallet(wallet_name)
+
+            if 'error' in wallet_data:
+                console.print(f"[red]❌ Wallet not found: {wallet_name}[/red]")
+                return
+
+            table = Table(title=f"🏦 Wallet: {wallet_name}")
+            table.add_column("Property", style="cyan", no_wrap=True)
+            table.add_column("Value", style="magenta")
+
+            table.add_row("Wallet ID", wallet_data.get('wallet_id', 'unknown'))
+            table.add_row("Name", wallet_data.get('name', 'unnamed'))
+            table.add_row("Address", wallet_data.get('address', 'unknown'))
+            table.add_row("Balance", f"{wallet_data.get('balance', 0):.2f}")
+            table.add_row("Created", time.ctime(wallet_data.get('created_at', 0)))
+
+            console.print(table)
+        else:
+            # List all wallets
+            wallets = wallet.list_wallets()
+
+            if not wallets:
+                console.print("[yellow]📭 No wallets found[/yellow]")
+                console.print("[dim]Create your first wallet with: pisecure create-wallet <name>[/dim]")
+                return
+
+            table = Table(title="🏦 Available Wallets")
+            table.add_column("ID", style="cyan", no_wrap=True)
+            table.add_column("Name", style="green")
+            table.add_column("Address", style="magenta", no_wrap=True)
+            table.add_column("Balance", style="yellow", justify="right")
+            table.add_column("Created", style="blue")
+
+            for w in wallets:
+                created_time = time.ctime(w.get('created', 0))
+                table.add_row(
+                    w.get('id', 'unknown'),
+                    w.get('name', 'unnamed'),
+                    w.get('address', 'unknown'),
+                    f"{w.get('balance', 0):.2f}",
+                    created_time
+                )
+
+            console.print(table)
+
+    except Exception as e:
+        console.print(f"[red]❌ Show wallet error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('recipient_address')
+@click.argument('amount', type=float)
+@click.option('--from-wallet', help='Sender wallet ID')
+@click.option('--memo', help='Transaction memo')
+def transfer_tokens(recipient_address, amount, from_wallet, memo):
+    """Transfer tokens to another wallet"""
+    try:
+        from .core.wallet import SignWallet
+
+        if not from_wallet:
+            console.print("[red]❌ Must specify sender wallet with --from-wallet[/red]")
+            return
+
+        wallet = SignWallet()
+        wallet_data = wallet.load_wallet(from_wallet)
+
+        if 'error' in wallet_data:
+            console.print(f"[red]❌ Wallet not found: {from_wallet}[/red]")
+            return
+
+        # Load wallet with private key for signing
+        wallet = SignWallet(f"/var/lib/pisecure/wallets/{from_wallet}.json")
+
+        console.print(f"[blue]💸 Transferring {amount} tokens[/blue]")
+        console.print(f"   From: {from_wallet}")
+        console.print(f"   To: {recipient_address}")
+        if memo:
+            console.print(f"   Memo: {memo}")
+
+        # Create transfer transaction
+        transaction = wallet.create_transfer_transaction(recipient_address, amount, memo)
+
+        if 'error' in transaction:
+            console.print(f"[red]❌ Transaction creation failed: {transaction['error']}[/red]")
+            return
+
+        # Add to blockchain
+        blockchain = SignChain()
+        tx_hash = blockchain.add_transaction(transaction)
+
+        console.print("[green]✅ Transaction submitted successfully![/green]")
+        console.print(f"   Transaction Hash: {tx_hash}")
+        console.print("[yellow]💡 Transaction will be mined in the next block[/yellow]")
+
+        # Optionally mine immediately
+        console.print("[dim]Mining transaction...[/dim]")
+        mined_block = blockchain.mine_pending_transactions(verbose=True)
+        if mined_block:
+            console.print(f"[green]✅ Transaction mined in block #{mined_block.index}[/green]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Transfer error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('wallet_address')
+def wallet_balance(wallet_address):
+    """Check wallet balance"""
+    try:
+        blockchain = SignChain()
+
+        balance = blockchain.get_wallet_balance(wallet_address)
+
+        console.print(f"[green]💰 Wallet Balance[/green]")
+        console.print(f"   Address: {wallet_address}")
+        console.print(f"   Balance: {balance:.2f} tokens")
+
+    except Exception as e:
+        console.print(f"[red]❌ Balance check error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('wallet_address')
+def wallet_history(wallet_address):
+    """Show wallet transaction history"""
+    try:
+        blockchain = SignChain()
+
+        transactions = blockchain.get_wallet_transactions(wallet_address)
+
+        if not transactions:
+            console.print(f"[yellow]📭 No transactions found for wallet: {wallet_address}[/yellow]")
+            return
+
+        table = Table(title=f"📊 Transaction History: {wallet_address[:16]}...")
+        table.add_column("TX Hash", style="cyan", no_wrap=True)
+        table.add_column("Block", style="magenta", justify="right")
+        table.add_column("Direction", style="green")
+        table.add_column("Amount", style="yellow", justify="right")
+        table.add_column("Time", style="blue")
+
+        for tx in transactions[-20:]:  # Show last 20 transactions
+            direction_icon = "⬅️" if tx['direction'] == 'incoming' else "➡️"
+            tx_time = time.ctime(tx.get('timestamp', 0))
+            table.add_row(
+                tx['tx_hash'][:16] + "...",
+                str(tx['block_index']),
+                f"{direction_icon} {tx['direction']}",
+                f"{tx['amount']:.2f}",
+                tx_time
+            )
+
+        console.print(table)
+
+    except Exception as e:
+        console.print(f"[red]❌ History error: {e}[/red]")
+
+
+@cli.command()
 @click.option('--name', help='Custom device name')
 @click.option('--org', default='PiSecure Network', help='Organization name')
 @click.option('--skip-cert', is_flag=True, help='Skip certificate generation')
