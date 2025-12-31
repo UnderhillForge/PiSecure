@@ -1,0 +1,292 @@
+/* PiSecure Dashboard Styles */
+
+:root {
+    --primary-color: #2c3e50;
+    --secondary-color: #3498db;
+    --success-color: #27ae60;
+    --warning-color: #f39c12;
+    --danger-color: #e74c3c;
+    --background-color: #f8f9fa;
+    --card-background: #ffffff;
+    --text-color: #2c3e50;
+    --text-muted: #6c757d;
+    --border-color: #dee2e6;
+    --shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: var(--background-color);
+    color: var(--text-color);
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* Header */
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    padding: 20px;
+    background: var(--card-background);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+}
+
+header h1 {
+    color: var(--primary-color);
+    font-size: 1.8rem;
+    font-weight: 600;
+}
+
+nav {
+    display: flex;
+    gap: 20px;
+}
+
+nav a {
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+
+nav a:hover, nav a.active {
+    background-color: var(--secondary-color);
+    color: white;
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--text-muted);
+    animation: pulse 2s infinite;
+}
+
+.status-dot.connected {
+    background-color: var(--success-color);
+    animation: none;
+}
+
+.status-dot.disconnected {
+    background-color: var(--danger-color);
+    animation: none;
+}
+
+/* Cards */
+.card {
+    background: var(--card-background);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    margin-bottom: 20px;
+    overflow: hidden;
+}
+
+.card h2 {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: white;
+    padding: 15px 20px;
+    font-size: 1.2rem;
+    font-weight: 500;
+    margin: 0;
+}
+
+.card > div {
+    padding: 20px;
+}
+
+/* Metrics Grid */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+}
+
+.metric {
+    text-align: center;
+}
+
+.metric .label {
+    display: block;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.metric .value {
+    display: block;
+    font-size: 2rem;
+    font-weight: 600;
+    color: var(--primary-color);
+    margin-bottom: 10px;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 6px;
+    background-color: #e9ecef;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--success-color), var(--warning-color));
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+/* Status Grids */
+.status-grid, .mining-grid, .network-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 20px;
+}
+
+.status-item, .mining-metric, .network-metric {
+    text-align: center;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 6px;
+}
+
+.status-label, .mining-label, .network-label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-value, .mining-value, .network-value {
+    display: block;
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+#valid-indicator {
+    font-size: 1.2rem;
+}
+
+/* Activity List */
+.activity-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.activity-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.activity-item:last-child {
+    border-bottom: none;
+}
+
+.activity-time {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.activity-desc {
+    font-weight: 500;
+}
+
+/* Chart Container */
+.chart-container {
+    position: relative;
+    height: 200px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .container {
+        padding: 10px;
+    }
+
+    header {
+        flex-direction: column;
+        gap: 15px;
+        text-align: center;
+    }
+
+    nav {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .metrics-grid, .status-grid, .mining-grid, .network-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .activity-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+}
+
+/* Animations */
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+/* Status Colors */
+.status-active { color: var(--success-color); }
+.status-paused { color: var(--warning-color); }
+.status-stopped { color: var(--danger-color); }
+.status-unknown { color: var(--text-muted); }
+
+/* Loading States */
+.loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.loading::after {
+    content: " Loading...";
+    font-style: italic;
+    color: var(--text-muted);
+}
+
+/* Error States */
+.error {
+    border-left: 4px solid var(--danger-color);
+    background-color: #fff5f5;
+}
+
+/* Success States */
+.success {
+    border-left: 4px solid var(--success-color);
+    background-color: #f5fff5;
+}
