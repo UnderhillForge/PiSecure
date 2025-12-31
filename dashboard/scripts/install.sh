@@ -23,19 +23,23 @@ NC='\033[0m'
 
 # Logging functions
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1" | tee -a "$LOG_DIR/install.log"
+    echo -e "${BLUE}[INFO]${NC} $1"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] $1" >> "$LOG_DIR/install.log" 2>/dev/null || true
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1" | tee -a "$LOG_DIR/install.log"
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [SUCCESS] $1" >> "$LOG_DIR/install.log" 2>/dev/null || true
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a "$LOG_DIR/install.log"
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [WARNING] $1" >> "$LOG_DIR/install.log" 2>/dev/null || true
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOG_DIR/install.log"
+    echo -e "${RED}[ERROR]${NC} $1"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $1" >> "$LOG_DIR/install.log" 2>/dev/null || true
 }
 
 # Check if running on Raspberry Pi
