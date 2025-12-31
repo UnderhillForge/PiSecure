@@ -1,0 +1,16 @@
+# Core dependencies for PiSecure
+cryptography>=41.0.0
+PyNaCl>=1.5.0
+requests>=2.31.0
+click>=8.1.0
+rich>=13.0.0
+python-dateutil>=2.8.2
+
+# Optional dependencies (uncomment as needed)
+# ipfshttpclient>=0.8.0  # For IPFS integration
+# RPi.GPIO>=0.7.0       # For GPIO access on Pi
+# gpiozero>=2.0         # For GPIO abstraction
+# tpm2-pytss>=1.2.0     # For TPM integration
+# paho-mqtt>=1.6.1      # For MQTT support
+# fastapi>=0.100.0      # For REST API
+# uvicorn>=0.23.0       # For async server
