@@ -99,33 +99,11 @@ install_system_deps() {
     # Install cryptography dependencies
     sudo apt install -y build-essential libssl-dev libffi-dev libsodium-dev
 
-    # Install Pi-specific dependencies based on model (optional - skip if not available)
-    case $PI_NUMBER in
-        0|1|2|3)
-            # Pi Zero, Zero W, Zero 2 W, Pi 3
-            log_info "Installing dependencies for Pi Zero/3 series..."
-            if ! sudo apt install -y raspberrypi-bootloader 2>/dev/null; then
-                log_warning "Pi-specific bootloader package not available - this is OK for most use cases"
-            fi
-            ;;
-        4)
-            # Pi 4
-            log_info "Installing dependencies for Pi 4..."
-            if ! sudo apt install -y raspberrypi-bootloader 2>/dev/null; then
-                log_warning "Pi-specific bootloader package not available - this is OK for most use cases"
-            fi
-            ;;
-        5)
-            # Pi 5
-            log_info "Installing dependencies for Pi 5..."
-            if ! sudo apt install -y raspberrypi-bootloader 2>/dev/null; then
-                log_warning "Pi-specific bootloader package not available - this is OK for most use cases"
-            fi
-            ;;
-        *)
-            log_warning "Unknown Pi model - skipping Pi-specific packages (this is OK)"
-            ;;
-    esac
+    # Note: Pi-specific bootloader packages are optional and may not be available
+    # on all OS variants. PiSecure works fine without them.
+    log_info "Note: Some Pi-specific packages may not be available on this OS"
+    log_info "This is normal and PiSecure will work fine without them"
+    log_warning "Skipping optional Pi-specific bootloader packages (not required for PiSecure)"
 
     # Ensure user is in required groups
     sudo usermod -a -G gpio,video,i2c $USER || true
