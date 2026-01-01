@@ -140,7 +140,7 @@ install_pisecure() {
     log_info "Installing PiSecure dependencies..."
 
     # Install core dependencies that are known to work
-    pip install cryptography PyNaCl requests click rich python-dateutil
+    pip install cryptography PyNaCl requests click rich python-dateutil flask psutil
 
     # Clone and install PiSecure manually to handle import issues
     if [ ! -d "repo" ]; then
