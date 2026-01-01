@@ -11,9 +11,16 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from .core import SignChain, HardwareVerifier, SignTokenMiner
-from .updates import OTAUpdater
-from .identity import DeviceIdentity, DeviceAuthenticator
+try:
+    # Try relative imports first (for package installation)
+    from .core import SignChain, HardwareVerifier, SignTokenMiner
+    from .updates import OTAUpdater
+    from .identity import DeviceIdentity, DeviceAuthenticator
+except ImportError:
+    # Fall back to absolute imports (for direct execution)
+    from core import SignChain, HardwareVerifier, SignTokenMiner
+    from updates import OTAUpdater
+    from identity import DeviceIdentity, DeviceAuthenticator
 
 console = Console()
 
@@ -187,7 +194,12 @@ def identity():
 def wallet(token_id):
     """Show wallet status and tokens"""
     try:
-        from .core.wallet import SignWallet
+        try:
+            # Try relative import first
+            from .core.wallet import SignWallet
+        except ImportError:
+            # Fall back to absolute import
+            from core.wallet import SignWallet
 
         wallet = SignWallet()
 
@@ -200,7 +212,12 @@ def wallet(token_id):
                     break
 
             if token_data:
-                from .core.tokens import SignToken
+                try:
+                    # Try relative import first
+                    from .core.tokens import SignToken
+                except ImportError:
+                    # Fall back to absolute import
+                    from core.tokens import SignToken
                 token = SignToken.from_dict(token_data)
 
                 table = Table(title=f"🏷️ Token: {token_id}")
@@ -263,6 +280,16 @@ def wallet(token_id):
 def verify_update(package_path):
     """Verify update package signature and integrity"""
     try:
+        try:
+            # Try relative import first
+            from .updates import OTAUpdater
+        except ImportError:
+            # Fall back to absolute import
+            from updates import OTAUpdater
+
+        updater = OTAUpdater()
+    """Verify update package signature and integrity"""
+    try:
         updater = OTAUpdater()
 
         console.print(f"[blue]🔍 Verifying update package: {package_path}[/blue]\n")
@@ -291,8 +318,12 @@ def verify_update(package_path):
 def check_updates(apply):
     """Check for available updates"""
     try:
-        import pisecure
-        current_version = pisecure.__version__
+        try:
+            # Try relative import first
+            from .updates import OTAUpdater
+        except ImportError:
+            # Fall back to absolute import
+            from updates import OTAUpdater
 
         updater = OTAUpdater()
 
@@ -508,7 +539,12 @@ def list_backups():
 def create_wallet(wallet_name, name):
     """Create a new wallet"""
     try:
-        from .core.wallet import SignWallet
+        try:
+            # Try relative import first
+            from .core.wallet import SignWallet
+        except ImportError:
+            # Fall back to absolute import
+            from core.wallet import SignWallet
 
         wallet = SignWallet()
 
@@ -534,7 +570,12 @@ def create_wallet(wallet_name, name):
 def show_wallet(wallet_name):
     """Show wallet information"""
     try:
-        from .core.wallet import SignWallet
+        try:
+            # Try relative import first
+            from .core.wallet import SignWallet
+        except ImportError:
+            # Fall back to absolute import
+            from core.wallet import SignWallet
 
         wallet = SignWallet()
 
@@ -597,7 +638,12 @@ def show_wallet(wallet_name):
 def transfer_tokens(recipient_address, amount, from_wallet, memo):
     """Transfer tokens to another wallet"""
     try:
-        from .core.wallet import SignWallet
+        try:
+            # Try relative import first
+            from .core.wallet import SignWallet
+        except ImportError:
+            # Fall back to absolute import
+            from core.wallet import SignWallet
 
         if not from_wallet:
             console.print("[red]❌ Must specify sender wallet with --from-wallet[/red]")
@@ -944,7 +990,12 @@ def import_identity(identity_file):
 def export_wallet(backup_path):
     """Export wallet to backup file"""
     try:
-        from .core.wallet import SignWallet
+        try:
+            # Try relative import first
+            from .core.wallet import SignWallet
+        except ImportError:
+            # Fall back to absolute import
+            from core.wallet import SignWallet
 
         wallet = SignWallet()
         wallet.export_wallet(backup_path)
@@ -960,7 +1011,12 @@ def export_wallet(backup_path):
 def import_wallet(backup_path):
     """Import wallet from backup file"""
     try:
-        from .core.wallet import SignWallet
+        try:
+            # Try relative import first
+            from .core.wallet import SignWallet
+        except ImportError:
+            # Fall back to absolute import
+            from core.wallet import SignWallet
 
         wallet = SignWallet()
         success = wallet.import_wallet(backup_path)
