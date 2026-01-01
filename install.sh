@@ -201,11 +201,11 @@ EOF
 
     chmod +x launch_pisecure.py
 
-    # Create web dashboard launcher
+    # Create web dashboard launcher (runs Flask app, not static server)
     cat > launch_dashboard.py << 'EOF'
 #!/bin/bash
 """
-PiSecure Web Dashboard Launcher
+PiSecure Web Dashboard Launcher - Runs Flask Application
 """
 
 # Get the directory where this script is located
@@ -214,12 +214,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Activate the virtual environment
 source "$SCRIPT_DIR/venv/bin/activate"
 
-# Change to dashboard directory and start web server
+# Change to dashboard directory and run Flask app
 cd "$SCRIPT_DIR/repo/dashboard/web"
-echo "Starting PiSecure Web Dashboard..."
-echo "Access at: http://localhost:5000"
+echo "🚀 Starting PiSecure Flask Dashboard..."
+echo "========================================"
+echo "Dashboard will be available at:"
+echo "  Local:   http://localhost:5000"
+echo "  Network: http://[your-pi-ip]:5000"
+echo ""
+echo "Features:"
+echo "  ✅ Real-time system monitoring"
+echo "  ✅ Blockchain status display"
+echo "  ✅ Mining status tracking"
+echo "  ✅ Network peer information"
+echo "  ✅ Auto-refresh every 30 seconds"
+echo ""
 echo "Press Ctrl+C to stop"
-exec python3 -m http.server 5000
+echo ""
+
+# Run the minimal dashboard Flask application
+exec python3 minimal_dashboard.py
 EOF
 
     chmod +x launch_dashboard.py
