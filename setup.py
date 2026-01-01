@@ -66,7 +66,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'pisecure=pisecure.cli:main',
+            'pisecure=launch_pisecure:main',
         ],
     },
     classifiers=[
