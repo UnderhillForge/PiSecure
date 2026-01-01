@@ -99,11 +99,89 @@ install_system_deps() {
     # Install cryptography dependencies
     sudo apt install -y build-essential libssl-dev libffi-dev libsodium-dev
 
-    # Note: Pi-specific bootloader packages are optional and may not be available
-    # on all OS variants. PiSecure works fine without them.
-    log_info "Note: Some Pi-specific packages may not be available on this OS"
-    log_info "This is normal and PiSecure will work fine without them"
-    log_warning "Skipping optional Pi-specific bootloader packages (not required for PiSecure)"
+    # Install Pi-specific packages required for mining functionality
+    case $PI_NUMBER in
+        0|1|2|3)
+            # Pi Zero, Zero W, Zero 2 W, Pi 3 - need raspberrypi-userland for vcgencmd
+            log_info "Installing Pi-specific packages for mining (Zero/3 series)..."
+            # Try different package names - some OS variants may have different names
+            PACKAGES_INSTALLED=0
+            if sudo apt install -y raspberrypi-userland 2>/dev/null; then
+                log_success "Installed raspberrypi-userland (VideoCore GPU access)"
+                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
+            elif sudo apt install -y libraspberrypi-bin 2>/dev/null; then
+                log_success "Installed libraspberrypi-bin (VideoCore GPU access)"
+                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
+            fi
+
+            if sudo apt install -y raspberrypi-bootloader 2>/dev/null; then
+                log_success "Installed raspberrypi-bootloader (kernel modules)"
+                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
+            elif sudo apt install -y raspberrypi-kernel 2>/dev/null; then
+                log_success "Installed raspberrypi-kernel (kernel modules)"
+                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
+            fi
+
+            if [ $PACKAGES_INSTALLED -eq 0 ]; then
+                log_warning "Pi-specific packages not available - mining may be limited"
+                log_info "PiSecure will still work but hardware verification may fail"
+            fi
+            ;;
+        4)
+            # Pi 4 - similar requirements
+            log_info "Installing Pi-specific packages for mining (Pi 4)..."
+            PACKAGES_INSTALLED=0
+            if sudo apt install -y raspberrypi-userland 2>/dev/null; then
+                log_success "Installed raspberrypi-userland (VideoCore GPU access)"
+                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
+            elif sudo apt install -y libraspberrypi-bin 2>/dev/null; then
+                log_success "Installed libraspberrypi-bin (VideoCore GPU access)"
+                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
+            fi
+
+            if sudo apt install -y raspberrypi-bootloader 2>/dev/null; then
+                log_success "Installed raspberrypi-bootloader (kernel modules)"
+                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
+            elif sudo apt install -y raspberrypi-kernel 2>/dev/null; then
+                log_success "Installed raspberrypi-kernel (kernel modules)"
+                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
+            fi
+
+            if [ $PACKAGES_INSTALLED -eq 0 ]; then
+                log_warning "Pi-specific packages not available - mining may be limited"
+                log_info "PiSecure will still work but hardware verification may fail"
+            fi
+            ;;
+        5)
+            # Pi 5 - may need different packages
+            log_info "Installing Pi-specific packages for mining (Pi 5)..."
+            PACKAGES_INSTALLED=0
+            if sudo apt install -y raspberrypi-userland 2>/dev/null; then
+                log_success "Installed raspberrypi-userland (VideoCore GPU access)"
+                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
+            elif sudo apt install -y libraspberrypi-bin 2>/dev/null; then
+                log_success "Installed libraspberrypi-bin (VideoCore GPU access)"
+                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
+            fi
+
+            if sudo apt install -y raspberrypi-bootloader 2>/dev/null; then
+                log_success "Installed raspberrypi-bootloader (kernel modules)"
+                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
+            elif sudo apt install -y raspberrypi-kernel 2>/dev/null; then
+                log_success "Installed raspberrypi-kernel (kernel modules)"
+                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
+            fi
+
+            if [ $PACKAGES_INSTALLED -eq 0 ]; then
+                log_warning "Pi-specific packages not available - mining may be limited"
+                log_info "PiSecure will still work but hardware verification may fail"
+            fi
+            ;;
+        *)
+            log_warning "Unknown Pi model - some mining features may not work"
+            log_info "PiSecure core functionality will still work"
+            ;;
+    esac
 
     # Ensure user is in required groups
     sudo usermod -a -G gpio,video,i2c $USER || true
