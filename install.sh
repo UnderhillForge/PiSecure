@@ -151,52 +151,78 @@ install_pisecure() {
     mkdir -p venv/lib/python3.*/site-packages/pisecure/
     cp -r repo/pisecure/* venv/lib/python3.*/site-packages/pisecure/ 2>/dev/null || true
 
-    # Create launcher script (uses simple_cli which works)
+    # Create launcher script (activates venv and uses simple_cli)
     cat > launch_pisecure.py << 'EOF'
-#!/usr/bin/env python3
+#!/bin/bash
 """
-PiSecure CLI Launcher - Simple Python launcher that works around import issues
+PiSecure CLI Launcher - Activates virtual environment and runs CLI
 """
 
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Activate the virtual environment
+source "$SCRIPT_DIR/venv/bin/activate"
+
+# Run the PiSecure CLI
+exec python3 -c "
 import sys
 import os
 
-# Add the current directory and repo to Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-repo_dir = os.path.join(os.path.dirname(current_dir), 'repo')
+# Add virtual environment site-packages to path
+venv_site_packages = '$SCRIPT_DIR/venv/lib/python3.*/site-packages'
+sys.path.insert(0, venv_site_packages)
 
-sys.path.insert(0, current_dir)
+# Also add repo directory for fallback
+repo_dir = '$SCRIPT_DIR/repo'
 sys.path.insert(0, repo_dir)
 
-def main():
-    """Main entry point for the launcher"""
-    # Now try to import and run PiSecure CLI
+try:
+    from pisecure.simple_cli import cli
+    cli()
+except ImportError as e:
+    print(f'Import error: {e}')
+    print('Trying alternative import paths...')
+
     try:
-        from pisecure.simple_cli import cli
-        cli()
-    except ImportError as e:
-        print(f"Import error: {e}")
-        print("Trying alternative import paths...")
-
-        # Try different import approaches
-        try:
-            # Direct module import
-            sys.path.insert(0, '/opt/pisecure/repo')
-            from pisecure.simple_cli import cli
-            cli()
-        except Exception as e2:
-            print(f"Alternative import failed: {e2}")
-            print("\nPiSecure CLI is having import issues.")
-            print("The web dashboard works perfectly though!")
-            print("Access it at: http://localhost:5000")
-            sys.exit(1)
-
-
-if __name__ == '__main__':
-    main()
+        # Try importing from repo directly
+        sys.path.insert(0, repo_dir)
+        import pisecure.simple_cli as cli_module
+        cli_module.cli()
+    except Exception as e2:
+        print(f'Alternative import failed: {e2}')
+        print()
+        print('PiSecure CLI is having import issues.')
+        print('The web dashboard should still work!')
+        print('Try: python3 -m http.server 5000 (in the dashboard directory)')
+        sys.exit(1)
+"
 EOF
 
     chmod +x launch_pisecure.py
+
+    # Create web dashboard launcher
+    cat > launch_dashboard.py << 'EOF'
+#!/bin/bash
+"""
+PiSecure Web Dashboard Launcher
+"""
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Activate the virtual environment
+source "$SCRIPT_DIR/venv/bin/activate"
+
+# Change to dashboard directory and start web server
+cd "$SCRIPT_DIR/repo/dashboard/web"
+echo "Starting PiSecure Web Dashboard..."
+echo "Access at: http://localhost:5000"
+echo "Press Ctrl+C to stop"
+exec python3 -m http.server 5000
+EOF
+
+    chmod +x launch_dashboard.py
 
     log_success "PiSecure installed successfully"
 }
