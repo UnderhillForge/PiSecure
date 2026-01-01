@@ -103,21 +103,27 @@ install_system_deps() {
         0|1|2|3)
             # Pi Zero, Zero W, Zero 2 W, Pi 3
             log_info "Installing dependencies for Pi Zero/3 series..."
-            sudo apt install -y raspberrypi-bootloader
+            # Try different package names for different OS versions
+            sudo apt install -y raspberrypi-bootloader 2>/dev/null || \
+            sudo apt install -y raspberrypi-kernel 2>/dev/null || \
+            log_warning "Pi-specific bootloader package not available - this is OK for most use cases"
             ;;
         4)
             # Pi 4
             log_info "Installing dependencies for Pi 4..."
-            sudo apt install -y raspberrypi-bootloader
+            sudo apt install -y raspberrypi-bootloader 2>/dev/null || \
+            sudo apt install -y raspberrypi-kernel 2>/dev/null || \
+            log_warning "Pi-specific bootloader package not available - this is OK for most use cases"
             ;;
         5)
             # Pi 5
             log_info "Installing dependencies for Pi 5..."
-            sudo apt install -y raspberrypi-bootloader
+            sudo apt install -y raspberrypi-bootloader 2>/dev/null || \
+            sudo apt install -y raspberrypi-kernel 2>/dev/null || \
+            log_warning "Pi-specific bootloader package not available - this is OK for most use cases"
             ;;
         *)
-            log_warning "Unknown Pi model, installing generic dependencies..."
-            sudo apt install -y raspberrypi-bootloader
+            log_warning "Unknown Pi model - skipping Pi-specific packages (this is OK)"
             ;;
     esac
 
