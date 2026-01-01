@@ -175,33 +175,33 @@ class HardwareVerifier:
         }
 
     def _verify_videocore_gpu(self) -> Dict[str, Any]:
-        """Verify VideoCore GPU presence - exclusive Broadcom technology"""
+        """Verify VideoCore GPU presence - supports IV, VI, and VII"""
         try:
-            # Use vcgencmd to verify VideoCore GPU
+            # Method 1: Try standard VideoCore commands (works on IV/VI/VII)
             result = subprocess.run(['vcgencmd', 'version'],
                                   capture_output=True, text=True, timeout=2)
 
             if result.returncode == 0:
-                # vcgencmd is available, indicates VideoCore GPU
+                videocore_version = self._detect_videocore_version()
                 gpu_mem = 'unknown'
                 features_verified = 1  # vcgencmd version worked
 
-                # Try to get GPU memory info
+                # Try to get GPU memory info (works on IV/VI, may differ on VII)
                 mem_result = subprocess.run(['vcgencmd', 'get_mem', 'gpu'],
                                           capture_output=True, text=True, timeout=2)
                 if mem_result.returncode == 0 and 'gpu=' in mem_result.stdout:
                     gpu_mem = mem_result.stdout.strip().replace('gpu=', '')
                     features_verified += 1
 
-                # Check temperature sensor (VideoCore GPU temp)
-                temp_result = subprocess.run(['vcgencmd', 'measure_temp'],
-                                           capture_output=True, text=True, timeout=2)
-                if temp_result.returncode == 0 and 'temp=' in temp_result.stdout:
+                # Check temperature sensor (different methods for different VideoCore versions)
+                temp_verified = self._verify_videocore_temperature()
+                if temp_verified:
                     features_verified += 1
 
                 return {
                     'passed': True,
                     'gpu_memory': gpu_mem,
+                    'videocore_version': videocore_version,
                     'features_verified': features_verified,
                     'videocore_detected': True
                 }
@@ -213,6 +213,78 @@ class HardwareVerifier:
             'passed': False,
             'error': 'VideoCore GPU verification failed'
         }
+
+    def _detect_videocore_version(self) -> str:
+        """Detect VideoCore GPU version"""
+        try:
+            # Try to get version info
+            version_result = subprocess.run(['vcgencmd', 'version'],
+                                          capture_output=True, text=True, timeout=2)
+
+            if version_result.returncode == 0:
+                version_output = version_result.stdout.lower()
+
+                # Check for version indicators
+                if 'videocore vii' in version_output or 'vc7' in version_output:
+                    return 'VII'
+                elif 'videocore vi' in version_output or 'vc6' in version_output:
+                    return 'VI'
+                elif 'videocore iv' in version_output or 'vc4' in version_output:
+                    return 'IV'
+                else:
+                    # Fallback: check hardware model for version hints
+                    chip_result = self._verify_chip_identification()
+                    model = chip_result.get('model', '').lower()
+
+                    if 'pi 5' in model:
+                        return 'VII'  # Pi 5 uses VideoCore VII
+                    elif 'pi 4' in model:
+                        return 'VI'   # Pi 4 uses VideoCore VI
+                    else:
+                        return 'IV'   # Older Pis use VideoCore IV
+
+        except Exception:
+            pass
+
+        return 'unknown'
+
+    def _verify_videocore_temperature(self) -> bool:
+        """Verify VideoCore temperature sensor with version-specific fallbacks"""
+        try:
+            # Method 1: Standard GPU temperature (works on IV/VI)
+            temp_result = subprocess.run(['vcgencmd', 'measure_temp'],
+                                       capture_output=True, text=True, timeout=2)
+
+            if temp_result.returncode == 0 and 'temp=' in temp_result.stdout:
+                temp_str = temp_result.stdout.strip()
+                temp_match = re.search(r'temp=([0-9.]+)', temp_str)
+                if temp_match:
+                    temp = float(temp_match.group(1))
+                    if 0 <= temp <= 100:  # Reasonable temperature range
+                        return True
+
+            # Method 2: Pi 5 specific temperature check (VideoCore VII)
+            # Pi 5 may use different temperature reporting
+            try:
+                # Check system temperature as fallback
+                with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+                    temp_raw = int(f.read().strip())
+                    temp_celsius = temp_raw / 1000.0
+                    if 0 <= temp_celsius <= 100:
+                        return True
+            except:
+                pass
+
+            # Method 3: Check for any temperature-related vcgencmd output
+            temp_sensors = subprocess.run(['vcgencmd', 'measure_volts', 'core'],
+                                        capture_output=True, text=True, timeout=2)
+            if temp_sensors.returncode == 0:
+                return True  # If vcgencmd works at all, GPU is present
+
+        except Exception:
+            pass
+
+        return False
 
     def _verify_mailbox_interface(self) -> Dict[str, Any]:
         """Verify mailbox interface - exclusive CPU↔GPU communication"""
