@@ -17,16 +17,20 @@ class HardwareVerifier:
     """Comprehensive Raspberry Pi hardware verification using exclusive registers and chipsets"""
 
     def __init__(self):
-        self.allowed_hardware = ['raspberry_pi_4', 'raspberry_pi_5', 'raspberry_pi_zero_2']
+        # Support ALL Raspberry Pi models for maximum compatibility
+        self.allowed_hardware = [
+            'raspberry_pi_zero', 'raspberry_pi_zero_w', 'raspberry_pi_zero_2',
+            'raspberry_pi_3', 'raspberry_pi_3b+', 'raspberry_pi_4', 'raspberry_pi_5'
+        ]
 
-        # Verification methods with weights
+        # Verification methods with weights - made more lenient for older Pi models
         self.verification_methods = {
-            'cpu_serial': {'weight': 0.25, 'required': True},
-            'hardware_rng': {'weight': 0.20, 'required': False},  # Made optional for Pi 5 compatibility
-            'videocore_gpu': {'weight': 0.20, 'required': True},
-            'mailbox_interface': {'weight': 0.15, 'required': False},
-            'chip_identification': {'weight': 0.10, 'required': False},
-            'otp_registers': {'weight': 0.10, 'required': False}
+            'cpu_serial': {'weight': 0.20, 'required': True},      # Required for all Pi
+            'hardware_rng': {'weight': 0.15, 'required': False},   # Optional for older Pi
+            'videocore_gpu': {'weight': 0.25, 'required': False},  # Optional for newer Pi
+            'chip_identification': {'weight': 0.20, 'required': True}, # Required for model detection
+            'gpio_access': {'weight': 0.10, 'required': False},    # Optional GPIO check
+            'system_info': {'weight': 0.10, 'required': False}      # Optional system checks
         }
 
     def verify_mining_eligibility(self) -> Dict[str, Any]:

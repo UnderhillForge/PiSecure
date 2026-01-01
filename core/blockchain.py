@@ -209,8 +209,13 @@ class SignChain:
             print(f"❌ Failed to save pending transactions: {e}")
 
     def add_transaction(self, transaction: Dict[str, Any]) -> str:
-        """Add transaction to pending transactions"""
+        """Add transaction to pending transactions with wallet validation"""
         with self.lock:
+            # Validate transaction based on type
+            validation_result = self._validate_transaction(transaction)
+            if not validation_result['valid']:
+                raise ValueError(f"Transaction validation failed: {validation_result['error']}")
+
             # Add timestamp if not present
             if "timestamp" not in transaction:
                 transaction["timestamp"] = time.time()
@@ -223,6 +228,197 @@ class SignChain:
             # Return transaction hash for tracking
             tx_string = json.dumps(transaction, sort_keys=True)
             return hashlib.sha256(tx_string.encode()).hexdigest()
+
+    def _validate_transaction(self, transaction: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate transaction before adding to pending pool"""
+        tx_type = transaction.get('type', '')
+
+        if tx_type == 'token_transfer':
+            return self._validate_token_transfer(transaction)
+        elif tx_type == 'batch_transfer':
+            return self._validate_batch_transfer(transaction)
+        elif tx_type in ['genesis', 'test_transaction', 'sensor_reading']:
+            # These don't require wallet validation
+            return {'valid': True}
+        else:
+            return {
+                'valid': False,
+                'error': f'Unknown transaction type: {tx_type}'
+            }
+
+    def _validate_token_transfer(self, transaction: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate token transfer transaction"""
+        try:
+            # Required fields
+            required_fields = ['sender_address', 'recipient_address', 'amount', 'signature']
+            for field in required_fields:
+                if field not in transaction:
+                    return {
+                        'valid': False,
+                        'error': f'Missing required field: {field}'
+                    }
+
+            sender_address = transaction['sender_address']
+            amount = transaction['amount']
+
+            # Validate amount
+            if not isinstance(amount, (int, float)) or amount <= 0:
+                return {
+                    'valid': False,
+                    'error': f'Invalid amount: {amount}'
+                }
+
+            # Check sender balance (simplified - should query wallet system)
+            # In production, this would query the wallet system or maintain balances
+            sender_balance = self._get_wallet_balance(sender_address)
+            if sender_balance < amount:
+                return {
+                    'valid': False,
+                    'error': f'Insufficient balance: {sender_balance} < {amount}'
+                }
+
+            # Verify signature (simplified - should use wallet system)
+            # In production, this would verify against sender's public key
+            signature = transaction.get('signature')
+            if not signature:
+                return {
+                    'valid': False,
+                    'error': 'Missing transaction signature'
+                }
+
+            # For now, accept all signatures (implement proper verification later)
+            # sender_public_key = self._get_wallet_public_key(sender_address)
+            # if not self._verify_transaction_signature(transaction, signature, sender_public_key):
+            #     return {'valid': False, 'error': 'Invalid transaction signature'}
+
+            return {'valid': True}
+
+        except Exception as e:
+            return {
+                'valid': False,
+                'error': f'Transfer validation error: {e}'
+            }
+
+    def _validate_batch_transfer(self, transaction: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate batch transfer transaction"""
+        try:
+            # Required fields
+            required_fields = ['sender_address', 'transfers', 'total_amount', 'signature']
+            for field in required_fields:
+                if field not in transaction:
+                    return {
+                        'valid': False,
+                        'error': f'Missing required field: {field}'
+                    }
+
+            sender_address = transaction['sender_address']
+            transfers = transaction['transfers']
+            total_amount = transaction['total_amount']
+
+            # Validate transfers list
+            if not isinstance(transfers, list) or not transfers:
+                return {
+                    'valid': False,
+                    'error': 'Invalid transfers list'
+                }
+
+            # Validate each transfer
+            calculated_total = 0
+            for transfer in transfers:
+                if not isinstance(transfer, dict):
+                    return {
+                        'valid': False,
+                        'error': 'Invalid transfer format'
+                    }
+
+                recipient = transfer.get('recipient')
+                amount = transfer.get('amount')
+
+                if not recipient or not isinstance(amount, (int, float)) or amount <= 0:
+                    return {
+                        'valid': False,
+                        'error': f'Invalid transfer: {transfer}'
+                    }
+
+                calculated_total += amount
+
+            # Verify total amount
+            if abs(calculated_total - total_amount) > 0.001:  # Small tolerance for float precision
+                return {
+                    'valid': False,
+                    'error': f'Total amount mismatch: {calculated_total} vs {total_amount}'
+                }
+
+            # Check sender balance
+            sender_balance = self._get_wallet_balance(sender_address)
+            if sender_balance < total_amount:
+                return {
+                    'valid': False,
+                    'error': f'Insufficient balance for batch: {sender_balance} < {total_amount}'
+                }
+
+            return {'valid': True}
+
+        except Exception as e:
+            return {
+                'valid': False,
+                'error': f'Batch transfer validation error: {e}'
+            }
+
+    def _get_wallet_balance(self, wallet_address: str) -> float:
+        """Get wallet balance (simplified implementation)"""
+        # In production, this would query a wallet database or service
+        # For now, return a mock balance
+        # This should be replaced with actual wallet balance checking
+
+        # Mock implementation - check if wallet has been seen in recent transactions
+        for block in reversed(self.chain[-10:]):  # Check last 10 blocks
+            for tx in block.transactions:
+                if tx.get('type') in ['token_transfer', 'batch_transfer']:
+                    # If wallet was recipient, add to balance
+                    if tx.get('recipient_address') == wallet_address:
+                        # This is very simplified - real implementation would track balances properly
+                        return 1000.0  # Mock balance
+                    # If wallet was sender, subtract from balance
+                    elif tx.get('sender_address') == wallet_address:
+                        return 500.0  # Mock balance
+
+        return 100.0  # Default mock balance
+
+    def _get_wallet_public_key(self, wallet_address: str) -> Optional[str]:
+        """Get wallet public key (placeholder)"""
+        # In production, this would query wallet service
+        return None
+
+    def _verify_transaction_signature(self, transaction: Dict[str, Any],
+                                    signature: str, public_key_pem: str) -> bool:
+        """Verify transaction signature (placeholder)"""
+        # In production, this would use cryptography library
+        return True  # Mock validation
+
+    def get_wallet_balance(self, wallet_address: str) -> float:
+        """Public method to get wallet balance"""
+        return self._get_wallet_balance(wallet_address)
+
+    def get_wallet_transactions(self, wallet_address: str) -> List[Dict[str, Any]]:
+        """Get all transactions involving a wallet"""
+        wallet_transactions = []
+
+        for block in self.chain:
+            for tx in block.transactions:
+                if tx.get('type') in ['token_transfer', 'batch_transfer']:
+                    if (tx.get('sender_address') == wallet_address or
+                        tx.get('recipient_address') == wallet_address):
+                        wallet_transactions.append({
+                            'tx_hash': hashlib.sha256(json.dumps(tx, sort_keys=True).encode()).hexdigest(),
+                            'block_index': block.index,
+                            'timestamp': tx.get('timestamp'),
+                            'type': tx.get('type'),
+                            'amount': tx.get('amount', 0),
+                            'direction': 'incoming' if tx.get('recipient_address') == wallet_address else 'outgoing'
+                        })
+
+        return wallet_transactions
 
     def mine_pending_transactions(self, verbose: bool = False) -> Optional[SignBlock]:
         """Mine a new block with pending transactions"""

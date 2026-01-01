@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-- **Hardware**: Raspberry Pi 4 or 5 (hardware verification required)
+- **Hardware**: Raspberry Pi Zero, Zero W, Zero 2 W, 3, 3B+, 4, or 5 (hardware verification required)
 - **OS**: Raspberry Pi OS (64-bit recommended) or Ubuntu/Debian
 - **Python**: 3.7 or higher
 
