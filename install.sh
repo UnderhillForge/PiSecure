@@ -2,7 +2,8 @@
 # PiSecure Universal Installer
 # Works on all Raspberry Pi models: Zero, Zero W, Zero 2 W, 3, 3B+, 4, 5
 
-set -e
+# Note: We don't use 'set -e' because some optional package installations may fail
+# and we want to continue the installation anyway
 
 # Colors for output
 RED='\033[0;31m'
@@ -98,29 +99,28 @@ install_system_deps() {
     # Install cryptography dependencies
     sudo apt install -y build-essential libssl-dev libffi-dev libsodium-dev
 
-    # Install Pi-specific dependencies based on model
+    # Install Pi-specific dependencies based on model (optional - skip if not available)
     case $PI_NUMBER in
         0|1|2|3)
             # Pi Zero, Zero W, Zero 2 W, Pi 3
             log_info "Installing dependencies for Pi Zero/3 series..."
-            # Try different package names for different OS versions
-            sudo apt install -y raspberrypi-bootloader 2>/dev/null || \
-            sudo apt install -y raspberrypi-kernel 2>/dev/null || \
-            log_warning "Pi-specific bootloader package not available - this is OK for most use cases"
+            if ! sudo apt install -y raspberrypi-bootloader 2>/dev/null; then
+                log_warning "Pi-specific bootloader package not available - this is OK for most use cases"
+            fi
             ;;
         4)
             # Pi 4
             log_info "Installing dependencies for Pi 4..."
-            sudo apt install -y raspberrypi-bootloader 2>/dev/null || \
-            sudo apt install -y raspberrypi-kernel 2>/dev/null || \
-            log_warning "Pi-specific bootloader package not available - this is OK for most use cases"
+            if ! sudo apt install -y raspberrypi-bootloader 2>/dev/null; then
+                log_warning "Pi-specific bootloader package not available - this is OK for most use cases"
+            fi
             ;;
         5)
             # Pi 5
             log_info "Installing dependencies for Pi 5..."
-            sudo apt install -y raspberrypi-bootloader 2>/dev/null || \
-            sudo apt install -y raspberrypi-kernel 2>/dev/null || \
-            log_warning "Pi-specific bootloader package not available - this is OK for most use cases"
+            if ! sudo apt install -y raspberrypi-bootloader 2>/dev/null; then
+                log_warning "Pi-specific bootloader package not available - this is OK for most use cases"
+            fi
             ;;
         *)
             log_warning "Unknown Pi model - skipping Pi-specific packages (this is OK)"
