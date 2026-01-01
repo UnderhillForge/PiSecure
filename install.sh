@@ -99,89 +99,17 @@ install_system_deps() {
     # Install cryptography dependencies
     sudo apt install -y build-essential libssl-dev libffi-dev libsodium-dev
 
-    # Install Pi-specific packages required for mining functionality
-    case $PI_NUMBER in
-        0|1|2|3)
-            # Pi Zero, Zero W, Zero 2 W, Pi 3 - need raspberrypi-userland for vcgencmd
-            log_info "Installing Pi-specific packages for mining (Zero/3 series)..."
-            # Try different package names - some OS variants may have different names
-            PACKAGES_INSTALLED=0
-            if sudo apt install -y raspberrypi-userland 2>/dev/null; then
-                log_success "Installed raspberrypi-userland (VideoCore GPU access)"
-                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
-            elif sudo apt install -y libraspberrypi-bin 2>/dev/null; then
-                log_success "Installed libraspberrypi-bin (VideoCore GPU access)"
-                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
-            fi
-
-            if sudo apt install -y raspberrypi-bootloader 2>/dev/null; then
-                log_success "Installed raspberrypi-bootloader (kernel modules)"
-                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
-            elif sudo apt install -y raspberrypi-kernel 2>/dev/null; then
-                log_success "Installed raspberrypi-kernel (kernel modules)"
-                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
-            fi
-
-            if [ $PACKAGES_INSTALLED -eq 0 ]; then
-                log_warning "Pi-specific packages not available - mining may be limited"
-                log_info "PiSecure will still work but hardware verification may fail"
-            fi
-            ;;
-        4)
-            # Pi 4 - similar requirements
-            log_info "Installing Pi-specific packages for mining (Pi 4)..."
-            PACKAGES_INSTALLED=0
-            if sudo apt install -y raspberrypi-userland 2>/dev/null; then
-                log_success "Installed raspberrypi-userland (VideoCore GPU access)"
-                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
-            elif sudo apt install -y libraspberrypi-bin 2>/dev/null; then
-                log_success "Installed libraspberrypi-bin (VideoCore GPU access)"
-                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
-            fi
-
-            if sudo apt install -y raspberrypi-bootloader 2>/dev/null; then
-                log_success "Installed raspberrypi-bootloader (kernel modules)"
-                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
-            elif sudo apt install -y raspberrypi-kernel 2>/dev/null; then
-                log_success "Installed raspberrypi-kernel (kernel modules)"
-                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
-            fi
-
-            if [ $PACKAGES_INSTALLED -eq 0 ]; then
-                log_warning "Pi-specific packages not available - mining may be limited"
-                log_info "PiSecure will still work but hardware verification may fail"
-            fi
-            ;;
-        5)
-            # Pi 5 - may need different packages
-            log_info "Installing Pi-specific packages for mining (Pi 5)..."
-            PACKAGES_INSTALLED=0
-            if sudo apt install -y raspberrypi-userland 2>/dev/null; then
-                log_success "Installed raspberrypi-userland (VideoCore GPU access)"
-                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
-            elif sudo apt install -y libraspberrypi-bin 2>/dev/null; then
-                log_success "Installed libraspberrypi-bin (VideoCore GPU access)"
-                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
-            fi
-
-            if sudo apt install -y raspberrypi-bootloader 2>/dev/null; then
-                log_success "Installed raspberrypi-bootloader (kernel modules)"
-                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
-            elif sudo apt install -y raspberrypi-kernel 2>/dev/null; then
-                log_success "Installed raspberrypi-kernel (kernel modules)"
-                PACKAGES_INSTALLED=$((PACKAGES_INSTALLED + 1))
-            fi
-
-            if [ $PACKAGES_INSTALLED -eq 0 ]; then
-                log_warning "Pi-specific packages not available - mining may be limited"
-                log_info "PiSecure will still work but hardware verification may fail"
-            fi
-            ;;
-        *)
-            log_warning "Unknown Pi model - some mining features may not work"
-            log_info "PiSecure core functionality will still work"
-            ;;
-    esac
+    # Install only essential Pi-specific packages (raspberrypi-userland provides vcgencmd)
+    # Note: raspberrypi-bootloader is NOT needed - it only updates EEPROM firmware
+    log_info "Installing raspberrypi-userland for VideoCore GPU access (provides vcgencmd)..."
+    if sudo apt install -y raspberrypi-userland 2>/dev/null; then
+        log_success "Installed raspberrypi-userland (VideoCore GPU access for mining)"
+    elif sudo apt install -y libraspberrypi-bin 2>/dev/null; then
+        log_success "Installed libraspberrypi-bin (VideoCore GPU access for mining)"
+    else
+        log_warning "VideoCore GPU package not found - mining features may be limited"
+        log_info "PiSecure will still work for wallet and identity features"
+    fi
 
     # Ensure user is in required groups
     sudo usermod -a -G gpio,video,i2c $USER || true
@@ -223,33 +151,49 @@ install_pisecure() {
     mkdir -p venv/lib/python3.*/site-packages/pisecure/
     cp -r repo/pisecure/* venv/lib/python3.*/site-packages/pisecure/ 2>/dev/null || true
 
-    # Create launcher script
+    # Create launcher script (uses simple_cli which works)
     cat > launch_pisecure.py << 'EOF'
 #!/usr/bin/env python3
 """
-PiSecure CLI Launcher - Works around import issues
+PiSecure CLI Launcher - Simple Python launcher that works around import issues
 """
 
 import sys
 import os
 
-# Add repo to Python path
-repo_dir = os.path.join(os.path.dirname(__file__), 'repo')
+# Add the current directory and repo to Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+repo_dir = os.path.join(os.path.dirname(current_dir), 'repo')
+
+sys.path.insert(0, current_dir)
 sys.path.insert(0, repo_dir)
 
-try:
-    from pisecure.cli import main
-    main()
-except ImportError as e:
-    print(f"Import error: {e}")
-    print("Trying alternative approach...")
+def main():
+    """Main entry point for the launcher"""
+    # Now try to import and run PiSecure CLI
     try:
-        # Direct execution
-        exec(open(os.path.join(repo_dir, 'pisecure.py')).read())
-    except Exception as e2:
-        print(f"Failed to launch PiSecure: {e2}")
-        print("Please check the installation and try again.")
-        sys.exit(1)
+        from pisecure.simple_cli import cli
+        cli()
+    except ImportError as e:
+        print(f"Import error: {e}")
+        print("Trying alternative import paths...")
+
+        # Try different import approaches
+        try:
+            # Direct module import
+            sys.path.insert(0, '/opt/pisecure/repo')
+            from pisecure.simple_cli import cli
+            cli()
+        except Exception as e2:
+            print(f"Alternative import failed: {e2}")
+            print("\nPiSecure CLI is having import issues.")
+            print("The web dashboard works perfectly though!")
+            print("Access it at: http://localhost:5000")
+            sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
 EOF
 
     chmod +x launch_pisecure.py
