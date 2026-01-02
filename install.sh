@@ -6,8 +6,12 @@ PiSecure Installer - Complete Setup for Raspberry Pi Blockchain Node
 This script installs PiSecure as a complete blockchain node with:
 - Wallet creation and management
 - Background mining service
+- REST API server
 - Web dashboard
 - Automatic startup and peer discovery
+
+NOTE: This script uses virtual environments to avoid system Python conflicts.
+Genesis keys are OPTIONAL - the system works without them for normal operations.
 
 Usage: curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/install.sh | bash
 """
@@ -23,10 +27,11 @@ NC='\033[0m' # No Color
 
 # Configuration
 REPO_URL="https://github.com/UnderhillForge/PiSecure.git"
-INSTALL_DIR="/opt/pisecure"
+INSTALL_DIR="/home/pi/PiSecure"
+VENV_DIR="$INSTALL_DIR/pisecure_env"
 DATA_DIR="/var/lib/pisecure"
 CONFIG_DIR="/etc/pisecure"
-SERVICE_USER="pisecure"
+SERVICE_USER="pi"
 HOSTNAME_PREFIX="pisecure-node"
 
 # Logging functions
@@ -44,14 +49,6 @@ log_warning() {
 
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Check if running as root
-check_root() {
-    if [[ $EUID -eq 0 ]]; then
-        log_error "This script should not be run as root. It will create a service user."
-        exit 1
-    fi
 }
 
 # Detect Raspberry Pi
@@ -86,28 +83,14 @@ install_dependencies() {
     log_success "System dependencies installed"
 }
 
-# Create service user
-create_service_user() {
-    log_info "Creating PiSecure service user..."
-
-    if ! id "$SERVICE_USER" &>/dev/null; then
-        sudo useradd -r -s /bin/false -m -d "$INSTALL_DIR" "$SERVICE_USER"
-        log_success "Created user: $SERVICE_USER"
-    else
-        log_warning "User $SERVICE_USER already exists"
-    fi
-}
-
 # Setup directories
 setup_directories() {
     log_info "Setting up directories..."
 
-    sudo mkdir -p "$INSTALL_DIR"
     sudo mkdir -p "$DATA_DIR"
     sudo mkdir -p "$CONFIG_DIR"
     sudo mkdir -p "/var/log/pisecure"
 
-    sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
     sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
     sudo chown -R "$SERVICE_USER:$SERVICE_USER" "/var/log/pisecure"
 
@@ -120,19 +103,32 @@ install_pisecure() {
 
     # Clone repository
     if [[ ! -d "$INSTALL_DIR/.git" ]]; then
-        sudo -u "$SERVICE_USER" git clone "$REPO_URL" "$INSTALL_DIR"
+        git clone "$REPO_URL" "$INSTALL_DIR"
     else
         cd "$INSTALL_DIR"
-        sudo -u "$SERVICE_USER" git pull
+        git pull origin main
     fi
 
     # Create virtual environment
-    sudo -u "$SERVICE_USER" python3 -m venv "$INSTALL_DIR/venv"
+    python3 -m venv "$VENV_DIR"
+
+    # Activate and install dependencies
+    source "$VENV_DIR/bin/activate"
+    pip install --upgrade pip
+
+    # Install PiSecure dependencies
+    pip install flask flask-cors flask-limiter cryptography requests psutil
 
     # Install PiSecure
-    sudo -u "$SERVICE_USER" bash -c "source $INSTALL_DIR/venv/bin/activate && cd $INSTALL_DIR && pip install -e ."
+    pip install -e .
 
-    log_success "PiSecure installed"
+    # Verify installation
+    python -c "import pisecure; print('PiSecure import successful')" || {
+        log_error "PiSecure installation failed"
+        exit 1
+    }
+
+    log_success "PiSecure installed successfully"
 }
 
 # Configure firewall
@@ -142,8 +138,8 @@ configure_firewall() {
     sudo ufw default deny incoming
     sudo ufw default allow outgoing
     sudo ufw allow ssh
+    sudo ufw allow 3142/tcp  # PiSecure API
     sudo ufw allow 5000/tcp  # Dashboard
-    sudo ufw allow 3141/tcp  # PiSecure P2P (placeholder)
     sudo ufw --force enable
 
     log_success "Firewall configured"
@@ -175,30 +171,31 @@ create_config() {
     sudo tee "$CONFIG_DIR/config.json" > /dev/null <<EOF
 {
     "network": {
-        "listen_port": 3141,
+        "listen_port": 3142,
         "max_connections": 10,
-        "bootstrap_peers": [
-            "https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/peers.json"
-        ]
+        "bootstrap_peers": []
     },
     "mining": {
         "enabled": true,
-        "max_temperature": 70,
-        "thermal_throttle": true,
-        "daily_limit_hours": 24
+        "wallet_address": "default_wallet",
+        "threads": 4,
+        "difficulty_adjustment": true
+    },
+    "api": {
+        "enabled": true,
+        "host": "0.0.0.0",
+        "port": 3142,
+        "rate_limit": "100 per minute"
     },
     "dashboard": {
         "enabled": true,
-        "port": 5000,
-        "host": "0.0.0.0"
+        "host": "0.0.0.0",
+        "port": 5000
     },
-    "security": {
-        "auto_updates": true,
-        "certificate_lifetime_days": 365,
-        "key_size": 2048
-    },
-    "data_dir": "$DATA_DIR",
-    "log_level": "INFO"
+    "storage": {
+        "blockchain_path": "/var/lib/pisecure/blockchain.json",
+        "database_path": "/var/lib/pisecure/pisecure.db"
+    }
 }
 EOF
 
@@ -212,6 +209,28 @@ EOF
 create_services() {
     log_info "Creating systemd services..."
 
+    # PiSecure API server service
+    sudo tee /etc/systemd/system/pisecure.service > /dev/null <<EOF
+[Unit]
+Description=PiSecure Blockchain API Server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$VENV_DIR/bin/python -m pisecure.api.server --host 0.0.0.0 --port 3142
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pisecure-api
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
     # PiSecure mining service
     sudo tee /etc/systemd/system/pisecure-mining.service > /dev/null <<EOF
 [Unit]
@@ -222,10 +241,8 @@ Wants=network.target
 [Service]
 Type=simple
 User=$SERVICE_USER
-Group=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
-Environment=PATH=$INSTALL_DIR/venv/bin
-ExecStart=$INSTALL_DIR/venv/bin/python -m pisecure.cli mine --background
+ExecStart=$VENV_DIR/bin/python -m pisecure.cli mine --background
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -246,36 +263,13 @@ Wants=network.target
 [Service]
 Type=simple
 User=$SERVICE_USER
-Group=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
-Environment=PATH=$INSTALL_DIR/venv/bin
-ExecStart=$INSTALL_DIR/venv/bin/python dashboard/web/minimal_dashboard.py
+ExecStart=$VENV_DIR/bin/python dashboard/web/minimal_dashboard.py --host 0.0.0.0 --port 5000
 Restart=always
-RestartSec=10
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=pisecure-dashboard
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    # PiSecure main service
-    sudo tee /etc/systemd/system/pisecure.service > /dev/null <<EOF
-[Unit]
-Description=PiSecure Blockchain Node
-After=network.target pisecure-mining.service pisecure-dashboard.service
-Wants=network.target
-Requires=pisecure-mining.service pisecure-dashboard.service
-
-[Service]
-Type=oneshot
-User=$SERVICE_USER
-Group=$SERVICE_USER
-WorkingDirectory=$INSTALL_DIR
-Environment=PATH=$INSTALL_DIR/venv/bin
-ExecStart=$INSTALL_DIR/venv/bin/python -c "print('PiSecure node started')"
-RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
@@ -315,7 +309,7 @@ server {
 
     # API endpoints
     location /api/ {
-        proxy_pass http://localhost:5000/api/;
+        proxy_pass http://localhost:3142/api/;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
     }
@@ -334,38 +328,15 @@ setup_wallet() {
     log_info "Creating default mining wallet..."
 
     # Generate unique wallet name based on system identifier
-    if [[ -f /proc/cpuinfo ]] && grep -q "Serial" /proc/cpuinfo; then
-        # Raspberry Pi - use CPU serial (guaranteed unique)
-        SYSTEM_ID=$(grep "Serial" /proc/cpuinfo | awk '{print $3}' | tr '[:upper:]' '[:lower:]')
-        WALLET_NAME="node-${SYSTEM_ID: -6}"
-        WALLET_DISPLAY_NAME="PiSecure Node Wallet"
-    else
-        # Non-Pi system - use multi-source unique identifier
-        UNIQUE_ID=$(generate_system_unique_id)
-        WALLET_NAME="host-${UNIQUE_ID}"
-        WALLET_DISPLAY_NAME="PiSecure Host Wallet"
+    PI_SERIAL=$(grep "Serial" /proc/cpuinfo | awk '{print $3}' | tr '[:upper:]' '[:lower:]')
+    WALLET_NAME="node-${PI_SERIAL: -6}"
+    WALLET_DISPLAY_NAME="PiSecure Node Wallet"
 
-        # Final collision check (belt and suspenders)
-        COUNTER=1
-        ORIGINAL_NAME="$WALLET_NAME"
-        while [[ -f "/var/lib/pisecure/wallets/${WALLET_NAME}.json" ]]; do
-            WALLET_NAME="${ORIGINAL_NAME}${COUNTER}"
-            ((COUNTER++))
-            if [[ $COUNTER -gt 99 ]]; then
-                TIMESTAMP=$(date +%s | tail -c 4)
-                WALLET_NAME="${ORIGINAL_NAME}-${TIMESTAMP}"
-                break
-            fi
-        done
-    fi
+    log_info "Creating wallet: $WALLET_NAME"
 
-    log_info "Creating wallet: $WALLET_NAME (based on system identifier)"
-
-    # Create wallet as service user
-    WALLET_RESULT=$(sudo -u "$SERVICE_USER" bash -c "
-        source $INSTALL_DIR/venv/bin/activate
-        cd $INSTALL_DIR
-        python -c \"
+    # Create wallet
+    source "$VENV_DIR/bin/activate"
+    WALLET_RESULT=$(python -c "
 from pisecure.core.wallet import SignWallet
 wallet = SignWallet()
 result = wallet.create_wallet('$WALLET_NAME', '$WALLET_DISPLAY_NAME')
@@ -373,15 +344,14 @@ if result['success']:
     print('SUCCESS:' + result['address'])
 else:
     print('FAILED:' + result.get('error', 'Unknown error'))
-\"
-    ")
+" 2>/dev/null)
 
     if [[ $WALLET_RESULT == SUCCESS:* ]]; then
         WALLET_ADDRESS=$(echo "$WALLET_RESULT" | cut -d: -f2)
         log_success "Wallet created: $WALLET_NAME ($WALLET_ADDRESS)"
 
-        # Save wallet name to config
-        sudo jq --arg wallet "$WALLET_NAME" '.mining.wallet = $wallet' "$CONFIG_DIR/config.json" > /tmp/config.json
+        # Update config with wallet address
+        sudo jq --arg wallet "$WALLET_ADDRESS" '.mining.wallet_address = $wallet' "$CONFIG_DIR/config.json" > /tmp/config.json
         sudo mv /tmp/config.json "$CONFIG_DIR/config.json"
     else
         ERROR_MSG=$(echo "$WALLET_RESULT" | cut -d: -f2)
@@ -392,134 +362,27 @@ else:
     log_success "Wallet setup complete"
 }
 
-# Generate cryptographically unique system identifier
-generate_system_unique_id() {
-    local UNIQUE_ID=""
-
-    # For guaranteed uniqueness, we generate a UUID4-style identifier
-    # This provides 2^122 possible values with effectively zero collision probability
-
-    # Method 1: Try to use uuidgen if available (most Linux systems)
-    if command -v uuidgen &> /dev/null; then
-        UNIQUE_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | cut -d'-' -f1)
-    fi
-
-    # Method 2: Generate UUID using /proc/sys/kernel/random/uuid (Linux)
-    if [[ -z "$UNIQUE_ID" ]] && [[ -f /proc/sys/kernel/random/uuid ]]; then
-        UNIQUE_ID=$(cat /proc/sys/kernel/random/uuid | cut -d'-' -f1)
-    fi
-
-    # Method 3: Use Python to generate UUID4
-    if [[ -z "$UNIQUE_ID" ]]; then
-        # Try system python first
-        if command -v python3 &> /dev/null; then
-            UNIQUE_ID=$(python3 -c "import uuid; print(str(uuid.uuid4())[:8])" 2>/dev/null)
-        fi
-
-        # Try with python (fallback)
-        if [[ -z "$UNIQUE_ID" ]] && command -v python &> /dev/null; then
-            UNIQUE_ID=$(python -c "import uuid; print(str(uuid.uuid4())[:8])" 2>/dev/null)
-        fi
-    fi
-
-    # Method 4: Cryptographic random generation using /dev/urandom
-    if [[ -z "$UNIQUE_ID" ]]; then
-        # Generate 8-character hex string from 32 bits of entropy
-        UNIQUE_ID=$(od -An -N4 -tu4 /dev/urandom | tr -d ' ' | cut -c1-8)
-    fi
-
-    # Method 5: Ultimate fallback (timestamp + entropy)
-    if [[ -z "$UNIQUE_ID" ]]; then
-        TIMESTAMP=$(date +%s%N 2>/dev/null || date +%s)
-        ENTROPY=$(cat /proc/sys/kernel/random/entropy_avail 2>/dev/null || echo "12345")
-        UNIQUE_ID=$(echo "${TIMESTAMP}${ENTROPY}${RANDOM}" | sha256sum | cut -c1-8)
-    fi
-
-    # Ensure we have something (should never happen)
-    if [[ -z "$UNIQUE_ID" ]]; then
-        UNIQUE_ID="fallback"
-    fi
-
-    echo "$UNIQUE_ID"
-}
-
-# Install system-wide command
-install_command() {
-    log_info "Installing system-wide pisecure command..."
-
-    # Copy pisecure.sh to /usr/local/bin/pisecure
-    sudo cp "$INSTALL_DIR/pisecure.sh" /usr/local/bin/pisecure
-    sudo chmod +x /usr/local/bin/pisecure
-
-    # Test the command
-    if command -v pisecure &> /dev/null; then
-        log_success "System-wide command installed: pisecure"
-    else
-        log_warning "System-wide command installation may require logout/login"
-    fi
-}
-
 # Start services
 start_services() {
     log_info "Starting PiSecure services..."
 
-    sudo systemctl enable pisecure
-    sudo systemctl enable pisecure-mining
-    sudo systemctl enable pisecure-dashboard
+    sudo systemctl enable pisecure.service
+    sudo systemctl enable pisecure-mining.service
+    sudo systemctl enable pisecure-dashboard.service
 
-    sudo systemctl start pisecure-mining
-    sudo systemctl start pisecure-dashboard
-    sudo systemctl start pisecure
+    sudo systemctl start pisecure.service
+    sudo systemctl start pisecure-mining.service
+    sudo systemctl start pisecure-dashboard.service
+
+    # Wait a moment for services to start
+    sleep 3
 
     log_success "Services started"
-}
-
-# Setup automatic updates
-setup_updates() {
-    log_info "Setting up automatic updates..."
-
-    sudo tee /etc/cron.daily/pisecure-updates > /dev/null <<EOF
-#!/bin/bash
-# PiSecure automatic updates
-sudo -u $SERVICE_USER bash -c "
-    source $INSTALL_DIR/venv/bin/activate
-    cd $INSTALL_DIR
-    python -c \"
-from pisecure.updates import OTAUpdater
-updater = OTAUpdater()
-updates = updater.check_for_updates()
-if updates:
-    print(f'Found {len(updates)} updates, installing latest...')
-    # Auto-apply latest update
-    updater.download_update(updates[0])
-    updater.apply_update(updates[0]['local_path'], updates[0])
-else:
-    print('No updates available')
-\"
-"
-EOF
-
-    sudo chmod +x /etc/cron.daily/pisecure-updates
-    log_success "Automatic updates configured"
 }
 
 # Print completion message
 completion_message() {
     HOSTNAME=$(hostname)
-    WALLET_INFO=$(sudo -u "$SERVICE_USER" bash -c "
-        source $INSTALL_DIR/venv/bin/activate
-        cd $INSTALL_DIR
-        python -c \"
-from pisecure.core.wallet import SignWallet
-wallet = SignWallet()
-wallets = wallet.list_wallets()
-if wallets:
-    w = wallets[0]
-    print(w['name'] + ' (' + w['address'][:16] + '...)')
-else:
-    print('No wallet found')
-\"
-    ")
 
     echo
     echo "========================================"
@@ -531,21 +394,20 @@ else:
     echo "🌐 Web Dashboard: http://$HOSTNAME.local"
     echo "    or: http://$(hostname -I | awk '{print $1}')"
     echo
-    echo "👛 Wallet: $WALLET_INFO"
+    echo "🔗 API Server: http://$HOSTNAME.local/api/v1/health"
+    echo "    or: http://$(hostname -I | awk '{print $1}'):3142/api/v1/health"
     echo
     echo "📋 Useful commands:"
-    echo "  Check status:  python -m pisecure.cli status"
-    echo "  View wallet:   python -m pisecure.cli wallet"
-    echo "  Start mining:  python -m pisecure.cli mine"
-    echo "  Transfer:      python -m pisecure.cli transfer-tokens <address> <amount> --from-wallet <wallet>"
+    echo "  Check status:  sudo systemctl status pisecure*"
+    echo "  View logs:     sudo journalctl -u pisecure* -f"
+    echo "  Stop mining:   sudo systemctl stop pisecure-mining"
+    echo "  Restart API:   sudo systemctl restart pisecure"
     echo
-    echo "🔄 Services:"
-    echo "  Mining:     sudo systemctl status pisecure-mining"
-    echo "  Dashboard:  sudo systemctl status pisecure-dashboard"
+    echo "🔑 Foundation Operations (Genesis Keys Required):"
+    echo "  The API server works without genesis keys!"
+    echo "  Foundation endpoints return 'not available' until keys are added"
     echo
     echo "📚 Documentation: https://github.com/UnderhillForge/PiSecure"
-    echo
-    echo "⚠️  IMPORTANT: Backup your wallet data from $DATA_DIR/wallets/"
     echo
     log_success "Installation completed successfully!"
 }
@@ -557,11 +419,10 @@ main() {
     echo "========================================"
     echo
     log_info "Starting PiSecure installation..."
+    log_warning "Genesis keys are OPTIONAL - system works without them!"
 
-    check_root
     detect_pi
     install_dependencies
-    create_service_user
     setup_directories
     install_pisecure
     configure_firewall
@@ -570,9 +431,7 @@ main() {
     create_services
     setup_nginx
     setup_wallet
-    install_command
     start_services
-    setup_updates
 
     completion_message
 }
