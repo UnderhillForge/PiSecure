@@ -26,28 +26,31 @@ HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PiSecure Node - {{ hostname }}</title>
     <meta http-equiv="refresh" content="30">
-    <style>
+        <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
             min-height: 100vh;
             padding: 20px;
+            color: #e0e6ff;
         }
         .container { max-width: 1200px; margin: 0 auto; }
         .header {
-            background: rgba(255,255,255,0.95);
+            background: rgba(30, 30, 46, 0.95);
             border-radius: 15px;
             padding: 20px;
             margin-bottom: 20px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
             backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
         }
         .header h1 {
-            color: #2c3e50;
+            color: #a8b5d1;
             font-size: 2rem;
             font-weight: 600;
             text-align: center;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
         .grid {
             display: grid;
@@ -56,52 +59,63 @@ HTML_TEMPLATE = """
             margin-bottom: 20px;
         }
         .card {
-            background: rgba(255,255,255,0.95);
+            background: rgba(30, 30, 46, 0.95);
             border-radius: 15px;
             padding: 20px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
             backdrop-filter: blur(10px);
-            transition: transform 0.2s;
+            transition: transform 0.2s, box-shadow 0.2s;
+            border: 1px solid rgba(255,255,255,0.1);
         }
-        .card:hover { transform: translateY(-2px); }
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+            border-color: rgba(102, 126, 234, 0.3);
+        }
         .card h2 {
-            color: #2c3e50;
+            color: #a8b5d1;
             margin-bottom: 15px;
             font-size: 1.3rem;
             font-weight: 500;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
         }
         .metric {
             display: flex;
             justify-content: space-between;
             align-items: center;
             padding: 10px 0;
-            border-bottom: 1px solid #ecf0f1;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
         }
         .metric:last-child { border-bottom: none; }
-        .metric-label { color: #7f8c8d; font-weight: 500; }
+        .metric-label {
+            color: #8892b0;
+            font-weight: 500;
+        }
         .metric-value {
             font-size: 1.5rem;
             font-weight: 600;
-            color: #2c3e50;
+            color: #e0e6ff;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
         }
         .progress-bar {
             width: 100%;
             height: 8px;
-            background: #ecf0f1;
+            background: rgba(255,255,255,0.1);
             border-radius: 4px;
             overflow: hidden;
             margin-top: 8px;
         }
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, #27ae60, #3498db);
+            background: linear-gradient(90deg, #00d4aa, #667eea);
             border-radius: 4px;
             transition: width 0.3s ease;
+            box-shadow: 0 0 10px rgba(102, 126, 234, 0.3);
         }
-        .status-good { color: #27ae60; }
-        .status-warn { color: #f39c12; }
-        .status-bad { color: #e74c3c; }
-        .status-unknown { color: #95a5a6; }
+        .status-good { color: #00d4aa; }
+        .status-warn { color: #ffd60a; }
+        .status-bad { color: #ff453a; }
+        .status-unknown { color: #8e8e93; }
         .activity-list {
             max-height: 200px;
             overflow-y: auto;
@@ -110,14 +124,17 @@ HTML_TEMPLATE = """
             display: flex;
             justify-content: space-between;
             padding: 8px 0;
-            border-bottom: 1px solid #ecf0f1;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
         }
         .activity-item:last-child { border-bottom: none; }
-        .activity-time { color: #7f8c8d; font-size: 0.9rem; }
-        .activity-desc { font-weight: 500; }
+        .activity-time { color: #8892b0; font-size: 0.9rem; }
+        .activity-desc {
+            font-weight: 500;
+            color: #e0e6ff;
+        }
         .footer {
             text-align: center;
-            color: rgba(255,255,255,0.8);
+            color: rgba(224, 230, 255, 0.6);
             margin-top: 20px;
             font-size: 0.9rem;
         }
@@ -359,25 +376,27 @@ WALLET_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PiSecure Wallet - {{ hostname }}</title>
-    <style>
+        <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
             min-height: 100vh;
             padding: 20px;
+            color: #e0e6ff;
         }
         .container { max-width: 1000px; margin: 0 auto; }
         .header {
-            background: rgba(255,255,255,0.95);
+            background: rgba(30, 30, 46, 0.95);
             border-radius: 15px;
             padding: 20px;
             margin-bottom: 20px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
             backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
             text-align: center;
         }
-        .header h1 { color: #2c3e50; font-size: 2rem; font-weight: 600; }
+        .header h1 { color: #a8b5d1; font-size: 2rem; font-weight: 600; }
         .nav { margin-top: 10px; }
         .nav a {
             color: #667eea;
@@ -394,17 +413,35 @@ WALLET_TEMPLATE = """
             margin-bottom: 20px;
         }
         .card {
-            background: rgba(255,255,255,0.95);
+            background: rgba(30, 30, 46, 0.95);
             border-radius: 15px;
             padding: 20px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
             backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+            border-color: rgba(102, 126, 234, 0.3);
         }
         .card h2 {
-            color: #2c3e50;
+            color: #a8b5d1;
             margin-bottom: 15px;
             font-size: 1.3rem;
             font-weight: 500;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+        }
+        .card h3 {
+            color: #a8b5d1;
+            font-size: 1.1rem;
+            margin: 20px 0 10px 0;
+        }
+        .card h4 {
+            color: #8892b0;
+            font-size: 1rem;
+            margin: 15px 0 10px 0;
         }
 
         .wallet-list { margin-bottom: 20px; }
@@ -414,21 +451,24 @@ WALLET_TEMPLATE = """
             align-items: center;
             padding: 15px;
             margin-bottom: 10px;
-            background: #f8f9fa;
+            background: rgba(45, 45, 61, 0.8);
             border-radius: 8px;
             border-left: 4px solid #667eea;
+            cursor: pointer;
+            transition: background 0.2s;
         }
-        .wallet-info h3 { margin: 0; color: #2c3e50; font-size: 1.1rem; }
+        .wallet-item:hover { background: rgba(55, 55, 71, 0.8); }
+        .wallet-info h3 { margin: 0; color: #e0e6ff; font-size: 1.1rem; }
         .wallet-address {
             font-family: monospace;
             font-size: 0.9rem;
-            color: #7f8c8d;
+            color: #8892b0;
             margin-top: 5px;
         }
         .wallet-balance {
             font-size: 1.2rem;
             font-weight: 600;
-            color: #27ae60;
+            color: #00d4aa;
         }
 
         .form-group { margin-bottom: 15px; }
@@ -436,18 +476,25 @@ WALLET_TEMPLATE = """
             display: block;
             margin-bottom: 5px;
             font-weight: 500;
-            color: #2c3e50;
+            color: #a8b5d1;
         }
-        .form-group input, .form-group select {
+        .form-group input, .form-group select, .form-group textarea {
             width: 100%;
             padding: 10px;
-            border: 2px solid #ecf0f1;
+            background: rgba(45, 45, 61, 0.8);
+            border: 2px solid rgba(255,255,255,0.1);
             border-radius: 8px;
             font-size: 1rem;
+            color: #e0e6ff;
         }
-        .form-group input:focus, .form-group select:focus {
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
             outline: none;
             border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        .form-group textarea {
+            resize: vertical;
+            min-height: 100px;
         }
 
         .btn {
@@ -470,14 +517,15 @@ WALLET_TEMPLATE = """
             border-radius: 8px;
             font-weight: 500;
         }
-        .status-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .status-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .status-success { background: rgba(0, 212, 170, 0.2); color: #00d4aa; border: 1px solid rgba(0, 212, 170, 0.3); }
+        .status-error { background: rgba(255, 69, 58, 0.2); color: #ff453a; border: 1px solid rgba(255, 69, 58, 0.3); }
 
         .blockchain-info {
-            background: #f8f9fa;
+            background: rgba(45, 45, 61, 0.8);
             padding: 15px;
             border-radius: 8px;
             margin-bottom: 15px;
+            border: 1px solid rgba(255,255,255,0.1);
         }
         .blockchain-info div {
             display: flex;
@@ -485,6 +533,38 @@ WALLET_TEMPLATE = """
             margin-bottom: 5px;
         }
         .blockchain-info div:last-child { margin-bottom: 0; }
+        .blockchain-info strong { color: #a8b5d1; }
+
+        /* Modal styles */
+        #block-modal, #tx-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            padding: 20px;
+            box-sizing: border-box;
+            display: none;
+        }
+        #block-modal > div, #tx-modal > div {
+            background: rgba(30, 30, 46, 0.95);
+            border-radius: 15px;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            max-height: 80vh;
+            overflow-y: auto;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        #block-modal p, #tx-modal p {
+            margin: 8px 0;
+            color: #e0e6ff;
+        }
+        #block-modal strong, #tx-modal strong {
+            color: #a8b5d1;
+        }
 
         @media (max-width: 768px) {
             .grid { grid-template-columns: 1fr; }
