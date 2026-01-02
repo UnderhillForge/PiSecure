@@ -1,10 +1,10 @@
 #!/bin/bash
-"""
-PiSecure Executable Wrapper
-===========================
-
-Provides executable commands without requiring python -m syntax.
-"""
+#
+# PiSecure Executable Wrapper
+# ===========================
+#
+# Provides executable commands without requiring python -m syntax.
+#
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_CMD="${PYTHON_CMD:-python3}"
