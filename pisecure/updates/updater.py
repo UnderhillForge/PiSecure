@@ -196,7 +196,8 @@ class OTAUpdater:
                     'manifest': manifest
                 }
 
-            print("✅ Authorization verified"            print(f"   Valid signatures: {auth_result['valid_signatures']}/{auth_result['total_signatures_checked']}")
+            print("✅ Authorization verified")
+            print(f"   Valid signatures: {auth_result['valid_signatures']}/{auth_result['total_signatures_checked']}")
             print(f"   Authorized signers: {', '.join(auth_result['authorized_signers'])}")
 
             return {
