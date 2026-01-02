@@ -636,7 +636,7 @@ class TokenEconomics:
 
     def __init__(self):
         self.fee_distributor = FeeDistribution()
-        self.foundation_trust = FoundationTrust()
+        self.foundation_trust = None  # Lazy loaded when needed
         self.developer_trusts: Dict[str, DeveloperTrust] = {}
         self.api_costs = self._initialize_api_costs()
 
@@ -681,8 +681,8 @@ class TokenEconomics:
         """Process transaction fee distribution"""
         distributions = self.fee_distributor.distribute_transaction_fee(fee_amount, miner_address)
 
-        # Send foundation contribution
-        if 'foundation' in distributions:
+        # Send foundation contribution (only if foundation trust is available)
+        if 'foundation' in distributions and self.foundation_trust is not None:
             foundation_amount = distributions['foundation']['amount']
             self.foundation_trust.receive_contribution(foundation_amount, 'transaction_fee')
 
