@@ -521,7 +521,7 @@ class TorOnionService:
             subprocess.run(['sudo', 'mkdir', '-p', self.onion_service_dir], check=True)
             subprocess.run(['sudo', 'chown', 'debian-tor:debian-tor', self.onion_service_dir], check=True)
 
-            # Add onion service config to torrc
+            # Add onion service config to torrc using sudo
             tor_config = f"""
 
 # PiSecure Onion Service
@@ -530,11 +530,12 @@ HiddenServicePort 80 127.0.0.1:3142
 HiddenServiceVersion 3
 """
 
-            # Append to torrc if not already present
-            with open(self.tor_config_path, 'r') as f:
-                if "PiSecure Onion Service" not in f.read():
-                    with open(self.tor_config_path, 'a') as f:
-                        f.write(tor_config)
+            # Check if config is already present
+            result = subprocess.run(['sudo', 'grep', '-q', 'PiSecure Onion Service', self.tor_config_path])
+            if result.returncode != 0:  # Not found, add it
+                # Append to torrc using sudo
+                echo_cmd = f"echo '{tor_config}' | sudo tee -a {self.tor_config_path} > /dev/null"
+                subprocess.run(echo_cmd, shell=True, check=True)
 
             # Restart tor
             subprocess.run(['sudo', 'systemctl', 'restart', 'tor'], check=True)

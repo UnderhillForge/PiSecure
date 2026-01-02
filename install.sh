@@ -338,14 +338,22 @@ setup_node_discovery() {
     python -c "
 from pisecure.core.nat_traversal import node_discovery
 import json
+import tempfile
+import os
 
 print('🔍 Setting up automatic node discovery...')
 results = node_discovery.make_node_discoverable()
 
-# Save discovery results
-discovery_file = '/etc/pisecure/node_discovery.json'
-with open(discovery_file, 'w') as f:
+# Save discovery results to temporary file first
+with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
     json.dump(results, f, indent=2)
+    temp_file = f.name
+
+# Move to final location with sudo
+discovery_file = '/etc/pisecure/node_discovery.json'
+os.system(f'sudo mv {temp_file} {discovery_file}')
+os.system(f'sudo chown {SERVICE_USER}:{SERVICE_USER} {discovery_file}')
+os.system(f'sudo chmod 644 {discovery_file}')
 
 print(f'✅ Node discovery configured: {results[\"success_count\"]} methods successful')
 print(f'📄 Discovery results saved to: {discovery_file}')
