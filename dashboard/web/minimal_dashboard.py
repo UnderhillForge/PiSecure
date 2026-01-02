@@ -263,7 +263,64 @@ HTML_TEMPLATE = """
                     <span class="metric-label">Data Received</span>
                     <span class="metric-value">{{ network_recv }} MB</span>
                 </div>
+
+                <!-- Node Discovery Status -->
+                <div class="metric">
+                    <span class="metric-label">Node Discovery</span>
+                    <span class="metric-value {{ 'status-good' if node_discovery_enabled else 'status-warn' }}">
+                        {{ '✅ Active' if node_discovery_enabled else '⚠️ Not Configured' }}
+                    </span>
+                </div>
+
+                {% if public_endpoints %}
+                <div class="metric">
+                    <span class="metric-label">Public Access</span>
+                    <span class="metric-value status-good">{{ public_endpoints|length }} endpoints</span>
+                </div>
+                {% endif %}
             </div>
+
+            <!-- Node Discovery Status -->
+            {% if node_discovery_enabled %}
+            <div class="card">
+                <h2>🛰️ Node Discovery</h2>
+                <div class="metric">
+                    <span class="metric-label">Discovery Methods</span>
+                    <span class="metric-value">{{ discovery_methods|length }}</span>
+                </div>
+
+                {% if public_endpoints %}
+                <div class="metric">
+                    <span class="metric-label">Public Endpoints</span>
+                    <span class="metric-value status-good">{{ public_endpoints|length }}</span>
+                </div>
+
+                {% for endpoint in public_endpoints %}
+                <div class="metric">
+                    <span class="metric-label">{{ endpoint.type|title }} Access</span>
+                    <span class="metric-value status-good">✅ Available</span>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="metric">
+                    <span class="metric-label">Status</span>
+                    <span class="metric-value status-warn">Setting up...</span>
+                </div>
+                {% endif %}
+
+                {% if relay_count %}
+                <div class="metric">
+                    <span class="metric-label">Relay Network</span>
+                    <span class="metric-value">{{ relay_count }} relays</span>
+                </div>
+                {% endif %}
+
+                <p style="font-size: 0.9rem; color: #7f8c8d; margin-top: 10px;">
+                    This node can be discovered worldwide through multiple methods.
+                    Mobile apps automatically find and connect to this node.
+                </p>
+            </div>
+            {% endif %}
         </div>
 
         <!-- Recent Activity -->
@@ -514,6 +571,64 @@ WALLET_TEMPLATE = """
                 <div id="transfer-status"></div>
             </div>
 
+            <!-- Wallet Backup -->
+            <div class="card" id="backup">
+                <h2>💾 Wallet Backup</h2>
+                <form id="backup-form">
+                    <div class="form-group">
+                        <label for="backup_wallet">Wallet to Backup:</label>
+                        <select id="backup_wallet" name="wallet_name" required>
+                            {% for wallet in wallets %}
+                            <option value="{{ wallet.id }}">{{ wallet.name }} ({{ wallet.id }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="include_private_key" name="include_private_key" value="true">
+                            Include private key (encrypted backup)
+                        </label>
+                    </div>
+                    <div class="form-group" id="password-group" style="display: none;">
+                        <label for="backup_password">Encryption Password:</label>
+                        <input type="password" id="backup_password" name="password" placeholder="Strong password..." minlength="8">
+                    </div>
+                    <button type="submit" class="btn">Create Backup</button>
+                </form>
+                <div id="backup-status"></div>
+                <p style="font-size: 0.9rem; color: #7f8c8d; margin-top: 10px;">
+                    ⚠️ Backups with private keys can restore your wallet completely.<br>
+                    Store encrypted backups securely and remember your password!
+                </p>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- Wallet Restore -->
+            <div class="card" id="restore">
+                <h2>📥 Wallet Restore</h2>
+                <form id="restore-form">
+                    <div class="form-group">
+                        <label for="restore_wallet_name">New Wallet Name:</label>
+                        <input type="text" id="restore_wallet_name" name="wallet_name" placeholder="restored_wallet" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="backup_data">Backup Data:</label>
+                        <textarea id="backup_data" name="backup_data" rows="6" placeholder="Paste your wallet backup JSON here..." required></textarea>
+                    </div>
+                    <div class="form-group" id="restore-password-group" style="display: none;">
+                        <label for="restore_password">Decryption Password:</label>
+                        <input type="password" id="restore_password" name="password" placeholder="Backup password...">
+                    </div>
+                    <button type="submit" class="btn">Restore Wallet</button>
+                </form>
+                <div id="restore-status"></div>
+                <p style="font-size: 0.9rem; color: #7f8c8d; margin-top: 10px;">
+                    📄 Paste the complete JSON backup data.<br>
+                    If the backup includes private keys, enter the decryption password.
+                </p>
+            </div>
+
             <!-- Blockchain Explorer -->
             <div class="card" id="blockchain">
                 <h2>⛓️ Blockchain Status</h2>
@@ -579,6 +694,91 @@ WALLET_TEMPLATE = """
                     setTimeout(() => location.reload(), 3000);
                 } else {
                     statusDiv.innerHTML = '<div class="status-msg status-error">❌ Error: ' + result.error + '</div>';
+                }
+            } catch (error) {
+                statusDiv.innerHTML = '<div class="status-msg status-error">❌ Network error: ' + error.message + '</div>';
+            }
+        });
+
+        // Show/hide password field for backup
+        document.getElementById('include_private_key').addEventListener('change', function(e) {
+            const passwordGroup = document.getElementById('password-group');
+            passwordGroup.style.display = e.target.checked ? 'block' : 'none';
+            document.getElementById('backup_password').required = e.target.checked;
+        });
+
+        // Backup Wallet
+        document.getElementById('backup-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+            const statusDiv = document.getElementById('backup-status');
+
+            try {
+                const response = await fetch('/api/wallet/backup', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Create downloadable backup file
+                    const blob = new Blob([result.backup_data], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = result.filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+
+                    statusDiv.innerHTML = '<div class="status-msg status-success">✅ Backup created successfully!<br>Downloaded: ' + result.filename + '<br>Size: ' + result.size + ' bytes<br>Private key included: ' + (result.includes_private_key ? 'Yes (encrypted)' : 'No') + '</div>';
+                } else {
+                    statusDiv.innerHTML = '<div class="status-msg status-error">❌ Backup failed: ' + result.error + '</div>';
+                }
+            } catch (error) {
+                statusDiv.innerHTML = '<div class="status-msg status-error">❌ Network error: ' + error.message + '</div>';
+            }
+        });
+
+        // Show/hide password field for restore
+        document.getElementById('backup_data').addEventListener('input', function(e) {
+            const backupData = e.target.value.trim();
+            const passwordGroup = document.getElementById('restore-password-group');
+
+            try {
+                const data = JSON.parse(backupData);
+                const hasPrivateKey = data.encrypted_private_key !== undefined;
+                passwordGroup.style.display = hasPrivateKey ? 'block' : 'none';
+                document.getElementById('restore_password').required = hasPrivateKey;
+            } catch (error) {
+                passwordGroup.style.display = 'none';
+                document.getElementById('restore_password').required = false;
+            }
+        });
+
+        // Restore Wallet
+        document.getElementById('restore-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+            const statusDiv = document.getElementById('restore-status');
+
+            try {
+                const response = await fetch('/api/wallet/restore', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    statusDiv.innerHTML = '<div class="status-msg status-success">✅ Wallet restored successfully!<br>Wallet ID: ' + result.wallet_id + '<br>Address: ' + result.address + '<br>Private key restored: ' + (result.private_key_restored ? 'Yes' : 'No') + '</div>';
+                    setTimeout(() => location.reload(), 3000);
+                } else {
+                    statusDiv.innerHTML = '<div class="status-msg status-error">❌ Restore failed: ' + result.error + '</div>';
                 }
             } catch (error) {
                 statusDiv.innerHTML = '<div class="status-msg status-error">❌ Network error: ' + error.message + '</div>';
@@ -733,12 +933,47 @@ def get_mining_info():
 
 def get_network_info():
     """Get network information"""
+    # Check for node discovery status
+    node_discovery_enabled = False
+    public_endpoints = []
+    discovery_methods = []
+    relay_count = 0
+
+    try:
+        # Check if node discovery is configured
+        discovery_file = Path("/etc/pisecure/node_discovery.json")
+        if discovery_file.exists():
+            with open(discovery_file, 'r') as f:
+                discovery_data = json.load(f)
+
+            node_discovery_enabled = len(discovery_data.get('endpoints', [])) > 0
+            public_endpoints = discovery_data.get('endpoints', [])
+            discovery_methods = discovery_data.get('methods_attempted', [])
+        else:
+            # Check if discovery service is available
+            try:
+                from pisecure.core.nat_traversal import node_discovery
+                status = node_discovery.get_discovery_status()
+                node_discovery_enabled = len(status.get('endpoints', [])) > 0
+                public_endpoints = status.get('endpoints', [])
+                relay_count = status.get('relay_count', 0)
+            except ImportError:
+                node_discovery_enabled = False
+
+    except Exception as e:
+        print(f"Node discovery check error: {e}")
+        node_discovery_enabled = False
+
     return {
         'connected_peers': 0,      # Would check actual peer connections
         'known_peers': 0,          # Would check peer database
         'sync_progress': '0%',     # Would check sync status
         'ip_address': 'Scanning...', # Already handled in system info
-        'network_recv': 0          # Already handled in system info
+        'network_recv': 0,         # Already handled in system info
+        'node_discovery_enabled': node_discovery_enabled,
+        'public_endpoints': public_endpoints,
+        'discovery_methods': discovery_methods,
+        'relay_count': relay_count
     }
 
 def get_recent_blocks():
@@ -874,6 +1109,99 @@ def transfer_tokens():
             'message': f'Transferred {amount} tokens to {recipient}',
             'tx_hash': f'simulated_{secrets.token_hex(16)}'
         }
+
+    except Exception as e:
+        return {'success': False, 'error': str(e)}, 500
+
+@app.route('/api/wallet/backup', methods=['POST'])
+def backup_wallet():
+    """API endpoint to backup wallet"""
+    try:
+        from pisecure.core.wallet import SignWallet
+        import os
+
+        wallet_name = request.form.get('wallet_name')
+        include_private_key = request.form.get('include_private_key') == 'true'
+        password = request.form.get('password')
+
+        if include_private_key and not password:
+            return {'success': False, 'error': 'Password required for private key backup'}, 400
+
+        # Create backup in /tmp first
+        backup_filename = f"pisecure_wallet_{wallet_name}_{int(time.time())}.json"
+        backup_path = f"/tmp/{backup_filename}"
+
+        if wallet_name:
+            wallet = SignWallet(f"/var/lib/pisecure/wallets/{wallet_name}.json")
+        else:
+            wallet = SignWallet()
+
+        result = wallet.export_wallet(backup_path, include_private_key, password)
+
+        if result['success']:
+            # Return the backup file content
+            with open(backup_path, 'r') as f:
+                backup_content = f.read()
+
+            # Clean up temp file
+            os.remove(backup_path)
+
+            return {
+                'success': True,
+                'backup_data': backup_content,
+                'filename': backup_filename,
+                'includes_private_key': include_private_key,
+                'size': len(backup_content)
+            }
+        else:
+            return {'success': False, 'error': result['error']}, 400
+
+    except Exception as e:
+        return {'success': False, 'error': str(e)}, 500
+
+@app.route('/api/wallet/restore', methods=['POST'])
+def restore_wallet():
+    """API endpoint to restore wallet from backup"""
+    try:
+        from pisecure.core.wallet import SignWallet
+        import os
+
+        backup_data = request.form.get('backup_data')
+        password = request.form.get('password')
+        wallet_name = request.form.get('wallet_name')
+
+        if not backup_data:
+            return {'success': False, 'error': 'No backup data provided'}, 400
+
+        # Create temporary file with backup data
+        temp_file = f"/tmp/pisecure_restore_{int(time.time())}.json"
+        with open(temp_file, 'w') as f:
+            f.write(backup_data)
+
+        try:
+            wallet = SignWallet()
+            result = wallet.restore_wallet_backup(temp_file, password if password else None)
+
+            # Clean up temp file
+            os.remove(temp_file)
+
+            if result['success']:
+                return {
+                    'success': True,
+                    'wallet_id': result['wallet_id'],
+                    'address': result['address'],
+                    'private_key_restored': result.get('private_key_restored', False)
+                }
+            else:
+                return {'success': False, 'error': result['error']}, 400
+
+        except Exception as e:
+            # Clean up temp file
+            try:
+                os.remove(temp_file)
+            except:
+                pass
+            raise e
 
     except Exception as e:
         return {'success': False, 'error': str(e)}, 500

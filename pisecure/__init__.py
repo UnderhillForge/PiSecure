@@ -7,7 +7,7 @@ Raspberry Pi devices, providing decentralized security, hardware-verified
 mining, and secure communication protocols.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __author__ = "J Stekervetz"
 __email__ = "mr_underhill@icloud.com"
 

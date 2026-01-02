@@ -350,38 +350,83 @@ class SignWallet:
         """Get wallet transaction history"""
         return self.wallet_data.get('transactions', [])
 
-    def export_wallet(self, export_path: str) -> bool:
+    def export_wallet(self, export_path: str, include_private_key: bool = False,
+                     password: str = None) -> Dict[str, Any]:
         """
-        Export wallet data (without private keys)
+        Export wallet data with optional private key backup
 
         Args:
             export_path: Path to export wallet data
+            include_private_key: Whether to include encrypted private key
+            password: Password for private key encryption (required if include_private_key=True)
 
         Returns:
-            Success status
+            Export result with success status and details
         """
         try:
             export_data = self.wallet_data.copy()
-            export_data.pop('private_key', None)  # Never export private key
 
+            # Remove private key object (not serializable)
+            export_data.pop('private_key', None)
+
+            # Add export metadata
+            export_data['export_info'] = {
+                'exported_at': int(os.times()[4]),
+                'version': '1.1',
+                'includes_private_key': include_private_key
+            }
+
+            if include_private_key:
+                if not password:
+                    return {
+                        'success': False,
+                        'error': 'Password required for private key export'
+                    }
+
+                # Load and encrypt private key
+                key_file = self.keys_dir / f"{self.get_wallet_id()}.pem"
+                if key_file.exists():
+                    with open(key_file, 'rb') as f:
+                        private_key_pem = f.read()
+
+                    # Encrypt with password using simple XOR (for demo - use proper encryption in production)
+                    # In production, use cryptography library for proper encryption
+                    encrypted_key = self._simple_encrypt(private_key_pem, password.encode())
+                    export_data['encrypted_private_key'] = encrypted_key.hex()
+                    export_data['export_info']['encryption'] = 'simple_xor'
+                else:
+                    return {
+                        'success': False,
+                        'error': 'Private key file not found'
+                    }
+
+            # Export to file
             with open(export_path, 'w') as f:
                 json.dump(export_data, f, indent=2)
 
-            return True
+            return {
+                'success': True,
+                'export_path': export_path,
+                'includes_private_key': include_private_key,
+                'file_size': os.path.getsize(export_path)
+            }
 
         except Exception as e:
-            print(f"Wallet export failed: {e}")
-            return False
+            return {
+                'success': False,
+                'error': str(e)
+            }
 
-    def import_wallet(self, import_path: str) -> bool:
+    def import_wallet(self, import_path: str, password: str = None) -> Dict[str, Any]:
         """
-        Import wallet data
+        Import wallet data with optional private key restoration
 
         Args:
             import_path: Path to import wallet data
+            password: Password for private key decryption (if encrypted)
 
         Returns:
-            Success status
+            Import result with success status and details
         """
         try:
             with open(import_path, 'r') as f:
@@ -390,17 +435,94 @@ class SignWallet:
             # Validate required fields
             required_fields = ['wallet_id', 'address', 'public_key']
             if not all(field in import_data for field in required_fields):
-                return False
+                return {
+                    'success': False,
+                    'error': 'Invalid wallet backup file - missing required fields'
+                }
+
+            # Check for encrypted private key
+            if 'encrypted_private_key' in import_data:
+                if not password:
+                    return {
+                        'success': False,
+                        'error': 'Password required to decrypt private key'
+                    }
+
+                # Decrypt private key
+                try:
+                    encrypted_key = bytes.fromhex(import_data['encrypted_private_key'])
+                    decrypted_key = self._simple_decrypt(encrypted_key, password.encode())
+
+                    # Save private key
+                    key_file = self.keys_dir / f"{import_data['wallet_id']}.pem"
+                    with open(key_file, 'wb') as f:
+                        f.write(decrypted_key)
+
+                    # Load the private key for wallet
+                    private_key = serialization.load_pem_private_key(
+                        decrypted_key, password=None, backend=default_backend()
+                    )
+                    import_data['private_key'] = private_key
+
+                except Exception as e:
+                    return {
+                        'success': False,
+                        'error': f'Failed to decrypt private key: {str(e)}'
+                    }
 
             # Update wallet data
             self.wallet_data.update(import_data)
             self._save_wallet()
 
-            return True
+            return {
+                'success': True,
+                'wallet_id': import_data['wallet_id'],
+                'address': import_data['address'],
+                'private_key_restored': 'encrypted_private_key' in import_data
+            }
 
         except Exception as e:
-            print(f"Wallet import failed: {e}")
-            return False
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def _simple_encrypt(self, data: bytes, key: bytes) -> bytes:
+        """Simple XOR encryption (for demo - use proper encryption in production)"""
+        # This is a simple example - in production use cryptography.fernet or similar
+        key_len = len(key)
+        return bytes(data[i] ^ key[i % key_len] for i in range(len(data)))
+
+    def _simple_decrypt(self, data: bytes, key: bytes) -> bytes:
+        """Simple XOR decryption"""
+        # Same as encryption for XOR
+        return self._simple_encrypt(data, key)
+
+    def create_wallet_backup(self, backup_path: str, password: str) -> Dict[str, Any]:
+        """
+        Create a complete wallet backup with private key
+
+        Args:
+            backup_path: Path for backup file
+            password: Password to encrypt private key
+
+        Returns:
+            Backup result
+        """
+        return self.export_wallet(backup_path, include_private_key=True, password=password)
+
+    def restore_wallet_backup(self, backup_path: str, password: str) -> Dict[str, Any]:
+        """
+        Restore wallet from backup
+
+        Args:
+            backup_path: Path to backup file
+            password: Password to decrypt private key
+
+        Returns:
+            Restore result
+        """
+        return self.import_wallet(backup_path, password=password)
 
     def list_wallets(self) -> List[Dict[str, Any]]:
         """List all available wallets"""

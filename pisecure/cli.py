@@ -2102,81 +2102,147 @@ def import_identity(identity_file):
 
 @cli.command()
 @click.option('--type', 'update_type', help='Filter by update type (critical, safe, compatible, breaking)')
-def update_check(update_type):
+@click.option('--git', is_flag=True, help='Use direct GitHub updates instead of blockchain-based')
+def update_check(update_type, git):
     """Check for available software updates"""
     try:
-        try:
-            # Try relative import first
-            from .updates.updater import OTAUpdater
-            from .updates.update_classifier import UpdateType
-        except ImportError:
-            # Fall back to absolute import
-            from updates.updater import OTAUpdater
-            from updates.update_classifier import UpdateType
-
-        updater = OTAUpdater()
-
-        console.print("[blue]🔍 Checking for PiSecure updates...[/blue]")
-
-        # Get current version
-        current_version = updater._get_current_version()
-        console.print(f"   Current version: {current_version}")
-
-        # Check for updates
-        available_updates = updater.check_for_updates(current_version)
-
-        if not available_updates:
-            console.print("[green]✅ Your PiSecure installation is up to date![/green]")
-            return
-
-        # Filter by type if requested
-        if update_type:
+        if git:
+            # Git-based updates
             try:
-                type_filter = UpdateType(update_type.lower())
-                available_updates = [u for u in available_updates if u.get('type') == type_filter.value]
-            except ValueError:
-                console.print(f"[red]❌ Invalid update type: {update_type}[/red]")
-                console.print("[dim]Valid types: critical, safe, compatible, breaking[/dim]")
+                from .updates.git_updater import git_updater
+            except ImportError:
+                from updates.git_updater import git_updater
+
+            console.print("[blue]🔍 Checking for GitHub updates...[/blue]")
+
+            # Check Git status first
+            git_status = git_updater.get_git_status()
+            if git_status.get('error'):
+                console.print(f"[red]❌ Git status error: {git_status['error']}[/red]")
                 return
 
-        console.print(f"\n[yellow]📦 Found {len(available_updates)} available update(s):[/yellow]\n")
+            console.print(f"   Current commit: {git_status['current_commit'][:8] if git_status['current_commit'] else 'unknown'}")
+            console.print(f"   Branch: {git_status['branch']}")
+            console.print(f"   Working directory: {'clean' if git_status['is_clean'] else 'modified'}")
 
-        # Display updates
-        for update in available_updates[:5]:  # Show latest 5
-            update_type_display = update.get('type', 'unknown').upper()
-            version = update.get('version', 'unknown')
-            description = update.get('description', 'No description')[:60]
+            if not git_status['github_accessible']:
+                console.print("[yellow]⚠️  Cannot access GitHub API[/yellow]")
+                return
 
-            # Color code by type
-            if update_type_display == 'CRITICAL':
-                type_color = "[red]"
-            elif update_type_display == 'SAFE':
-                type_color = "[green]"
-            elif update_type_display == 'COMPATIBLE':
-                type_color = "[yellow]"
-            else:
-                type_color = "[red]"
+            # Check for updates
+            available_updates = git_updater.check_git_updates()
 
-            console.print(f"{type_color}• {version} - {description}[/{type_color.replace('[', '').replace(']', '')}]")
+            if not available_updates:
+                console.print("[green]✅ Your PiSecure installation is up to date with GitHub![/green]")
+                return
 
-        if len(available_updates) > 5:
-            console.print(f"[dim]... and {len(available_updates) - 5} more[/dim]")
+            console.print(f"\n[yellow]📦 Found {len(available_updates)} available Git update(s):[/yellow]\n")
 
-        # Recommendations
-        critical_updates = [u for u in available_updates if u.get('type') == 'critical']
-        if critical_updates:
-            console.print(f"\n[red]🚨 {len(critical_updates)} critical update(s) available![/red]")
-            console.print("[dim]Run 'pisecure update apply' to install immediately[/dim]")
+            # Display updates
+            for update in available_updates[-5:]:  # Show latest 5
+                update_type_display = update.get('type', 'unknown').upper()
+                version = update.get('version', 'unknown')
+                description = update.get('description', 'No description')[:50]
+                commit_short = update.get('commit', '')[:8]
 
-        safe_updates = [u for u in available_updates if u.get('type') == 'safe']
-        if safe_updates and not critical_updates:
-            console.print(f"\n[green]✨ {len(safe_updates)} safe update(s) available[/green]")
-            console.print("[dim]Run 'pisecure update apply' to install[/dim]")
+                # Color code by type
+                if update_type_display == 'CRITICAL':
+                    type_color = "[red]"
+                elif update_type_display == 'SAFE':
+                    type_color = "[green]"
+                elif update_type_display == 'COMPATIBLE':
+                    type_color = "[yellow]"
+                else:
+                    type_color = "[red]"
 
-        breaking_updates = [u for u in available_updates if u.get('type') == 'breaking']
-        if breaking_updates:
-            console.print(f"\n[red]⚠️  {len(breaking_updates)} breaking update(s) require network coordination[/red]")
-            console.print("[dim]These may change consensus rules and need community approval[/dim]")
+                console.print(f"{type_color}• {version} ({commit_short}) - {description}[/{type_color.replace('[', '').replace(']', '')}]")
+
+            if len(available_updates) > 5:
+                console.print(f"[dim]... and {len(available_updates) - 5} more older commits[/dim]")
+
+            # Recommendations
+            safe_updates = [u for u in available_updates if u.get('type') in ['critical', 'safe']]
+            if safe_updates:
+                console.print(f"\n[green]✨ {len(safe_updates)} safe update(s) available[/green]")
+                console.print("[dim]Run 'pisecure update apply --git' to update to latest[/dim]")
+
+            breaking_updates = [u for u in available_updates if u.get('type') == 'breaking']
+            if breaking_updates:
+                console.print(f"\n[red]⚠️  {len(breaking_updates)} breaking update(s) detected[/red]")
+                console.print("[dim]Use --force with apply command if needed[/dim]")
+
+        else:
+            # Blockchain-based updates (original system)
+            try:
+                from .updates.updater import OTAUpdater
+                from .updates.update_classifier import UpdateType
+            except ImportError:
+                from updates.updater import OTAUpdater
+                from updates.update_classifier import UpdateType
+
+            updater = OTAUpdater()
+
+            console.print("[blue]🔍 Checking for PiSecure blockchain updates...[/blue]")
+
+            # Get current version
+            current_version = updater._get_current_version()
+            console.print(f"   Current version: {current_version}")
+
+            # Check for updates
+            available_updates = updater.check_for_updates(current_version)
+
+            if not available_updates:
+                console.print("[green]✅ Your PiSecure installation is up to date![/green]")
+                return
+
+            # Filter by type if requested
+            if update_type:
+                try:
+                    type_filter = UpdateType(update_type.lower())
+                    available_updates = [u for u in available_updates if u.get('type') == type_filter.value]
+                except ValueError:
+                    console.print(f"[red]❌ Invalid update type: {update_type}[/red]")
+                    console.print("[dim]Valid types: critical, safe, compatible, breaking[/dim]")
+                    return
+
+            console.print(f"\n[yellow]📦 Found {len(available_updates)} available update(s):[/yellow]\n")
+
+            # Display updates
+            for update in available_updates[:5]:  # Show latest 5
+                update_type_display = update.get('type', 'unknown').upper()
+                version = update.get('version', 'unknown')
+                description = update.get('description', 'No description')[:60]
+
+                # Color code by type
+                if update_type_display == 'CRITICAL':
+                    type_color = "[red]"
+                elif update_type_display == 'SAFE':
+                    type_color = "[green]"
+                elif update_type_display == 'COMPATIBLE':
+                    type_color = "[yellow]"
+                else:
+                    type_color = "[red]"
+
+                console.print(f"{type_color}• {version} - {description}[/{type_color.replace('[', '').replace(']', '')}]")
+
+            if len(available_updates) > 5:
+                console.print(f"[dim]... and {len(available_updates) - 5} more[/dim]")
+
+            # Recommendations
+            critical_updates = [u for u in available_updates if u.get('type') == 'critical']
+            if critical_updates:
+                console.print(f"\n[red]🚨 {len(critical_updates)} critical update(s) available![/red]")
+                console.print("[dim]Run 'pisecure update apply' to install immediately[/dim]")
+
+            safe_updates = [u for u in available_updates if u.get('type') == 'safe']
+            if safe_updates and not critical_updates:
+                console.print(f"\n[green]✨ {len(safe_updates)} safe update(s) available[/green]")
+                console.print("[dim]Run 'pisecure update apply' to install[/dim]")
+
+            breaking_updates = [u for u in available_updates if u.get('type') == 'breaking']
+            if breaking_updates:
+                console.print(f"\n[red]⚠️  {len(breaking_updates)} breaking update(s) require network coordination[/red]")
+                console.print("[dim]These may change consensus rules and need community approval[/dim]")
 
     except Exception as e:
         console.print(f"[red]❌ Update check failed: {e}[/red]")
@@ -2186,138 +2252,214 @@ def update_check(update_type):
 @click.argument('version', required=False)
 @click.option('--force', is_flag=True, help='Force application (skip safety checks)')
 @click.option('--skip-backup', is_flag=True, help='Skip backup creation (not recommended)')
-def update_apply(version, force, skip_backup):
+@click.option('--git', is_flag=True, help='Apply Git-based update to specific commit')
+def update_apply(version, force, skip_backup, git):
     """Apply available software updates"""
     try:
-        try:
-            # Try relative import first
-            from .updates.updater import OTAUpdater
-            from .updates.update_classifier import UpdateClassifier, UpdateType
-        except ImportError:
-            # Fall back to absolute import
-            from updates.updater import OTAUpdater
-            from updates.update_classifier import UpdateClassifier, UpdateType
+        if git:
+            # Git-based updates
+            try:
+                from .updates.git_updater import git_updater
+            except ImportError:
+                from updates.git_updater import git_updater
 
-        updater = OTAUpdater()
-        classifier = UpdateClassifier()
+            console.print("[blue]🔄 Applying Git-based PiSecure updates...[/blue]")
 
-        console.print("[blue]🔄 Applying PiSecure updates...[/blue]")
-
-        # Get current version
-        current_version = updater._get_current_version()
-        console.print(f"   Current version: {current_version}")
-
-        # Get available updates
-        available_updates = updater.check_for_updates(current_version)
-
-        if not available_updates:
-            console.print("[green]✅ No updates available - already up to date![/green]")
-            return
-
-        # Select update to apply
-        target_update = None
-        if version:
-            # Find specific version
-            for update in available_updates:
-                if update.get('version') == version:
-                    target_update = update
-                    break
-            if not target_update:
-                console.print(f"[red]❌ Version {version} not found in available updates[/red]")
+            # Check Git status first
+            git_status = git_updater.get_git_status()
+            if git_status.get('error'):
+                console.print(f"[red]❌ Git status error: {git_status['error']}[/red]")
                 return
-        else:
-            # Apply latest safe update
-            safe_updates = [u for u in available_updates if u.get('type') in ['critical', 'safe']]
-            if safe_updates:
-                target_update = safe_updates[0]  # Latest safe update
+
+            console.print(f"   Current commit: {git_status['current_commit'][:8] if git_status['current_commit'] else 'unknown'}")
+
+            if not git_status['github_accessible']:
+                console.print("[yellow]⚠️  Cannot access GitHub API[/yellow]")
+                return
+
+            # Get available updates
+            available_updates = git_updater.check_git_updates()
+
+            if not available_updates:
+                console.print("[green]✅ Already up to date with GitHub![/green]")
+                return
+
+            # Select commit to apply
+            target_commit = None
+            if version:
+                # Find specific commit
+                for update in available_updates:
+                    if update.get('commit', '').startswith(version) or update.get('version', '').endswith(version):
+                        target_commit = update.get('commit')
+                        break
+                if not target_commit:
+                    console.print(f"[red]❌ Commit {version} not found in available updates[/red]")
+                    return
             else:
-                console.print("[yellow]⚠️  No safe updates available[/yellow]")
-                console.print("[dim]Use --version to specify a specific update[/dim]")
+                # Apply latest safe update
+                safe_updates = [u for u in available_updates if u.get('type') in ['critical', 'safe']]
+                if safe_updates:
+                    target_commit = safe_updates[0].get('commit')
+                else:
+                    console.print("[yellow]⚠️  No safe Git updates available[/yellow]")
+                    console.print("[dim]Use --force to apply latest anyway[/dim]")
+                    if not force:
+                        return
+                    target_commit = available_updates[0].get('commit')
+
+            console.print(f"   Target commit: {target_commit[:8]}")
+
+            # Safety check for breaking changes
+            update_info = next((u for u in available_updates if u.get('commit') == target_commit), {})
+            if update_info.get('type') == 'breaking' and not force:
+                console.print("[red]⚠️  This commit contains breaking changes[/red]")
+                console.print("[dim]Use --force to apply anyway[/dim]")
                 return
 
-        update_version = target_update.get('version')
-        update_type = target_update.get('type', 'unknown')
+            # Apply Git update
+            apply_result = git_updater.apply_git_update(target_commit, force=force)
 
-        console.print(f"   Target update: {update_version}")
-        console.print(f"   Update type: {update_type.upper()}")
+            if apply_result['success']:
+                console.print("[green]✅ Git update applied successfully![/green]")
+                console.print(f"   New commit: {apply_result['commit'][:8]}")
+                console.print(f"   Version: {apply_result['version']}")
 
-        # Safety check for non-critical updates
-        if not force and update_type not in ['critical']:
-            console.print(f"\n[yellow]⚠️  This is a {update_type.upper()} update[/yellow]")
+                if apply_result.get('services_restarted'):
+                    console.print("[green]✅ Services restarted[/green]")
+                else:
+                    console.print("[yellow]🔄 Service restart recommended[/yellow]")
+            else:
+                console.print(f"[red]❌ Git update failed: {apply_result.get('error', 'Unknown error')}[/red]")
 
-            if update_type == 'breaking':
-                console.print("[red]Breaking updates may change consensus rules[/red]")
-                console.print("[red]Network coordination required - do not apply without community approval[/red]")
+        else:
+            # Blockchain-based updates (original system)
+            try:
+                from .updates.updater import OTAUpdater
+                from .updates.update_classifier import UpdateClassifier, UpdateType
+            except ImportError:
+                from updates.updater import OTAUpdater
+                from updates.update_classifier import UpdateClassifier, UpdateType
+
+            updater = OTAUpdater()
+            classifier = UpdateClassifier()
+
+            console.print("[blue]🔄 Applying PiSecure blockchain updates...[/blue]")
+
+            # Get current version
+            current_version = updater._get_current_version()
+            console.print(f"   Current version: {current_version}")
+
+            # Get available updates
+            available_updates = updater.check_for_updates(current_version)
+
+            if not available_updates:
+                console.print("[green]✅ No updates available - already up to date![/green]")
                 return
-            elif update_type == 'compatible':
-                console.print("[yellow]Compatible updates may require testing[/yellow]")
-                if not click.confirm("Continue with update?", default=False):
-                    console.print("[dim]Update cancelled[/dim]")
+
+            # Select update to apply
+            target_update = None
+            if version:
+                # Find specific version
+                for update in available_updates:
+                    if update.get('version') == version:
+                        target_update = update
+                        break
+                if not target_update:
+                    console.print(f"[red]❌ Version {version} not found in available updates[/red]")
+                    return
+            else:
+                # Apply latest safe update
+                safe_updates = [u for u in available_updates if u.get('type') in ['critical', 'safe']]
+                if safe_updates:
+                    target_update = safe_updates[0]  # Latest safe update
+                else:
+                    console.print("[yellow]⚠️  No safe updates available[/yellow]")
+                    console.print("[dim]Use --version to specify a specific update[/dim]")
                     return
 
-        # Download update
-        console.print("[dim]Downloading update...[/dim]")
-        download_result = updater.download_update(target_update)
+            update_version = target_update.get('version')
+            update_type = target_update.get('type', 'unknown')
 
-        if not download_result['success']:
-            console.print(f"[red]❌ Download failed: {download_result['error']}[/red]")
-            return
+            console.print(f"   Target update: {update_version}")
+            console.print(f"   Update type: {update_type.upper()}")
 
-        package_path = download_result['local_path']
+            # Safety check for non-critical updates
+            if not force and update_type not in ['critical']:
+                console.print(f"\n[yellow]⚠️  This is a {update_type.upper()} update[/yellow]")
 
-        # Verify update
-        console.print("[dim]Verifying update...[/dim]")
-        verify_result = updater.verify_update(package_path, target_update)
+                if update_type == 'breaking':
+                    console.print("[red]Breaking updates may change consensus rules[/red]")
+                    console.print("[red]Network coordination required - do not apply without community approval[/red]")
+                    return
+                elif update_type == 'compatible':
+                    console.print("[yellow]Compatible updates may require testing[/yellow]")
+                    if not click.confirm("Continue with update?", default=False):
+                        console.print("[dim]Update cancelled[/dim]")
+                        return
 
-        if not verify_result['verified']:
-            console.print(f"[red]❌ Verification failed: {verify_result['error']}[/red]")
-            return
+            # Download update
+            console.print("[dim]Downloading update...[/dim]")
+            download_result = updater.download_update(target_update)
 
-        manifest = verify_result['manifest']
+            if not download_result['success']:
+                console.print(f"[red]❌ Download failed: {download_result['error']}[/red]")
+                return
 
-        # Additional safety check using classifier
-        changed_files = manifest.get('changed_files', [])
-        is_safe, safety_reason = classifier.verify_update_safety(manifest, changed_files)
+            package_path = download_result['local_path']
 
-        if not is_safe and not force:
-            console.print(f"[red]❌ Safety check failed: {safety_reason}[/red]")
-            console.print("[dim]Use --force to override (not recommended)[/dim]")
-            return
+            # Verify update
+            console.print("[dim]Verifying update...[/dim]")
+            verify_result = updater.verify_update(package_path, target_update)
 
-        # Apply update
-        console.print("[dim]Applying update...[/dim]")
+            if not verify_result['verified']:
+                console.print(f"[red]❌ Verification failed: {verify_result['error']}[/red]")
+                return
 
-        apply_result = updater.apply_update(
-            package_path,
-            manifest,
-            progress_callback=lambda current, total: console.print(f"[dim]Installing... {current}/{total} files[/dim]")
-        )
+            manifest = verify_result['manifest']
 
-        if apply_result['success']:
-            console.print("[green]✅ Update applied successfully![/green]")
-            console.print(f"   New version: {apply_result['version']}")
-            console.print(f"   Backup ID: {apply_result['backup_id']}")
+            # Additional safety check using classifier
+            changed_files = manifest.get('changed_files', [])
+            is_safe, safety_reason = classifier.verify_update_safety(manifest, changed_files)
 
-            # Check if restart needed
-            if manifest.get('restart_required', True):
-                console.print("[yellow]🔄 System restart recommended[/yellow]")
-                if click.confirm("Restart services now?", default=False):
-                    # Restart services
-                    import subprocess
-                    try:
-                        subprocess.run(['sudo', 'systemctl', 'restart', 'pisecure*'], shell=True, check=True)
-                        console.print("[green]✅ Services restarted[/green]")
-                    except Exception as e:
-                        console.print(f"[red]❌ Service restart failed: {e}[/red]")
-                        console.print("[dim]Manual restart may be required[/dim]")
-        else:
-            console.print(f"[red]❌ Update failed: {apply_result.get('error', 'Unknown error')}[/red]")
+            if not is_safe and not force:
+                console.print(f"[red]❌ Safety check failed: {safety_reason}[/red]")
+                console.print("[dim]Use --force to override (not recommended)[/dim]")
+                return
 
-            # Check if rollback was attempted
-            if apply_result.get('rollback_attempted'):
-                console.print("[yellow]⚠️  Automatic rollback was attempted[/yellow]")
-                if not apply_result.get('rollback_attempted'):
-                    console.print("[red]Manual intervention may be required[/red]")
+            # Apply update
+            console.print("[dim]Applying update...[/dim]")
+
+            apply_result = updater.apply_update(
+                package_path,
+                manifest,
+                progress_callback=lambda current, total: console.print(f"[dim]Installing... {current}/{total} files[/dim]")
+            )
+
+            if apply_result['success']:
+                console.print("[green]✅ Update applied successfully![/green]")
+                console.print(f"   New version: {apply_result['version']}")
+                console.print(f"   Backup ID: {apply_result['backup_id']}")
+
+                # Check if restart needed
+                if manifest.get('restart_required', True):
+                    console.print("[yellow]🔄 System restart recommended[/yellow]")
+                    if click.confirm("Restart services now?", default=False):
+                        # Restart services
+                        import subprocess
+                        try:
+                            subprocess.run(['sudo', 'systemctl', 'restart', 'pisecure*'], shell=True, check=True)
+                            console.print("[green]✅ Services restarted[/green]")
+                        except Exception as e:
+                            console.print(f"[red]❌ Service restart failed: {e}[/red]")
+                            console.print("[dim]Manual restart may be required[/dim]")
+            else:
+                console.print(f"[red]❌ Update failed: {apply_result.get('error', 'Unknown error')}[/red]")
+
+                # Check if rollback was attempted
+                if apply_result.get('rollback_attempted'):
+                    console.print("[yellow]⚠️  Automatic rollback was attempted[/yellow]")
+                    if not apply_result.get('rollback_attempted'):
+                        console.print("[red]Manual intervention may be required[/red]")
 
     except Exception as e:
         console.print(f"[red]❌ Update application failed: {e}[/red]")
@@ -2525,8 +2667,11 @@ def update():
 
 @cli.command()
 @click.argument('backup_path', type=click.Path())
-def export_wallet(backup_path):
-    """Export wallet to backup file"""
+@click.option('--wallet', help='Wallet ID to backup (default: current wallet)')
+@click.option('--include-private-key', is_flag=True, help='Include encrypted private key in backup')
+@click.option('--password', prompt=True, hide_input=True, confirmation_prompt=True, help='Password for private key encryption')
+def backup_wallet(backup_path, wallet, include_private_key, password):
+    """Create encrypted wallet backup with private key"""
     try:
         try:
             # Try relative import first
@@ -2535,19 +2680,57 @@ def export_wallet(backup_path):
             # Fall back to absolute import
             from core.wallet import SignWallet
 
-        wallet = SignWallet()
-        wallet.export_wallet(backup_path)
+        if wallet:
+            # Backup specific wallet
+            wallet_instance = SignWallet()
+            wallet_data = wallet_instance.load_wallet(wallet)
+            if 'error' in wallet_data:
+                console.print(f"[red]❌ Wallet '{wallet}' not found[/red]")
+                return
 
-        console.print(f"[green]✅ Wallet exported to {backup_path}[/green]")
+            # Create wallet instance for the specific wallet
+            wallet_file = f"/var/lib/pisecure/wallets/{wallet}.json"
+            wallet_instance = SignWallet(wallet_file)
+
+        else:
+            # Backup current/default wallet
+            wallet_instance = SignWallet()
+            wallet = wallet_instance.get_wallet_id()
+            if not wallet:
+                console.print("[red]❌ No wallet loaded[/red]")
+                return
+
+        console.print(f"[blue]🔐 Creating wallet backup for: {wallet}[/blue]")
+
+        if include_private_key and not password:
+            console.print("[red]❌ Password required for private key backup[/red]")
+            return
+
+        # Create backup
+        result = wallet_instance.create_wallet_backup(backup_path, password if include_private_key else None)
+
+        if result['success']:
+            console.print("[green]✅ Wallet backup created successfully![/green]")
+            console.print(f"   📁 Backup file: {result['export_path']}")
+            console.print(f"   📊 File size: {result['file_size']} bytes")
+            console.print(f"   🔑 Private key included: {'✅ Yes (encrypted)' if result.get('includes_private_key') else '❌ No'}")
+
+            if include_private_key:
+                console.print("[yellow]⚠️  Remember your password - it's required to restore the private key![/yellow]")
+                console.print("[dim]Store this backup securely - it contains your wallet credentials[/dim]")
+        else:
+            console.print(f"[red]❌ Backup failed: {result['error']}[/red]")
 
     except Exception as e:
-        console.print(f"[red]❌ Export failed: {e}[/red]")
+        console.print(f"[red]❌ Backup error: {e}[/red]")
 
 
 @cli.command()
 @click.argument('backup_path', type=click.Path(exists=True))
-def import_wallet(backup_path):
-    """Import wallet from backup file"""
+@click.option('--wallet-name', help='Name for restored wallet (optional)')
+@click.option('--password', prompt=True, hide_input=True, help='Password for private key decryption')
+def restore_wallet(backup_path, wallet_name, password):
+    """Restore wallet from encrypted backup"""
     try:
         try:
             # Try relative import first
@@ -2556,16 +2739,200 @@ def import_wallet(backup_path):
             # Fall back to absolute import
             from core.wallet import SignWallet
 
-        wallet = SignWallet()
-        success = wallet.import_wallet(backup_path)
+        console.print(f"[blue]📥 Restoring wallet from: {backup_path}[/blue]")
 
-        if success:
-            console.print(f"[green]✅ Wallet imported from {backup_path}[/green]")
+        # Check if backup contains private key
+        try:
+            with open(backup_path, 'r') as f:
+                backup_data = json.load(f)
+
+            has_private_key = 'encrypted_private_key' in backup_data
+            wallet_id = backup_data.get('wallet_id', 'unknown')
+
+            console.print(f"   👛 Wallet ID: {wallet_id}")
+            console.print(f"   🔑 Private key included: {'✅ Yes' if has_private_key else '❌ No'}")
+
+            if has_private_key and not password:
+                console.print("[red]❌ Password required to decrypt private key[/red]")
+                return
+
+        except Exception as e:
+            console.print(f"[red]❌ Invalid backup file: {e}[/red]")
+            return
+
+        # Create wallet instance
+        wallet_instance = SignWallet()
+
+        # Restore from backup
+        result = wallet_instance.restore_wallet_backup(backup_path, password if has_private_key else None)
+
+        if result['success']:
+            console.print("[green]✅ Wallet restored successfully![/green]")
+            console.print(f"   👛 Wallet ID: {result['wallet_id']}")
+            console.print(f"   🏦 Address: {result['address']}")
+            console.print(f"   🔑 Private key restored: {'✅ Yes' if result.get('private_key_restored') else '❌ No'}")
+
+            # Rename wallet if requested
+            if wallet_name and wallet_name != result['wallet_id']:
+                console.print(f"[blue]🔄 Renaming wallet to: {wallet_name}[/blue]")
+                # Load the restored wallet and update name
+                restored_wallet = SignWallet(f"/var/lib/pisecure/wallets/{result['wallet_id']}.json")
+                restored_wallet.wallet_data['wallet_id'] = wallet_name
+                restored_wallet.wallet_data['name'] = wallet_name
+                restored_wallet._save_wallet()
+
+                # Rename files
+                import shutil
+                old_json = f"/var/lib/pisecure/wallets/{result['wallet_id']}.json"
+                new_json = f"/var/lib/pisecure/wallets/{wallet_name}.json"
+                old_pem = f"/var/lib/pisecure/wallets/keys/{result['wallet_id']}.pem"
+                new_pem = f"/var/lib/pisecure/wallets/keys/{wallet_name}.pem"
+
+                shutil.move(old_json, new_json)
+                if os.path.exists(old_pem):
+                    shutil.move(old_pem, new_pem)
+
+                console.print(f"[green]✅ Wallet renamed to: {wallet_name}[/green]")
+
         else:
-            console.print(f"[red]❌ Import failed[/red]")
+            console.print(f"[red]❌ Restore failed: {result['error']}[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Restore error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('backup_path', type=click.Path())
+@click.option('--wallet', help='Wallet ID to export (default: current wallet)')
+def export_wallet(backup_path, wallet):
+    """Export wallet metadata (without private key)"""
+    try:
+        try:
+            # Try relative import first
+            from .core.wallet import SignWallet
+        except ImportError:
+            # Fall back to absolute import
+            from core.wallet import SignWallet
+
+        if wallet:
+            wallet_file = f"/var/lib/pisecure/wallets/{wallet}.json"
+            wallet_instance = SignWallet(wallet_file)
+        else:
+            wallet_instance = SignWallet()
+
+        console.print(f"[blue]📤 Exporting wallet metadata...[/blue]")
+
+        result = wallet_instance.export_wallet(backup_path, include_private_key=False)
+
+        if result['success']:
+            console.print("[green]✅ Wallet metadata exported successfully![/green]")
+            console.print(f"   📁 Export file: {result['export_path']}")
+            console.print(f"   📊 File size: {result['file_size']} bytes")
+            console.print("[yellow]⚠️  Private key NOT included - use 'backup-wallet' for full backup[/yellow]")
+        else:
+            console.print(f"[red]❌ Export failed: {result['error']}[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Export error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('backup_path', type=click.Path(exists=True))
+@click.option('--wallet-name', help='Name for imported wallet (optional)')
+def import_wallet(backup_path, wallet_name):
+    """Import wallet metadata (without private key)"""
+    try:
+        try:
+            # Try relative import first
+            from .core.wallet import SignWallet
+        except ImportError:
+            # Fall back to absolute import
+            from core.wallet import SignWallet
+
+        console.print(f"[blue]📥 Importing wallet metadata from: {backup_path}[/blue]")
+
+        wallet_instance = SignWallet()
+        result = wallet_instance.import_wallet(backup_path)
+
+        if result['success']:
+            console.print("[green]✅ Wallet metadata imported successfully![/green]")
+            console.print(f"   👛 Wallet ID: {result['wallet_id']}")
+            console.print(f"   🏦 Address: {result['address']}")
+            console.print(f"   🔑 Private key restored: {'✅ Yes' if result.get('private_key_restored') else '❌ No'}")
+
+            if wallet_name and wallet_name != result['wallet_id']:
+                # Rename imported wallet
+                wallet_instance.wallet_data['wallet_id'] = wallet_name
+                wallet_instance.wallet_data['name'] = wallet_name
+                wallet_instance._save_wallet()
+                console.print(f"[green]✅ Wallet renamed to: {wallet_name}[/green]")
+
+            console.print("[yellow]⚠️  If this backup included a private key, use 'restore-wallet' instead[/yellow]")
+        else:
+            console.print(f"[red]❌ Import failed: {result['error']}[/red]")
 
     except Exception as e:
         console.print(f"[red]❌ Import error: {e}[/red]")
+
+
+@cli.command()
+@click.option('--wallet', help='Wallet ID to show (default: current wallet)')
+def wallet_info(wallet):
+    """Show detailed wallet information"""
+    try:
+        try:
+            # Try relative import first
+            from .core.wallet import SignWallet
+        except ImportError:
+            # Fall back to absolute import
+            from core.wallet import SignWallet
+
+        if wallet:
+            wallet_file = f"/var/lib/pisecure/wallets/{wallet}.json"
+            wallet_instance = SignWallet(wallet_file)
+        else:
+            wallet_instance = SignWallet()
+
+        wallet_id = wallet_instance.get_wallet_id()
+        if not wallet_id:
+            console.print("[red]❌ No wallet loaded[/red]")
+            return
+
+        console.print(f"[blue]👛 Wallet Information: {wallet_id}[/blue]")
+        console.print("=" * 40)
+
+        console.print(f"[cyan]Wallet ID:[/cyan] {wallet_id}")
+        console.print(f"[cyan]Name:[/cyan] {wallet_instance.wallet_data.get('name', 'Unnamed')}")
+        console.print(f"[cyan]Address:[/cyan] {wallet_instance.get_address()}")
+        console.print(f"[cyan]Balance:[/cyan] {wallet_instance.get_balance():.2f} tokens")
+
+        # Check if private key exists
+        key_file = wallet_instance.keys_dir / f"{wallet_id}.pem"
+        has_private_key = key_file.exists()
+        console.print(f"[cyan]Private Key:[/cyan] {'✅ Available' if has_private_key else '❌ Not found'}")
+
+        created_at = wallet_instance.wallet_data.get('created_at', 0)
+        if created_at:
+            import time
+            console.print(f"[cyan]Created:[/cyan] {time.ctime(created_at)}")
+
+        # Transaction count
+        transactions = wallet_instance.get_transaction_history()
+        console.print(f"[cyan]Transactions:[/cyan] {len(transactions)}")
+
+        # File locations
+        wallet_file = wallet_instance.wallet_file
+        console.print(f"[cyan]Wallet File:[/cyan] {wallet_file}")
+        console.print(f"[cyan]Key File:[/cyan] {key_file}")
+
+        console.print()
+        console.print("[green]💡 Wallet Commands:[/green]")
+        console.print("  Backup (with private key): pisecure backup-wallet /path/to/backup.json --include-private-key")
+        console.print("  Restore: pisecure restore-wallet /path/to/backup.json")
+        console.print("  Export metadata only: pisecure export-wallet /path/to/export.json")
+
+    except Exception as e:
+        console.print(f"[red]❌ Wallet info error: {e}[/red]")
 
 
 def main():
