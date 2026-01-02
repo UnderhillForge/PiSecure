@@ -631,18 +631,53 @@ WALLET_TEMPLATE = """
 
             <!-- Blockchain Explorer -->
             <div class="card" id="blockchain">
-                <h2>⛓️ Blockchain Status</h2>
+                <h2>⛓️ Blockchain Explorer</h2>
+
+                <!-- Quick Stats -->
                 <div class="blockchain-info">
-                    <div><strong>Blocks:</strong> <span>{{ chain_info.blocks }}</span></div>
-                    <div><strong>Pending TX:</strong> <span>{{ chain_info.pending_transactions }}</span></div>
-                    <div><strong>Difficulty:</strong> <span>{{ chain_info.difficulty }}</span></div>
-                    <div><strong>Chain Valid:</strong> <span>{{ '✅ Yes' if chain_info.is_valid else '❌ No' }}</span></div>
-                    <div><strong>Network Health:</strong> <span>{{ chain_info.network_health }}</span></div>
+                    <div><strong>Blocks:</strong> <span id="total-blocks">{{ chain_info.blocks }}</span></div>
+                    <div><strong>Pending TX:</strong> <span id="pending-tx">{{ chain_info.pending_transactions }}</span></div>
+                    <div><strong>Difficulty:</strong> <span id="difficulty">{{ chain_info.difficulty }}</span></div>
+                    <div><strong>Chain Valid:</strong> <span id="chain-valid">{{ '✅ Yes' if chain_info.is_valid else '❌ No' }}</span></div>
+                    <div><strong>Network Health:</strong> <span id="network-health">{{ chain_info.network_health }}</span></div>
                 </div>
-                <p style="font-size: 0.9rem; color: #7f8c8d; margin-top: 10px;">
-                    The blockchain automatically mines pending transactions.
-                    New blocks appear here as they're discovered.
-                </p>
+
+                <!-- Search -->
+                <div class="form-group" style="margin: 15px 0;">
+                    <label for="explorer-search">Search Blocks/TX:</label>
+                    <input type="text" id="explorer-search" placeholder="Block #, TX hash, or address..." style="margin-bottom: 5px;">
+                    <button type="button" class="btn" onclick="searchBlockchain()" style="width: auto; padding: 8px 16px;">Search</button>
+                </div>
+
+                <!-- Recent Blocks -->
+                <h3 style="margin: 20px 0 10px 0; color: #2c3e50;">📦 Recent Blocks</h3>
+                <div id="recent-blocks" class="wallet-list">
+                    <!-- Blocks will be loaded here -->
+                </div>
+
+                <!-- Recent Transactions -->
+                <h3 style="margin: 20px 0 10px 0; color: #2c3e50;">💸 Recent Transactions</h3>
+                <div id="recent-transactions" class="wallet-list">
+                    <!-- Transactions will be loaded here -->
+                </div>
+
+                <!-- Block Details Modal (hidden by default) -->
+                <div id="block-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; padding: 20px; box-sizing: border-box;">
+                    <div style="background: white; border-radius: 15px; padding: 20px; max-width: 800px; margin: 0 auto; max-height: 80vh; overflow-y: auto;">
+                        <h2 style="margin-bottom: 20px;">📦 Block Details</h2>
+                        <div id="block-details"></div>
+                        <button class="btn" onclick="closeModal()" style="margin-top: 20px;">Close</button>
+                    </div>
+                </div>
+
+                <!-- Transaction Details Modal -->
+                <div id="tx-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; padding: 20px; box-sizing: border-box;">
+                    <div style="background: white; border-radius: 15px; padding: 20px; max-width: 800px; margin: 0 auto; max-height: 80vh; overflow-y: auto;">
+                        <h2 style="margin-bottom: 20px;">💸 Transaction Details</h2>
+                        <div id="tx-details"></div>
+                        <button class="btn" onclick="closeModal()" style="margin-top: 20px;">Close</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -785,6 +820,15 @@ WALLET_TEMPLATE = """
             }
         });
 
+        // Load blockchain explorer data on page load
+        loadBlockchainExplorer();
+
+        // Auto-refresh blockchain stats every 30 seconds
+        setInterval(async function() {
+            updateBlockchainStats();
+            loadBlockchainExplorer();
+        }, 30000);
+
         // Auto-refresh wallet list every 30 seconds
         setInterval(async function() {
             try {
@@ -798,6 +842,217 @@ WALLET_TEMPLATE = """
                 console.log('Auto-refresh failed:', e);
             }
         }, 30000);
+
+        // Load blockchain explorer data
+        async function loadBlockchainExplorer() {
+            try {
+                // Load recent blocks
+                const blocksResponse = await fetch('/api/blockchain/recent-blocks');
+                const blocksData = await blocksResponse.json();
+
+                // Update stats
+                document.getElementById('total-blocks').textContent = blocksData.total_blocks;
+                document.getElementById('pending-tx').textContent = blocksData.pending_tx;
+
+                // Display recent blocks
+                const blocksContainer = document.getElementById('recent-blocks');
+                blocksContainer.innerHTML = '';
+
+                if (blocksData.blocks.length === 0) {
+                    blocksContainer.innerHTML = '<div class="wallet-item"><div class="wallet-info"><h3>No blocks yet</h3><div class="wallet-address">Blockchain initializing...</div></div></div>';
+                } else {
+                    blocksData.blocks.forEach(block => {
+                        const blockElement = document.createElement('div');
+                        blockElement.className = 'wallet-item';
+                        blockElement.onclick = () => showBlockDetails(block.index);
+                        blockElement.innerHTML = `
+                            <div class="wallet-info">
+                                <h3>Block #${block.index}</h3>
+                                <div class="wallet-address">${block.hash} • ${block.timestamp}</div>
+                            </div>
+                            <div class="wallet-balance">${block.transactions} TX • Diff ${block.difficulty}</div>
+                        `;
+                        blocksContainer.appendChild(blockElement);
+                    });
+                }
+
+                // Load recent transactions
+                const txResponse = await fetch('/api/blockchain/recent-transactions');
+                const txData = await txResponse.json();
+
+                const txContainer = document.getElementById('recent-transactions');
+                txContainer.innerHTML = '';
+
+                if (txData.transactions.length === 0) {
+                    txContainer.innerHTML = '<div class="wallet-item"><div class="wallet-info"><h3>No transactions yet</h3><div class="wallet-address">Waiting for activity...</div></div></div>';
+                } else {
+                    txData.transactions.forEach(tx => {
+                        const txElement = document.createElement('div');
+                        txElement.className = 'wallet-item';
+                        txElement.onclick = () => showTransactionDetails(tx.tx_hash);
+                        txElement.innerHTML = `
+                            <div class="wallet-info">
+                                <h3>${tx.tx_hash}</h3>
+                                <div class="wallet-address">${tx.sender} → ${tx.recipient}</div>
+                            </div>
+                            <div class="wallet-balance">${tx.amount.toFixed(2)} tokens</div>
+                        `;
+                        txContainer.appendChild(txElement);
+                    });
+                }
+
+            } catch (error) {
+                console.error('Failed to load blockchain explorer:', error);
+            }
+        }
+
+        // Update blockchain stats
+        async function updateBlockchainStats() {
+            try {
+                const response = await fetch('/api/blockchain/recent-blocks');
+                const data = await response.json();
+
+                document.getElementById('total-blocks').textContent = data.total_blocks;
+                document.getElementById('pending-tx').textContent = data.pending_tx;
+            } catch (error) {
+                console.error('Failed to update blockchain stats:', error);
+            }
+        }
+
+        // Search blockchain
+        function searchBlockchain() {
+            const query = document.getElementById('explorer-search').value.trim();
+            if (!query) return;
+
+            fetch(`/api/blockchain/search?q=${encodeURIComponent(query)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.results && data.results.length > 0) {
+                        const result = data.results[0]; // Show first result
+                        if (result.type === 'block') {
+                            showBlockDetails(result.index);
+                        } else if (result.type === 'transaction') {
+                            showTransactionDetails(result.tx_hash.replace('...', ''));
+                        }
+                    } else {
+                        alert('No results found for: ' + query);
+                    }
+                })
+                .catch(error => {
+                    console.error('Search failed:', error);
+                    alert('Search failed: ' + error.message);
+                });
+        }
+
+        // Show block details
+        function showBlockDetails(blockIndex) {
+            fetch(`/api/blockchain/block/${blockIndex}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Block not found: ' + data.error);
+                        return;
+                    }
+
+                    const detailsDiv = document.getElementById('block-details');
+                    detailsDiv.innerHTML = `
+                        <div style="margin-bottom: 20px;">
+                            <h3>Block #${data.index}</h3>
+                            <p><strong>Hash:</strong> ${data.hash}</p>
+                            <p><strong>Previous Hash:</strong> ${data.previous_hash}</p>
+                            <p><strong>Timestamp:</strong> ${data.timestamp_human}</p>
+                            <p><strong>Difficulty:</strong> ${data.difficulty}</p>
+                            <p><strong>Nonce:</strong> ${data.nonce}</p>
+                            <p><strong>Miner:</strong> ${data.miner}</p>
+                            <p><strong>Transactions:</strong> ${data.transactions_count}</p>
+                        </div>
+
+                        <h4>Transactions (${data.transactions.length})</h4>
+                        <div style="max-height: 300px; overflow-y: auto;">
+                            ${data.transactions.map(tx => `
+                                <div style="border: 1px solid #ddd; padding: 10px; margin: 5px 0; border-radius: 5px;">
+                                    <p><strong>TX Hash:</strong> ${tx.tx_hash}</p>
+                                    <p><strong>Type:</strong> ${tx.type}</p>
+                                    <p><strong>From:</strong> ${tx.sender}</p>
+                                    <p><strong>To:</strong> ${tx.recipient}</p>
+                                    <p><strong>Amount:</strong> ${tx.amount} tokens</p>
+                                    <p><strong>Time:</strong> ${tx.timestamp_human}</p>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+
+                    document.getElementById('block-modal').style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Failed to load block details:', error);
+                    alert('Failed to load block details: ' + error.message);
+                });
+        }
+
+        // Show transaction details
+        function showTransactionDetails(txHash) {
+            fetch(`/api/blockchain/transaction/${txHash}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Transaction not found: ' + data.error);
+                        return;
+                    }
+
+                    const detailsDiv = document.getElementById('tx-details');
+                    detailsDiv.innerHTML = `
+                        <div style="margin-bottom: 20px;">
+                            <h3>Transaction Details</h3>
+                            <p><strong>TX Hash:</strong> ${data.tx_hash}</p>
+                            <p><strong>Block:</strong> #${data.block_index}</p>
+                            <p><strong>Type:</strong> ${data.type}</p>
+                            <p><strong>From:</strong> ${data.sender_address}</p>
+                            <p><strong>To:</strong> ${data.recipient_address}</p>
+                            <p><strong>Amount:</strong> ${data.amount} tokens</p>
+                            <p><strong>Timestamp:</strong> ${data.timestamp_human}</p>
+                            <p><strong>Fee:</strong> ${data.fee} tokens</p>
+                            ${data.memo ? `<p><strong>Memo:</strong> ${data.memo}</p>` : ''}
+                        </div>
+
+                        ${data.type === 'batch_transfer' ? `
+                            <h4>Batch Transfers (${data.transfer_count})</h4>
+                            <div style="max-height: 200px; overflow-y: auto;">
+                                ${data.transfers.map(transfer => `
+                                    <div style="border: 1px solid #ddd; padding: 8px; margin: 3px 0; border-radius: 3px;">
+                                        <strong>${transfer.recipient.slice(0, 20)}...</strong> - ${transfer.amount} tokens
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <p><strong>Total Amount:</strong> ${data.total_amount} tokens</p>
+                        ` : ''}
+
+                        <h4>Signature</h4>
+                        <div style="font-family: monospace; word-break: break-all; background: #f8f9fa; padding: 10px; border-radius: 5px;">
+                            ${data.signature}
+                        </div>
+                    `;
+
+                    document.getElementById('tx-modal').style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Failed to load transaction details:', error);
+                    alert('Failed to load transaction details: ' + error.message);
+                });
+        }
+
+        // Close modal
+        function closeModal() {
+            document.getElementById('block-modal').style.display = 'none';
+            document.getElementById('tx-modal').style.display = 'none';
+        }
+
+        // Allow Enter key in search
+        document.getElementById('explorer-search').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                searchBlockchain();
+            }
+        });
     </script>
 </body>
 </html>
@@ -1205,6 +1460,206 @@ def restore_wallet():
 
     except Exception as e:
         return {'success': False, 'error': str(e)}, 500
+
+@app.route('/api/blockchain/recent-blocks')
+def get_recent_blocks():
+    """Get recent blocks for blockchain explorer"""
+    try:
+        from pisecure.core.blockchain import SignChain
+
+        blockchain = SignChain()
+        chain_info = blockchain.get_chain_info()
+
+        # Get recent blocks (last 10)
+        blocks = []
+        if hasattr(blockchain, 'chain') and blockchain.chain:
+            for block in blockchain.chain[-10:]:
+                blocks.append({
+                    'index': block.index,
+                    'hash': getattr(block, 'hash', 'unknown')[:16] + '...',
+                    'timestamp': time.ctime(block.timestamp),
+                    'transactions': len(block.transactions),
+                    'difficulty': getattr(block, 'difficulty', 4),
+                    'miner': getattr(block, 'miner', 'unknown')[:16] + '...'
+                })
+
+        return {
+            'blocks': blocks,
+            'total_blocks': chain_info.get('blocks', 0),
+            'pending_tx': chain_info.get('pending_transactions', 0)
+        }
+
+    except Exception as e:
+        return {'error': str(e), 'blocks': [], 'total_blocks': 0, 'pending_tx': 0}, 500
+
+@app.route('/api/blockchain/recent-transactions')
+def get_recent_transactions():
+    """Get recent transactions for blockchain explorer"""
+    try:
+        from pisecure.core.blockchain import SignChain
+
+        blockchain = SignChain()
+
+        # Get recent transactions from recent blocks
+        transactions = []
+        if hasattr(blockchain, 'chain') and blockchain.chain:
+            for block in blockchain.chain[-5:]:  # Last 5 blocks
+                for tx in block.transactions[-3:]:  # Last 3 tx per block
+                    transactions.append({
+                        'tx_hash': getattr(tx, 'tx_hash', 'unknown')[:16] + '...',
+                        'type': tx.get('type', 'unknown'),
+                        'timestamp': time.ctime(tx.get('timestamp', time.time())),
+                        'sender': tx.get('sender_address', 'unknown')[:16] + '...',
+                        'recipient': tx.get('recipient_address', 'unknown')[:16] + '...',
+                        'amount': tx.get('amount', 0),
+                        'block_index': block.index
+                    })
+
+        # Limit to last 15 transactions
+        transactions = transactions[-15:]
+
+        return {'transactions': transactions}
+
+    except Exception as e:
+        return {'error': str(e), 'transactions': []}, 500
+
+@app.route('/api/blockchain/search')
+def search_blockchain():
+    """Search blockchain for blocks or transactions"""
+    try:
+        from pisecure.core.blockchain import SignChain
+
+        query = request.args.get('q', '').strip()
+        if not query:
+            return {'results': []}
+
+        blockchain = SignChain()
+        results = []
+
+        # Search blocks by index
+        try:
+            block_index = int(query)
+            if hasattr(blockchain, 'chain') and 0 <= block_index < len(blockchain.chain):
+                block = blockchain.chain[block_index]
+                results.append({
+                    'type': 'block',
+                    'index': block.index,
+                    'hash': getattr(block, 'hash', 'unknown')[:16] + '...',
+                    'timestamp': time.ctime(block.timestamp),
+                    'transactions': len(block.transactions),
+                    'difficulty': getattr(block, 'difficulty', 4)
+                })
+        except ValueError:
+            pass
+
+        # Search transactions by hash
+        if hasattr(blockchain, 'chain'):
+            for block in blockchain.chain[-20:]:  # Search last 20 blocks
+                for tx in block.transactions:
+                    tx_hash = getattr(tx, 'tx_hash', '')
+                    if query.lower() in tx_hash.lower():
+                        results.append({
+                            'type': 'transaction',
+                            'tx_hash': tx_hash[:16] + '...',
+                            'block_index': block.index,
+                            'type': tx.get('type', 'unknown'),
+                            'amount': tx.get('amount', 0),
+                            'sender': tx.get('sender_address', 'unknown')[:16] + '...',
+                            'recipient': tx.get('recipient_address', 'unknown')[:16] + '...'
+                        })
+
+        return {'results': results[:10]}  # Limit to 10 results
+
+    except Exception as e:
+        return {'error': str(e), 'results': []}, 500
+
+@app.route('/api/blockchain/block/<int:block_index>')
+def get_block_details(block_index):
+    """Get detailed information about a specific block"""
+    try:
+        from pisecure.core.blockchain import SignChain
+
+        blockchain = SignChain()
+
+        if not hasattr(blockchain, 'chain') or block_index >= len(blockchain.chain):
+            return {'error': 'Block not found'}, 404
+
+        block = blockchain.chain[block_index]
+
+        # Get block details
+        block_details = {
+            'index': block.index,
+            'hash': getattr(block, 'hash', 'unknown'),
+            'previous_hash': getattr(block, 'previous_hash', 'unknown'),
+            'timestamp': block.timestamp,
+            'timestamp_human': time.ctime(block.timestamp),
+            'difficulty': getattr(block, 'difficulty', 4),
+            'nonce': getattr(block, 'nonce', 0),
+            'miner': getattr(block, 'miner', 'unknown'),
+            'transactions_count': len(block.transactions),
+            'transactions': []
+        }
+
+        # Add transaction details
+        for tx in block.transactions:
+            tx_details = {
+                'tx_hash': getattr(tx, 'tx_hash', 'unknown'),
+                'type': tx.get('type', 'unknown'),
+                'sender': tx.get('sender_address', 'unknown'),
+                'recipient': tx.get('recipient_address', 'unknown'),
+                'amount': tx.get('amount', 0),
+                'timestamp': tx.get('timestamp', time.time()),
+                'timestamp_human': time.ctime(tx.get('timestamp', time.time())),
+                'signature': tx.get('signature', 'unknown')[:32] + '...' if tx.get('signature') else 'none'
+            }
+            block_details['transactions'].append(tx_details)
+
+        return block_details
+
+    except Exception as e:
+        return {'error': str(e)}, 500
+
+@app.route('/api/blockchain/transaction/<tx_hash>')
+def get_transaction_details(tx_hash):
+    """Get detailed information about a specific transaction"""
+    try:
+        from pisecure.core.blockchain import SignChain
+
+        blockchain = SignChain()
+
+        # Search for transaction in recent blocks
+        if hasattr(blockchain, 'chain'):
+            for block in blockchain.chain[-50:]:  # Search last 50 blocks
+                for tx in block.transactions:
+                    if getattr(tx, 'tx_hash', '').startswith(tx_hash):
+                        tx_details = {
+                            'tx_hash': getattr(tx, 'tx_hash', 'unknown'),
+                            'block_index': block.index,
+                            'block_hash': getattr(block, 'hash', 'unknown'),
+                            'type': tx.get('type', 'unknown'),
+                            'sender_address': tx.get('sender_address', 'unknown'),
+                            'recipient_address': tx.get('recipient_address', 'unknown'),
+                            'amount': tx.get('amount', 0),
+                            'timestamp': tx.get('timestamp', time.time()),
+                            'timestamp_human': time.ctime(tx.get('timestamp', time.time())),
+                            'signature': tx.get('signature', 'unknown'),
+                            'nonce': tx.get('nonce', 'unknown'),
+                            'memo': tx.get('memo', ''),
+                            'fee': tx.get('fee', 0)
+                        }
+
+                        # Add batch transfer details if applicable
+                        if tx.get('type') == 'batch_transfer':
+                            tx_details['transfers'] = tx.get('transfers', [])
+                            tx_details['total_amount'] = tx.get('total_amount', 0)
+                            tx_details['transfer_count'] = tx.get('transfer_count', 0)
+
+                        return tx_details
+
+        return {'error': 'Transaction not found'}, 404
+
+    except Exception as e:
+        return {'error': str(e)}, 500
 
 @app.route('/api/health')
 def health_check():
