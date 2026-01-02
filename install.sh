@@ -329,27 +329,19 @@ EOF
     log_success "Nginx configured"
 }
 
-# Interactive wallet setup
+# Automated wallet setup
 setup_wallet() {
-    log_info "Setting up initial wallet..."
+    log_info "Creating default mining wallet..."
 
-    echo
-    echo "========================================"
-    echo "    PiSecure Wallet Setup"
-    echo "========================================"
-    echo
+    # Generate unique wallet name based on Pi serial
+    PI_SERIAL=$(grep "Serial" /proc/cpuinfo | awk '{print $3}' | tr '[:upper:]' '[:lower:]')
+    WALLET_NAME="node-${PI_SERIAL: -6}"
+    WALLET_DISPLAY_NAME="PiSecure Node Wallet"
 
-    read -p "Enter wallet name (default: default): " WALLET_NAME
-    WALLET_NAME=${WALLET_NAME:-default}
-
-    read -p "Enter wallet display name: " WALLET_DISPLAY_NAME
-    WALLET_DISPLAY_NAME=${WALLET_DISPLAY_NAME:-"PiSecure Node Wallet"}
-
-    echo
     log_info "Creating wallet: $WALLET_NAME"
 
     # Create wallet as service user
-    sudo -u "$SERVICE_USER" bash -c "
+    WALLET_RESULT=$(sudo -u "$SERVICE_USER" bash -c "
         source $INSTALL_DIR/venv/bin/activate
         cd $INSTALL_DIR
         python -c \"
@@ -357,18 +349,42 @@ from pisecure.core.wallet import SignWallet
 wallet = SignWallet()
 result = wallet.create_wallet('$WALLET_NAME', '$WALLET_DISPLAY_NAME')
 if result['success']:
-    print('✅ Wallet created successfully!')
-    print(f'   Address: {result[\"address\"]}')
+    print(f'SUCCESS:{result[\"address\"]}')
 else:
-    print(f'❌ Wallet creation failed: {result.get(\"error\")}')
+    print(f'FAILED:{result.get(\"error\", \"Unknown error\")}')
 \"
-    "
+    ")
 
-    # Save wallet name to config
-    sudo jq --arg wallet "$WALLET_NAME" '.mining.wallet = $wallet' "$CONFIG_DIR/config.json" > /tmp/config.json
-    sudo mv /tmp/config.json "$CONFIG_DIR/config.json"
+    if [[ $WALLET_RESULT == SUCCESS:* ]]; then
+        WALLET_ADDRESS=$(echo "$WALLET_RESULT" | cut -d: -f2)
+        log_success "Wallet created: $WALLET_NAME ($WALLET_ADDRESS)"
+
+        # Save wallet name to config
+        sudo jq --arg wallet "$WALLET_NAME" '.mining.wallet = $wallet' "$CONFIG_DIR/config.json" > /tmp/config.json
+        sudo mv /tmp/config.json "$CONFIG_DIR/config.json"
+    else
+        ERROR_MSG=$(echo "$WALLET_RESULT" | cut -d: -f2)
+        log_error "Wallet creation failed: $ERROR_MSG"
+        exit 1
+    fi
 
     log_success "Wallet setup complete"
+}
+
+# Install system-wide command
+install_command() {
+    log_info "Installing system-wide pisecure command..."
+
+    # Copy pisecure.sh to /usr/local/bin/pisecure
+    sudo cp "$INSTALL_DIR/pisecure.sh" /usr/local/bin/pisecure
+    sudo chmod +x /usr/local/bin/pisecure
+
+    # Test the command
+    if command -v pisecure &> /dev/null; then
+        log_success "System-wide command installed: pisecure"
+    else
+        log_warning "System-wide command installation may require logout/login"
+    fi
 }
 
 # Start services
@@ -482,6 +498,7 @@ main() {
     create_services
     setup_nginx
     setup_wallet
+    install_command
     start_services
     setup_updates
 
