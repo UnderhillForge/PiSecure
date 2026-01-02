@@ -38,7 +38,7 @@ from ..network.discovery import PeerDiscovery
 from ..updates.auth import UpdateAuthority
 from .economics import (
     TokenEconomics, DeveloperTrust, TrustType, TrustVisibility,
-    token_economics, fee_distributor, foundation_trust
+    token_economics, fee_distributor, foundation_trust, get_foundation_trust
 )
 
 # Configure logging
@@ -86,6 +86,10 @@ class BlockchainAPI:
             default_limits=[rate_limit]
         )
 
+        # API metadata (must be set before routes)
+        self.api_version = "v1"
+        self.start_time = time.time()
+
         # Initialize PiSecure components
         self.blockchain = blockchain or SignChain()
         self.wallet = SignWallet()
@@ -94,10 +98,6 @@ class BlockchainAPI:
 
         # Setup routes
         self._setup_routes()
-
-        # API metadata
-        self.api_version = "v1"
-        self.start_time = time.time()
 
     def _setup_routes(self):
         """Setup all API routes."""
