@@ -31,6 +31,13 @@ import random
 
 from .discovery import PeerDiscovery
 
+try:
+    # Try relative imports first (for package installation)
+    from ..core.nat_traversal import node_discovery
+except ImportError:
+    # Fall back to absolute imports (for direct execution)
+    from core.nat_traversal import node_discovery
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
