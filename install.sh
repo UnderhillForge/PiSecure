@@ -333,12 +333,25 @@ EOF
 setup_wallet() {
     log_info "Creating default mining wallet..."
 
-    # Generate unique wallet name based on Pi serial
-    PI_SERIAL=$(grep "Serial" /proc/cpuinfo | awk '{print $3}' | tr '[:upper:]' '[:lower:]')
-    WALLET_NAME="node-${PI_SERIAL: -6}"
-    WALLET_DISPLAY_NAME="PiSecure Node Wallet"
+    # Generate unique wallet name based on system identifier
+    if [[ -f /proc/cpuinfo ]] && grep -q "Serial" /proc/cpuinfo; then
+        # Raspberry Pi - use CPU serial
+        SYSTEM_ID=$(grep "Serial" /proc/cpuinfo | awk '{print $3}' | tr '[:upper:]' '[:lower:]')
+        WALLET_NAME="node-${SYSTEM_ID: -6}"
+        WALLET_DISPLAY_NAME="PiSecure Node Wallet"
+    else
+        # Non-Pi system - use hostname or random identifier
+        HOSTNAME_PART=$(hostname | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g' | cut -c1-6)
+        if [[ -z "$HOSTNAME_PART" ]]; then
+            # Fallback to random if hostname is empty
+            RANDOM_ID=$(od -An -N3 -tu1 /dev/urandom | tr -d ' ')
+            HOSTNAME_PART=$(printf "%06d" $((RANDOM_ID % 1000000)))
+        fi
+        WALLET_NAME="host-${HOSTNAME_PART}"
+        WALLET_DISPLAY_NAME="PiSecure Host Wallet"
+    fi
 
-    log_info "Creating wallet: $WALLET_NAME"
+    log_info "Creating wallet: $WALLET_NAME (based on system identifier)"
 
     # Create wallet as service user
     WALLET_RESULT=$(sudo -u "$SERVICE_USER" bash -c "
