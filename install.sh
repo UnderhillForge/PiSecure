@@ -241,13 +241,13 @@ EOF
     log_success "PiSecure installed successfully"
 }
 
-# Create systemd service
+# Create systemd services
 create_service() {
     local install_dir="${1:-/opt/pisecure}"
 
-    log_info "Creating systemd service..."
+    log_info "Creating systemd services..."
 
-    # Create service file
+    # Create PiSecure blockchain monitoring service
     sudo tee /etc/systemd/system/pisecure.service > /dev/null << EOF
 [Unit]
 Description=PiSecure Blockchain Node
@@ -268,10 +268,38 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+    # Create PiSecure web dashboard service
+    sudo tee /etc/systemd/system/pisecure-dashboard.service > /dev/null << EOF
+[Unit]
+Description=PiSecure Web Dashboard
+After=network.target pisecure.service
+Wants=network.target
+Requires=pisecure.service
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$install_dir/repo/dashboard/web
+ExecStart=$install_dir/venv/bin/python3 $install_dir/repo/dashboard/web/minimal_dashboard.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONPATH=$install_dir/repo:$install_dir/venv/lib/python3.*/site-packages
+Environment=FLASK_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Enable services to start on boot
+    sudo systemctl enable pisecure
+    sudo systemctl enable pisecure-dashboard
+
     # Reload systemd
     sudo systemctl daemon-reload
 
-    log_success "Systemd service created"
+    log_success "Systemd services created and enabled (blockchain monitoring + web dashboard)"
 }
 
 # Create desktop shortcuts (for Pi with desktop)
@@ -344,17 +372,21 @@ main() {
     log_success "PiSecure installation completed!"
     echo ""
     echo "📍 Installation directory: $install_dir"
-    echo "🚀 Launch PiSecure: $install_dir/launch_pisecure.py"
-    echo "🌐 Web Dashboard: http://localhost:5000"
+    echo "🚀 Launch PiSecure CLI: $install_dir/launch_pisecure.py"
+    echo "🌐 Web Dashboard: http://localhost:5000 (auto-starts with service)"
     echo ""
     echo "Commands:"
     echo "  $install_dir/launch_pisecure.py --help    # Show CLI help"
     echo "  $install_dir/launch_pisecure.py status    # Show blockchain status"
     echo "  $install_dir/launch_pisecure.py verify-hardware  # Verify Pi hardware"
     echo ""
-    echo "Services:"
-    echo "  sudo systemctl start pisecure     # Start PiSecure service"
-    echo "  sudo systemctl enable pisecure    # Enable auto-start"
+    echo "Services (auto-enabled on boot):"
+    echo "  sudo systemctl status pisecure              # Blockchain monitoring"
+    echo "  sudo systemctl status pisecure-dashboard    # Web dashboard"
+    echo "  sudo systemctl restart pisecure             # Restart blockchain service"
+    echo "  sudo systemctl restart pisecure-dashboard   # Restart dashboard service"
+    echo ""
+    echo "Both services are enabled and will start automatically on boot!"
     echo ""
     log_warning "Important: Log out and back in for group changes to take effect"
     echo "========================================"
