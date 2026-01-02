@@ -119,7 +119,8 @@ install_pisecure() {
     # Install PiSecure dependencies
     pip install flask flask-cors flask-limiter cryptography requests psutil
 
-    # Install PiSecure
+    # Install PiSecure (must be in the correct directory)
+    cd "$INSTALL_DIR"
     pip install -e .
 
     # Verify installation
