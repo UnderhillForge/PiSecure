@@ -13,9 +13,14 @@ Advanced tokenomics system implementing:
 import time
 import json
 import hashlib
+import os
+from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.exceptions import InvalidSignature
 
 
 class TrustType(Enum):
@@ -280,11 +285,14 @@ class DeveloperTrust:
 
 
 class FoundationTrust:
-    """314ST Foundation community trust"""
+    """314ST Foundation community trust - secured by genesis private key"""
 
     def __init__(self):
         self.address = 'foundation_314st'
         self.balance = 0
+        self.genesis_private_key = self._load_genesis_private_key()
+        self.genesis_public_key = self._load_genesis_public_key()
+
         self.allocation_rules = {
             'development': 0.40,      # 40% Core development
             'grants': 0.30,          # 30% Developer grants
@@ -294,6 +302,36 @@ class FoundationTrust:
         self.funds_allocated = {category: 0 for category in self.allocation_rules}
         self.active_grants: List[Dict[str, Any]] = []
         self.governance_proposals: List[Dict[str, Any]] = []
+        self.transaction_log: List[Dict[str, Any]] = []
+
+    def _load_genesis_private_key(self):
+        """Load genesis private key from file"""
+        try:
+            priv_key_path = Path(__file__).parent.parent / 'updates' / 'genesis_auth_priv.key'
+            with open(priv_key_path, 'rb') as f:
+                private_key_data = f.read()
+
+            # Try to load as PEM format
+            private_key = serialization.load_pem_private_key(
+                private_key_data,
+                password=None
+            )
+            return private_key
+        except Exception as e:
+            raise RuntimeError(f"Failed to load genesis private key: {e}")
+
+    def _load_genesis_public_key(self):
+        """Load genesis public key from file"""
+        try:
+            pub_key_path = Path(__file__).parent.parent / 'updates' / 'genesis_auth_pub.key'
+            with open(pub_key_path, 'rb') as f:
+                public_key_data = f.read()
+
+            # Try to load as PEM format
+            public_key = serialization.load_pem_public_key(public_key_data)
+            return public_key
+        except Exception as e:
+            raise RuntimeError(f"Failed to load genesis public key: {e}")
 
     def receive_contribution(self, amount: float, source: str):
         """Receive fee contribution"""
@@ -351,6 +389,176 @@ class FoundationTrust:
                     return True
         return False
 
+    def sign_foundation_transaction(self, transaction_data: Dict[str, Any]) -> str:
+        """Sign foundation transaction with genesis private key"""
+        # Create canonical transaction representation
+        tx_string = json.dumps(transaction_data, sort_keys=True, separators=(',', ':'))
+
+        # Sign with genesis private key
+        signature = self.genesis_private_key.sign(
+            tx_string.encode(),
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+
+        # Return hex-encoded signature
+        return signature.hex()
+
+    def verify_foundation_transaction(self, transaction_data: Dict[str, Any], signature: str) -> bool:
+        """Verify foundation transaction signature with genesis public key"""
+        try:
+            # Create canonical transaction representation
+            tx_string = json.dumps(transaction_data, sort_keys=True, separators=(',', ':'))
+
+            # Decode signature
+            signature_bytes = bytes.fromhex(signature)
+
+            # Verify with genesis public key
+            self.genesis_public_key.verify(
+                signature_bytes,
+                tx_string.encode(),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            return True
+        except InvalidSignature:
+            return False
+        except Exception:
+            return False
+
+    def execute_foundation_transaction(self, transaction_data: Dict[str, Any], signature: str) -> Dict[str, Any]:
+        """Execute a foundation transaction if signature is valid"""
+        # Verify signature first
+        if not self.verify_foundation_transaction(transaction_data, signature):
+            return {'success': False, 'error': 'Invalid genesis signature'}
+
+        tx_type = transaction_data.get('type')
+        amount = transaction_data.get('amount', 0)
+        recipient = transaction_data.get('recipient')
+        purpose = transaction_data.get('purpose', 'unspecified')
+
+        # Execute based on transaction type
+        if tx_type == 'fund_allocation':
+            return self._execute_allocation_transaction(amount, recipient, purpose)
+        elif tx_type == 'grant_payment':
+            return self._execute_grant_transaction(amount, recipient, purpose)
+        elif tx_type == 'reserve_transfer':
+            return self._execute_reserve_transaction(amount, recipient, purpose)
+        else:
+            return {'success': False, 'error': 'Unknown transaction type'}
+
+    def _execute_allocation_transaction(self, amount: float, category: str, purpose: str) -> Dict[str, Any]:
+        """Execute fund allocation to development categories"""
+        if amount > self.balance:
+            return {'success': False, 'error': 'Insufficient foundation balance'}
+
+        if category not in self.allocation_rules:
+            return {'success': False, 'error': 'Invalid allocation category'}
+
+        # Execute allocation
+        self.funds_allocated[category] += amount
+        self.balance -= amount
+
+        # Log transaction
+        self._log_transaction({
+            'type': 'allocation',
+            'category': category,
+            'amount': amount,
+            'purpose': purpose,
+            'timestamp': time.time()
+        })
+
+        return {
+            'success': True,
+            'transaction_type': 'allocation',
+            'category': category,
+            'amount': amount,
+            'new_balance': self.balance
+        }
+
+    def _execute_grant_transaction(self, amount: float, grant_id: str, purpose: str) -> Dict[str, Any]:
+        """Execute grant payment"""
+        if amount > self.balance:
+            return {'success': False, 'error': 'Insufficient foundation balance'}
+
+        # Find grant
+        grant = None
+        for g in self.active_grants:
+            if g['grant_id'] == grant_id:
+                grant = g
+                break
+
+        if not grant:
+            return {'success': False, 'error': 'Grant not found'}
+
+        if grant['status'] != 'approved':
+            return {'success': False, 'error': 'Grant not approved'}
+
+        # Execute payment (simplified - would transfer to grant recipient)
+        self.balance -= amount
+
+        # Log transaction
+        self._log_transaction({
+            'type': 'grant_payment',
+            'grant_id': grant_id,
+            'amount': amount,
+            'recipient': grant['developer'],
+            'purpose': purpose,
+            'timestamp': time.time()
+        })
+
+        return {
+            'success': True,
+            'transaction_type': 'grant_payment',
+            'grant_id': grant_id,
+            'amount': amount,
+            'recipient': grant['developer'],
+            'new_balance': self.balance
+        }
+
+    def _execute_reserve_transaction(self, amount: float, purpose: str, details: str) -> Dict[str, Any]:
+        """Execute reserve fund transaction"""
+        if amount > self.balance:
+            return {'success': False, 'error': 'Insufficient foundation balance'}
+
+        # Execute transfer to reserve
+        self.funds_allocated['reserve'] += amount
+        self.balance -= amount
+
+        # Log transaction
+        self._log_transaction({
+            'type': 'reserve_transfer',
+            'amount': amount,
+            'purpose': purpose,
+            'details': details,
+            'timestamp': time.time()
+        })
+
+        return {
+            'success': True,
+            'transaction_type': 'reserve_transfer',
+            'amount': amount,
+            'new_balance': self.balance
+        }
+
+    def _log_transaction(self, transaction: Dict[str, Any]):
+        """Log foundation transaction for transparency"""
+        self.transaction_log.append(transaction)
+
+        # Keep only last 1000 transactions to prevent unbounded growth
+        if len(self.transaction_log) > 1000:
+            self.transaction_log = self.transaction_log[-1000:]
+
+    def get_transaction_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get foundation transaction history"""
+        return self.transaction_log[-limit:] if limit > 0 else self.transaction_log
+
     def get_status(self) -> Dict[str, Any]:
         """Get foundation status"""
         return {
@@ -358,7 +566,9 @@ class FoundationTrust:
             'balance': self.balance,
             'funds_allocated': self.funds_allocated,
             'active_grants': len(self.active_grants),
-            'allocation_rules': self.allocation_rules
+            'allocation_rules': self.allocation_rules,
+            'total_transactions': len(self.transaction_log),
+            'genesis_key_loaded': self.genesis_private_key is not None
         }
 
 

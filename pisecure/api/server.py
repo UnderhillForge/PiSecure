@@ -512,6 +512,94 @@ class BlockchainAPI:
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
 
+        # === FOUNDATION TRANSACTION ENDPOINTS (GENESIS KEY REQUIRED) ===
+
+        # Sign foundation transaction
+        @self.app.route(f'/api/{self.api_version}/foundation/sign-transaction', methods=['POST'])
+        def sign_foundation_transaction():
+            try:
+                tx_data = request.get_json()
+
+                if not tx_data:
+                    return jsonify({'error': 'No transaction data provided'}), 400
+
+                # Sign with genesis private key
+                signature = foundation_trust.sign_foundation_transaction(tx_data)
+
+                return jsonify({
+                    'success': True,
+                    'transaction': tx_data,
+                    'signature': signature,
+                    'signed_by': 'genesis_key'
+                })
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Execute signed foundation transaction
+        @self.app.route(f'/api/{self.api_version}/foundation/execute-transaction', methods=['POST'])
+        def execute_foundation_transaction():
+            try:
+                signed_tx_data = request.get_json()
+
+                if not signed_tx_data:
+                    return jsonify({'error': 'No signed transaction data provided'}), 400
+
+                transaction = signed_tx_data.get('transaction')
+                signature = signed_tx_data.get('signature')
+
+                if not transaction or not signature:
+                    return jsonify({'error': 'Transaction and signature required'}), 400
+
+                # Execute transaction if signature is valid
+                result = foundation_trust.execute_foundation_transaction(transaction, signature)
+
+                return jsonify(result)
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Get foundation transaction history
+        @self.app.route(f'/api/{self.api_version}/foundation/transactions', methods=['GET'])
+        def get_foundation_transactions():
+            try:
+                limit = min(int(request.args.get('limit', 50)), 200)
+                transactions = foundation_trust.get_transaction_history(limit)
+
+                return jsonify({
+                    'transactions': transactions,
+                    'total_count': len(foundation_trust.transaction_log),
+                    'limit': limit
+                })
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Verify foundation transaction signature
+        @self.app.route(f'/api/{self.api_version}/foundation/verify-transaction', methods=['POST'])
+        def verify_foundation_transaction():
+            try:
+                verify_data = request.get_json()
+
+                if not verify_data:
+                    return jsonify({'error': 'No verification data provided'}), 400
+
+                transaction = verify_data.get('transaction')
+                signature = verify_data.get('signature')
+
+                if not transaction or not signature:
+                    return jsonify({'error': 'Transaction and signature required'}), 400
+
+                is_valid = foundation_trust.verify_foundation_transaction(transaction, signature)
+
+                return jsonify({
+                    'is_valid': is_valid,
+                    'verified_by': 'genesis_public_key' if is_valid else None
+                })
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
         # API documentation
         @self.app.route(f'/api/{self.api_version}/docs', methods=['GET'])
         def api_docs():
