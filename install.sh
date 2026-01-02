@@ -324,6 +324,36 @@ EOF
     log_success "Nginx configured"
 }
 
+# Setup automatic node discovery
+setup_node_discovery() {
+    log_info "Setting up automatic node discovery..."
+
+    # Install NAT traversal dependencies
+    sudo apt install -y miniupnpc
+
+    # Run node discovery setup
+    source "$VENV_DIR/bin/activate"
+
+    # Test and setup node discovery
+    python -c "
+from pisecure.core.nat_traversal import node_discovery
+import json
+
+print('🔍 Setting up automatic node discovery...')
+results = node_discovery.make_node_discoverable()
+
+# Save discovery results
+discovery_file = '/etc/pisecure/node_discovery.json'
+with open(discovery_file, 'w') as f:
+    json.dump(results, f, indent=2)
+
+print(f'✅ Node discovery configured: {results[\"success_count\"]} methods successful')
+print(f'📄 Discovery results saved to: {discovery_file}')
+"
+
+    log_success "Automatic node discovery configured"
+}
+
 # Automated wallet setup
 setup_wallet() {
     log_info "Creating default mining wallet..."
@@ -431,6 +461,7 @@ main() {
     create_config
     create_services
     setup_nginx
+    setup_node_discovery
     setup_wallet
     start_services
 

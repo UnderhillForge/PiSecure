@@ -1163,6 +1163,241 @@ def list_names():
 
 
 @cli.command()
+def setup_public_access():
+    """Setup automatic public access using NAT traversal, Tor, and relays"""
+    try:
+        try:
+            # Try relative import first
+            from .core.nat_traversal import node_discovery
+        except ImportError:
+            # Fall back to absolute import
+            from core.nat_traversal import node_discovery
+
+        console.print("[blue]🌐 Setting up automatic public access for your PiSecure node...[/blue]")
+        console.print("[dim]This will make your node discoverable worldwide without manual configuration[/dim]")
+        console.print()
+
+        # Run discovery setup
+        results = node_discovery.make_node_discoverable()
+
+        console.print("[green]✅ Public access setup complete![/green]")
+        console.print(f"   Node ID: {results['node_id']}")
+        console.print(f"   Methods: {', '.join(results['methods_attempted'])}")
+        console.print(f"   Success: {results['success_count']} methods working")
+        console.print()
+
+        # Show endpoints
+        if results['endpoints']:
+            console.print("[blue]🔗 Available Access Methods:[/blue]")
+            for endpoint in results['endpoints']:
+                endpoint_type = endpoint['type']
+                if endpoint_type == 'stun_direct':
+                    console.print(f"   🌐 Direct P2P: {endpoint['ip']}:{endpoint['port']} (NAT: {endpoint['nat_type']})")
+                elif endpoint_type == 'tor_onion':
+                    console.print(f"   🧅 Tor Onion: {endpoint['address']}")
+                elif endpoint_type == 'upnp':
+                    console.print(f"   📡 UPnP: {endpoint['ip']}:{endpoint['port']}")
+                elif endpoint_type == 'turn_relay':
+                    console.print(f"   🔄 TURN Relay: {endpoint['ip']}:{endpoint['port']}")
+                elif endpoint_type == 'community_relay':
+                    console.print(f"   ☁️ Community Relays: {endpoint['available_relays']} available")
+        else:
+            console.print("[yellow]⚠️ No public access methods succeeded[/yellow]")
+            console.print("[dim]Your node may still be accessible locally or via manual configuration[/dim]")
+
+        console.print()
+        console.print("[green]🎉 Your PiSecure node is now set up for worldwide access![/green]")
+        console.print("[dim]Mobile apps can now discover and connect to your node automatically[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Public access setup failed: {e}[/red]")
+
+
+@cli.command()
+def node_discovery_status():
+    """Show current node discovery and public access status"""
+    try:
+        try:
+            # Try relative import first
+            from .core.nat_traversal import node_discovery
+        except ImportError:
+            # Fall back to absolute import
+            from core.nat_traversal import node_discovery
+
+        status = node_discovery.get_discovery_status()
+
+        console.print("[blue]🔍 Node Discovery Status[/blue]")
+        console.print(f"   Node ID: {status['node_id']}")
+        console.print()
+
+        # Show endpoints
+        if status['endpoints']:
+            console.print("[green]✅ Active Endpoints:[/green]")
+            for endpoint in status['endpoints']:
+                endpoint_type = endpoint['type']
+                if endpoint_type == 'stun_direct':
+                    console.print(f"   🌐 Direct P2P: {endpoint['ip']}:{endpoint['port']}")
+                    console.print(f"      NAT Type: {endpoint.get('nat_type', 'unknown')}")
+                elif endpoint_type == 'tor_onion':
+                    console.print(f"   🧅 Tor Onion: {endpoint}")
+                elif endpoint_type == 'upnp':
+                    console.print(f"   📡 UPnP: {endpoint['ip']}:{endpoint['port']}")
+                elif endpoint_type == 'turn_relay':
+                    console.print(f"   🔄 TURN Relay: {endpoint['ip']}:{endpoint['port']}")
+        else:
+            console.print("[yellow]⚠️ No active endpoints[/yellow]")
+
+        # Show network status
+        if status['nat_info']:
+            console.print()
+            console.print("[blue]📊 NAT Information:[/blue]")
+            nat_info = status['nat_info']
+            console.print(f"   Public IP: {nat_info.get('public_ip', 'unknown')}")
+            console.print(f"   Public Port: {nat_info.get('public_port', 'unknown')}")
+            console.print(f"   NAT Type: {nat_info.get('nat_type', 'unknown')}")
+
+        if status['tor_address']:
+            console.print(f"   Tor Address: {status['tor_address']}")
+
+        console.print(f"   Community Relays: {status['relay_count']}")
+
+    except Exception as e:
+        console.print(f"[red]❌ Discovery status error: {e}[/red]")
+
+
+@cli.command()
+def test_connectivity():
+    """Test connectivity to bootstrap nodes and public endpoints"""
+    try:
+        import socket
+        import time
+
+        console.print("[blue]🔗 Testing PiSecure Network Connectivity[/blue]")
+        console.print()
+
+        # Test bootstrap nodes
+        bootstrap_nodes = [
+            ("bootstrap.pisecure.net", 3141),
+            ("stun.l.google.com", 19302),  # Test STUN
+        ]
+
+        console.print("[cyan]Testing Bootstrap Nodes:[/cyan]")
+        for host, port in bootstrap_nodes:
+            try:
+                start_time = time.time()
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                result = sock.connect_ex((host, port))
+                response_time = (time.time() - start_time) * 1000
+
+                if result == 0:
+                    console.print(f"   ✅ {host}:{port} - Reachable ({response_time:.0f}ms)")
+                else:
+                    console.print(f"   ❌ {host}:{port} - Unreachable")
+                sock.close()
+            except Exception as e:
+                console.print(f"   ❌ {host}:{port} - Error: {e}")
+
+        console.print()
+        console.print("[cyan]Local Node Status:[/cyan]")
+
+        # Test local services
+        local_services = [
+            ("localhost", 3142, "API Server"),
+            ("localhost", 5000, "Dashboard"),
+        ]
+
+        for host, port, service in local_services:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                result = sock.connect_ex((host, port))
+
+                if result == 0:
+                    console.print(f"   ✅ {service} - Running on {host}:{port}")
+                else:
+                    console.print(f"   ❌ {service} - Not accessible on {host}:{port}")
+                sock.close()
+            except Exception as e:
+                console.print(f"   ❌ {service} - Error: {e}")
+
+    except Exception as e:
+        console.print(f"[red]❌ Connectivity test error: {e}[/red]")
+
+
+@cli.command()
+def network_health():
+    """Show overall network health and connectivity statistics"""
+    try:
+        try:
+            # Try relative import first
+            from .core.blockchain import SignChain
+            from .core.nat_traversal import node_discovery
+        except ImportError:
+            # Fall back to absolute import
+            from core.blockchain import SignChain
+            from core.nat_traversal import node_discovery
+
+        blockchain = SignChain()
+        chain_info = blockchain.get_chain_info()
+
+        console.print("[blue]🌐 PiSecure Network Health Report[/blue]")
+        console.print("=" * 50)
+
+        # Blockchain health
+        console.print(f"[cyan]Blockchain Status:[/cyan]")
+        console.print(f"   Blocks: {chain_info['blocks']}")
+        console.print(f"   Difficulty: {chain_info['difficulty']}")
+        console.print(f"   Chain Valid: {'✅ Yes' if chain_info['is_valid'] else '❌ No'}")
+        console.print(f"   Pending TX: {chain_info['pending_transactions']}")
+
+        # Network health
+        health = chain_info['network_health']
+        console.print(f"   Participation: {health['participation']:.1%}")
+        console.print(f"   Avg Block Time: {health['avg_block_time']:.1f}s")
+        console.print(f"   Network Health: {health['health_score']:.1%}")
+
+        # Node discovery status
+        discovery_status = node_discovery.get_discovery_status()
+        console.print()
+        console.print(f"[cyan]Node Discovery:[/cyan]")
+        console.print(f"   Node ID: {discovery_status['node_id']}")
+        console.print(f"   Active Endpoints: {len(discovery_status['endpoints'])}")
+        console.print(f"   Community Relays: {discovery_status['relay_count']}")
+
+        # PiNS statistics
+        names_count = len(blockchain.get_registered_names())
+        console.print(f"   PiNS Names: {names_count}")
+
+        # Overall assessment
+        console.print()
+        health_score = health['health_score']
+        if health_score > 0.8:
+            assessment = "[green]Excellent - Network is healthy[/green]"
+        elif health_score > 0.6:
+            assessment = "[yellow]Good - Network is functioning[/yellow]"
+        else:
+            assessment = "[red]Needs attention - Network health is low[/red]"
+
+        console.print(f"[cyan]Overall Assessment:[/cyan] {assessment}")
+
+        # Recommendations
+        console.print()
+        console.print("[cyan]Recommendations:[/cyan]")
+        if len(discovery_status['endpoints']) == 0:
+            console.print("   • Run 'pisecure setup-public-access' to enable worldwide access")
+        if chain_info['pending_transactions'] > 10:
+            console.print("   • High pending transactions - mining may be slow")
+        if health['participation'] < 0.5:
+            console.print("   • Low network participation - consider increasing mining activity")
+        if names_count == 0:
+            console.print("   • No PiNS names registered - consider registering your first name")
+
+    except Exception as e:
+        console.print(f"[red]❌ Network health check error: {e}[/red]")
+
+
+@cli.command()
 @click.argument('wallet_name', required=False)
 def show_wallet(wallet_name):
     """Show wallet information"""
