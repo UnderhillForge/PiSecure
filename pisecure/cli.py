@@ -369,6 +369,13 @@ def check_updates(apply):
 def download_update(update_hash, apply):
     """Download specific update by hash"""
     try:
+        try:
+            # Try relative import first
+            from .updates import OTAUpdater
+        except ImportError:
+            # Fall back to absolute import
+            from updates import OTAUpdater
+
         updater = OTAUpdater()
 
         console.print(f"[blue]📥 Downloading update: {update_hash}[/blue]")
@@ -379,7 +386,7 @@ def download_update(update_hash, apply):
         result = updater.download_update(update_info)
 
         if result['success']:
-            console.print(f"[green]✅ Update downloaded successfully[/green]")
+            console.print(f"[green]✅ Update downloaded: {result['size']} bytes[/green]")
             console.print(f"📁 Local path: {result['local_path']}")
             console.print(f"📊 Size: {result['size']} bytes")
             console.print(f"🌐 Source: {result.get('source', 'unknown')}")
@@ -400,6 +407,126 @@ def download_update(update_hash, apply):
 
     except Exception as e:
         console.print(f"[red]❌ Download error: {e}[/red]")
+
+
+@cli.command()
+def list_plugins():
+    """List installed plugins"""
+    try:
+        try:
+            # Try relative import first
+            from .plugins import plugin_manager
+        except ImportError:
+            # Fall back to absolute import
+            from plugins import plugin_manager
+
+        plugins = plugin_manager.list_plugins()
+
+        if not plugins:
+            console.print("[yellow]📭 No plugins installed[/yellow]")
+            console.print("[dim]Install plugins with: pisecure install-plugin <plugin_file>[/dim]")
+            return
+
+        table = Table(title="🔌 Installed Plugins")
+        table.add_column("Name", style="cyan", no_wrap=True)
+        table.add_column("Version", style="green")
+        table.add_column("Description", style="white")
+
+        for plugin in plugins:
+            table.add_row(
+                plugin['name'],
+                plugin['version'],
+                plugin['description']
+            )
+
+        console.print(table)
+
+    except Exception as e:
+        console.print(f"[red]❌ Plugin list error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('plugin_file', type=click.Path(exists=True))
+def install_plugin(plugin_file):
+    """Install a plugin from file"""
+    try:
+        try:
+            # Try relative import first
+            from .plugins import plugin_manager
+        except ImportError:
+            # Fall back to absolute import
+            from plugins import plugin_manager
+
+        console.print(f"[blue]🔌 Installing plugin: {plugin_file}[/blue]")
+
+        if plugin_manager.load_plugin(plugin_file):
+            console.print("[green]✅ Plugin installed successfully[/green]")
+            console.print("[yellow]🔄 Restart services to activate plugin features[/yellow]")
+        else:
+            console.print("[red]❌ Plugin installation failed[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Plugin installation error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('plugin_name')
+def uninstall_plugin(plugin_name):
+    """Uninstall a plugin"""
+    try:
+        try:
+            # Try relative import first
+            from .plugins import plugin_manager
+        except ImportError:
+            # Fall back to absolute import
+            from plugins import plugin_manager
+
+        console.print(f"[blue]🔌 Uninstalling plugin: {plugin_name}[/blue]")
+
+        if plugin_manager.unload_plugin(plugin_name):
+            console.print("[green]✅ Plugin uninstalled successfully[/green]")
+            console.print("[yellow]🔄 Restart services to complete removal[/yellow]")
+        else:
+            console.print(f"[red]❌ Plugin '{plugin_name}' not found or uninstall failed[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Plugin uninstallation error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('plugin_name')
+@click.argument('description', default="")
+def create_plugin_template(plugin_name, description):
+    """Create a plugin template file"""
+    try:
+        try:
+            # Try relative import first
+            from .plugins import plugin_manager
+        except ImportError:
+            # Fall back to absolute import
+            from plugins import plugin_manager
+
+        if not description:
+            description = f"{plugin_name} plugin for PiSecure"
+
+        template = plugin_manager.create_plugin_template(plugin_name, description)
+
+        filename = f"{plugin_name.lower().replace(' ', '_')}_plugin.py"
+        filepath = f"/opt/pisecure/plugins/{filename}"
+
+        # Ensure plugins directory exists
+        import os
+        os.makedirs("/opt/pisecure/plugins", exist_ok=True)
+
+        with open(filepath, 'w') as f:
+            f.write(template)
+
+        console.print(f"[green]✅ Plugin template created: {filepath}[/green]")
+        console.print("[blue]📝 Edit the file to implement your plugin functionality[/blue]")
+        console.print(f"[dim]Install with: pisecure install-plugin {filepath}[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Template creation error: {e}[/red]")
 
 
 @cli.command()
