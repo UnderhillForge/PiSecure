@@ -530,6 +530,212 @@ def create_plugin_template(plugin_name, description):
 
 
 @cli.command()
+@click.option('--password', prompt=True, hide_input=True, confirmation_prompt=True, help='Private key password')
+def generate_signing_key(password):
+    """Generate a new update signing keypair"""
+    try:
+        try:
+            # Try relative import first
+            from .updates.auth import update_signer
+        except ImportError:
+            # Fall back to absolute import
+            from updates.auth import update_signer
+
+        console.print("[blue]🔐 Generating update signing keypair...[/blue]")
+
+        result = update_signer.generate_keypair(password=password)
+
+        if result['success']:
+            console.print("[green]✅ Signing keypair generated successfully![/green]")
+            console.print(f"   Public Key: {result['public_key'][:50]}...")
+            console.print(f"   Key Size: {result['key_size']} bits")
+            console.print(f"   Algorithm: {result['algorithm']}")
+            console.print("[yellow]⚠️ Secure the private key file - it contains your signing credentials[/yellow]")
+        else:
+            console.print(f"[red]❌ Key generation failed: {result.get('error')}[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Key generation error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('key_id')
+@click.argument('public_key_file', type=click.Path(exists=True))
+@click.option('--permissions', default='sign_updates', help='Comma-separated permissions')
+def register_update_key(key_id, public_key_file, permissions):
+    """Register an authorized update signing key"""
+    try:
+        try:
+            # Try relative import first
+            from .updates.auth import update_authority
+        except ImportError:
+            # Fall back to absolute import
+            from updates.auth import update_authority
+
+        # Read public key
+        with open(public_key_file, 'r') as f:
+            public_key_pem = f.read()
+
+        permissions_list = [p.strip() for p in permissions.split(',')]
+
+        console.print(f"[blue]📝 Registering update key: {key_id}[/blue]")
+
+        result = update_authority.register_authority_key(
+            key_id=key_id,
+            public_key_pem=public_key_pem,
+            permissions=permissions_list
+        )
+
+        if result['success']:
+            console.print("[green]✅ Update key registered successfully![/green]")
+            if result.get('tx_hash'):
+                console.print(f"   Blockchain TX: {result['tx_hash']}")
+        else:
+            console.print(f"[red]❌ Key registration failed: {result.get('error')}[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Key registration error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('key_id')
+def revoke_update_key(key_id):
+    """Revoke an authorized update signing key"""
+    try:
+        try:
+            # Try relative import first
+            from .updates.auth import update_authority
+        except ImportError:
+            # Fall back to absolute import
+            from updates.auth import update_authority
+
+        console.print(f"[blue]🚫 Revoking update key: {key_id}[/blue]")
+
+        result = update_authority.revoke_authority_key(key_id=key_id)
+
+        if result['success']:
+            console.print("[green]✅ Update key revoked successfully![/green]")
+            if result.get('tx_hash'):
+                console.print(f"   Blockchain TX: {result['tx_hash']}")
+        else:
+            console.print(f"[red]❌ Key revocation failed: {result.get('error')}[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Key revocation error: {e}[/red]")
+
+
+@cli.command()
+def list_update_keys():
+    """List authorized update signing keys"""
+    try:
+        try:
+            # Try relative import first
+            from .updates.auth import update_authority
+        except ImportError:
+            # Fall back to absolute import
+            from updates.auth import update_authority
+
+        keys_info = update_authority.list_authorized_keys()
+
+        console.print(f"[blue]🔑 Authorized Update Keys (Threshold: {keys_info['threshold']})[/blue]\n")
+
+        if keys_info['active_keys']:
+            console.print("[green]✅ Active Keys:[/green]")
+            for key_id, key_info in keys_info['active_keys'].items():
+                console.print(f"   {key_id}:")
+                console.print(f"     Added: {time.ctime(key_info.get('added_at', 0))}")
+                console.print(f"     Permissions: {', '.join(key_info.get('permissions', []))}")
+        else:
+            console.print("[yellow]⚠️ No active keys[/yellow]")
+
+        if keys_info['revoked_keys']:
+            console.print(f"\n[red]🚫 Revoked Keys: {', '.join(keys_info['revoked_keys'])}[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ List keys error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('threshold', type=int)
+def set_update_threshold(threshold):
+    """Set the minimum signatures required for updates"""
+    try:
+        try:
+            # Try relative import first
+            from .updates.auth import update_authority
+        except ImportError:
+            # Fall back to absolute import
+            from updates.auth import update_authority
+
+        console.print(f"[blue]⚙️ Setting update threshold to: {threshold}[/blue]")
+
+        result = update_authority.set_threshold(threshold=threshold)
+
+        if result['success']:
+            console.print("[green]✅ Update threshold set successfully![/green]")
+            if result.get('tx_hash'):
+                console.print(f"   Blockchain TX: {result['tx_hash']}")
+        else:
+            console.print(f"[red]❌ Threshold update failed: {result.get('error')}[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Threshold update error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('update_data_file', type=click.Path(exists=True))
+def sign_update(update_data_file):
+    """Sign update data with the local private key"""
+    try:
+        try:
+            # Try relative import first
+            from .updates.auth import update_signer
+        except ImportError:
+            # Fall back to absolute import
+            from updates.auth import update_signer
+
+        # Read update data
+        with open(update_data_file, 'r') as f:
+            update_data = json.load(f)
+
+        console.print("[blue]✍️ Signing update data...[/blue]")
+
+        signature = update_signer.sign_update(update_data)
+
+        if signature:
+            # Add signature to update data
+            if 'signatures' not in update_data:
+                update_data['signatures'] = []
+
+            # Get public key info for signature
+            public_key = update_signer.get_public_key()
+            if public_key:
+                # Extract key ID from public key (this would need a lookup)
+                key_id = "local_signing_key"  # In practice, this would be looked up
+
+                update_data['signatures'].append({
+                    'key_id': key_id,
+                    'signature': signature
+                })
+
+                # Save signed update
+                signed_file = update_data_file.replace('.json', '_signed.json')
+                with open(signed_file, 'w') as f:
+                    json.dump(update_data, f, indent=2)
+
+                console.print("[green]✅ Update signed successfully![/green]")
+                console.print(f"   Signature: {signature[:32]}...")
+                console.print(f"   Signed file: {signed_file}")
+            else:
+                console.print("[red]❌ Could not get public key for signature[/red]")
+        else:
+            console.print("[red]❌ Update signing failed[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Update signing error: {e}[/red]")
+
+
+@cli.command()
 def update_status():
     """Show update system status"""
     try:

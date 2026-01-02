@@ -15,6 +15,7 @@ from typing import Dict, List, Any, Optional, Callable
 from .verifier import UpdateVerifier
 from .fetcher import UpdateFetcher
 from .rollback import RollbackManager
+from .auth import UpdateAuthority, UpdateSigner
 
 
 class OTAUpdater:
@@ -27,6 +28,7 @@ class OTAUpdater:
         self.verifier = UpdateVerifier()
         self.fetcher = UpdateFetcher(blockchain=blockchain)
         self.rollback = RollbackManager()
+        self.authority = UpdateAuthority(blockchain=blockchain)
 
         # Update state
         self.current_update = None
@@ -142,7 +144,7 @@ class OTAUpdater:
 
     def verify_update(self, package_path: str, update_info: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Verify downloaded update package
+        Verify downloaded update package and authorization
 
         Args:
             package_path: Path to downloaded package
@@ -154,21 +156,10 @@ class OTAUpdater:
         try:
             print(f"🔍 Verifying update package: {package_path}")
 
-            # Verify package signature and integrity
+            # Step 1: Verify package signature and integrity
             verification = self.verifier.verify_package(package_path)
 
-            if verification['verified']:
-                print("✅ Package verification successful")
-                print(f"   Version: {verification['manifest'].get('version')}")
-                print(f"   Publisher: {verification['manifest'].get('publisher', 'unknown')}")
-                print(f"   Algorithm: {verification.get('algorithm', 'unknown')}")
-
-                return {
-                    'verified': True,
-                    'manifest': verification['manifest'],
-                    'verification_details': verification
-                }
-            else:
+            if not verification['verified']:
                 print(f"❌ Package verification failed: {verification.get('error')}")
                 return {
                     'verified': False,
@@ -176,6 +167,45 @@ class OTAUpdater:
                     'stage': verification.get('stage'),
                     'verification_details': verification
                 }
+
+            manifest = verification['manifest']
+            print("✅ Package verification successful")
+            print(f"   Version: {manifest.get('version')}")
+            print(f"   Publisher: {manifest.get('publisher', 'unknown')}")
+
+            # Step 2: Verify update authorization
+            signatures = manifest.get('signatures', [])
+            if not signatures:
+                return {
+                    'verified': False,
+                    'error': 'No authorization signatures found',
+                    'stage': 'authorization',
+                    'manifest': manifest
+                }
+
+            print(f"🔐 Checking authorization ({len(signatures)} signature(s))...")
+            auth_result = self.authority.verify_update_signature(manifest, signatures)
+
+            if not auth_result['authorized']:
+                print(f"❌ Authorization failed: {auth_result.get('error', 'Unknown error')}")
+                return {
+                    'verified': False,
+                    'error': f'Authorization failed: {auth_result.get("error", "Unknown error")}',
+                    'stage': 'authorization',
+                    'auth_details': auth_result,
+                    'manifest': manifest
+                }
+
+            print("✅ Authorization verified"            print(f"   Valid signatures: {auth_result['valid_signatures']}/{auth_result['total_signatures_checked']}")
+            print(f"   Authorized signers: {', '.join(auth_result['authorized_signers'])}")
+
+            return {
+                'verified': True,
+                'authorized': True,
+                'manifest': manifest,
+                'auth_details': auth_result,
+                'verification_details': verification
+            }
 
         except Exception as e:
             print(f"❌ Verification error: {e}")
