@@ -1,0 +1,19 @@
+[
+    {
+        "name": "PiSecure Bootstrap Node 1",
+        "host": "bootstrap.pisecure.net",
+        "port": 3141,
+        "public_key": "placeholder_public_key_1"
+    },
+    {
+        "name": "PiSecure Bootstrap Node 2",
+        "host": "bootstrap2.pisecure.net",
+        "port": 3141,
+        "public_key": "placeholder_public_key_2"
+    },
+    {
+        "name": "GitHub Peer List",
+        "url": "https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/peers.json",
+        "type": "dynamic"
+    }
+]

@@ -190,9 +190,9 @@ def identity():
 
 
 @cli.command()
-@click.argument('token_id', required=False)
-def wallet(token_id):
-    """Show wallet status and tokens"""
+@click.argument('wallet_name', required=False)
+def wallet(wallet_name):
+    """Show wallet information and balance"""
     try:
         try:
             # Try relative import first
@@ -201,75 +201,54 @@ def wallet(token_id):
             # Fall back to absolute import
             from core.wallet import SignWallet
 
-        wallet = SignWallet()
+        if wallet_name:
+            # Show specific wallet
+            wallet = SignWallet()
+            wallet_data = wallet.load_wallet(wallet_name)
 
-        if token_id:
-            # Show specific token
-            token_data = None
-            for t in wallet.wallet_data.get('tokens', []):
-                if t.get('token_id'] == token_id:
-                    token_data = t
-                    break
+            if 'error' in wallet_data:
+                console.print(f"[red]❌ Wallet not found: {wallet_name}[/red]")
+                return
 
-            if token_data:
-                try:
-                    # Try relative import first
-                    from .core.tokens import SignToken
-                except ImportError:
-                    # Fall back to absolute import
-                    from core.tokens import SignToken
-                token = SignToken.from_dict(token_data)
-
-                table = Table(title=f"🏷️ Token: {token_id}")
-                table.add_column("Property", style="cyan", no_wrap=True)
-                table.add_column("Value", style="magenta")
-
-                table.add_row("Token ID", token.token_id)
-                table.add_row("Type", token.token_type)
-                table.add_row("Issued By", token.issued_by)
-                table.add_row("Permissions", ", ".join(token.permissions))
-                table.add_row("Issued At", time.ctime(token.issued_at))
-                table.add_row("Expires At", time.ctime(token.expires_at))
-                table.add_row("Blockchain TX", token.blockchain_tx[:16] + "..." if token.blockchain_tx else "None")
-
-                console.print(table)
-            else:
-                console.print(f"[red]❌ Token {token_id} not found in wallet[/red]")
-        else:
-            # Show wallet overview
-            tokens = wallet.wallet_data.get('tokens', [])
-            transfers = wallet.get_transfer_history()
-
-            table = Table(title="👛 Wallet Status")
-            table.add_column("Metric", style="cyan", no_wrap=True)
+            table = Table(title=f"🏦 Wallet: {wallet_name}")
+            table.add_column("Property", style="cyan", no_wrap=True)
             table.add_column("Value", style="magenta")
 
-            table.add_row("Wallet ID", wallet.wallet_data['wallet_id'][:16] + "...")
-            table.add_row("Total Tokens", str(len(tokens)))
-            table.add_row("Total Transfers", str(len(transfers)))
-            table.add_row("Created", time.ctime(wallet.wallet_data['created_at']))
+            table.add_row("Wallet ID", wallet_data.get('wallet_id', 'unknown'))
+            table.add_row("Name", wallet_data.get('name', 'unnamed'))
+            table.add_row("Address", wallet_data.get('address', 'unknown'))
+            table.add_row("Balance", f"{wallet_data.get('balance', 0):.2f}")
+            table.add_row("Created", time.ctime(wallet_data.get('created_at', 0)))
 
             console.print(table)
+        else:
+            # List all wallets
+            wallet = SignWallet()
+            wallets = wallet.list_wallets()
 
-            if tokens:
-                console.print("\n[blue]🪙 Tokens:[/blue]")
-                token_table = Table()
-                token_table.add_column("Token ID", style="cyan", no_wrap=True)
-                token_table.add_column("Type", style="green")
-                token_table.add_column("Permissions", style="yellow")
+            if not wallets:
+                console.print("[yellow]📭 No wallets found[/yellow]")
+                console.print("[dim]Create your first wallet with: pisecure create-wallet <name>[/dim]")
+                return
 
-                for token_data in tokens[:5]:  # Show first 5
-                    perms = ", ".join(token_data.get('permissions', []))
-                    token_table.add_row(
-                        token_data['token_id'][:16] + "...",
-                        token_data.get('token_type', 'unknown'),
-                        perms
-                    )
+            table = Table(title="🏦 Available Wallets")
+            table.add_column("ID", style="cyan", no_wrap=True)
+            table.add_column("Name", style="green")
+            table.add_column("Address", style="magenta", no_wrap=True)
+            table.add_column("Balance", style="yellow", justify="right")
+            table.add_column("Created", style="blue")
 
-                if len(tokens) > 5:
-                    token_table.add_row("...", "...", f"+{len(tokens)-5} more")
+            for w in wallets:
+                created_time = time.ctime(w.get('created', 0))
+                table.add_row(
+                    w.get('id', 'unknown'),
+                    w.get('name', 'unnamed'),
+                    w.get('address', 'unknown'),
+                    f"{w.get('balance', 0):.2f}",
+                    created_time
+                )
 
-                console.print(token_table)
+            console.print(table)
 
     except Exception as e:
         console.print(f"[red]❌ Wallet error: {e}[/red]")
@@ -287,9 +266,6 @@ def verify_update(package_path):
             # Fall back to absolute import
             from updates import OTAUpdater
 
-        updater = OTAUpdater()
-    """Verify update package signature and integrity"""
-    try:
         updater = OTAUpdater()
 
         console.print(f"[blue]🔍 Verifying update package: {package_path}[/blue]\n")

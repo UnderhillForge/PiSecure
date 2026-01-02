@@ -10,6 +10,17 @@
 
 **PiSecure provides enterprise-grade security for IoT and embedded projects with device identity management, cryptographically secure OTA updates, and optional hardware-verified blockchain mining on Raspberry Pi.**
 
+## 🚀 One-Command Installation
+
+```bash
+# For fresh Raspberry Pi setup (installs everything automatically)
+curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/install.sh | bash
+
+# After installation, access your node at:
+# http://pisecure-node-[serial].local
+# or http://[your-pi-ip]:5000
+```
+
 [Quick Start](#quick-start) • [Documentation](#documentation) • [Installation](#installation) • [Developer Guide](#developer-guide) • [Roadmap](docs/roadmap.md)
 
 ## Features

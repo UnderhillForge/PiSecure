@@ -365,28 +365,40 @@ def get_system_info():
         }
 
 def get_blockchain_info():
-    """Get blockchain information (simulated for demo)"""
-    # In a real implementation, this would query the actual blockchain
-    # For now, return simulated data
-
+    """Get blockchain information from actual PiSecure blockchain"""
     # Try to read from actual blockchain if it exists
-    blockchain_file = Path("/var/lib/pisecure/blockchain/chain.json")
+    blockchain_file = Path("/var/lib/pisecure/blockchain.json")
+    pending_file = Path("/var/lib/pisecure/pending_transactions.json")
+
     if blockchain_file.exists():
         try:
             with open(blockchain_file, 'r') as f:
                 chain_data = json.load(f)
                 block_count = len(chain_data)
                 latest_block = chain_data[-1] if chain_data else {}
-                pending_tx = 0  # Would need to check pending file
                 difficulty = latest_block.get('difficulty', 4)
-                chain_valid = True  # Would need validation
-        except:
+
+                # Load pending transactions
+                pending_tx = 0
+                if pending_file.exists():
+                    try:
+                        with open(pending_file, 'r') as f:
+                            pending_data = json.load(f)
+                            pending_tx = len(pending_data)
+                    except:
+                        pending_tx = 0
+
+                # Basic chain validation
+                chain_valid = block_count > 0
+
+        except Exception as e:
+            print(f"Error reading blockchain: {e}")
             block_count = 0
             pending_tx = 0
             difficulty = 4
             chain_valid = False
     else:
-        # Simulated data for demo
+        # No blockchain file yet
         block_count = 0
         pending_tx = 0
         difficulty = 4

@@ -1,9 +1,18 @@
 #!/bin/bash
-# PiSecure Universal Installer
-# Works on all Raspberry Pi models: Zero, Zero W, Zero 2 W, 3, 3B+, 4, 5
+"""
+PiSecure Installer - Complete Setup for Raspberry Pi Blockchain Node
+====================================================================
 
-# Note: We don't use 'set -e' because some optional package installations may fail
-# and we want to continue the installation anyway
+This script installs PiSecure as a complete blockchain node with:
+- Wallet creation and management
+- Background mining service
+- Web dashboard
+- Automatic startup and peer discovery
+
+Usage: curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/install.sh | bash
+"""
+
+set -e
 
 # Colors for output
 RED='\033[0;31m'
@@ -11,6 +20,14 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+# Configuration
+REPO_URL="https://github.com/UnderhillForge/PiSecure.git"
+INSTALL_DIR="/opt/pisecure"
+DATA_DIR="/var/lib/pisecure"
+CONFIG_DIR="/etc/pisecure"
+SERVICE_USER="pisecure"
+HOSTNAME_PREFIX="pisecure-node"
 
 # Logging functions
 log_info() {
@@ -29,367 +46,446 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Detect Raspberry Pi model
-detect_pi_model() {
-    if [ -f /proc/device-tree/model ]; then
-        PI_MODEL=$(tr -d '\0' < /proc/device-tree/model)
-    elif [ -f /sys/firmware/devicetree/base/model ]; then
-        PI_MODEL=$(tr -d '\0' < /sys/firmware/devicetree/base/model)
-    else
-        PI_MODEL="Unknown"
+# Check if running as root
+check_root() {
+    if [[ $EUID -eq 0 ]]; then
+        log_error "This script should not be run as root. It will create a service user."
+        exit 1
     fi
-
-    log_info "Detected Raspberry Pi model: $PI_MODEL"
-
-    # Extract model number for compatibility checks
-    if [[ $PI_MODEL =~ Raspberry\ Pi\ ([0-9]+) ]]; then
-        PI_NUMBER="${BASH_REMATCH[1]}"
-    else
-        PI_NUMBER="0"
-    fi
-
-    log_info "Pi generation: $PI_NUMBER"
 }
 
-# Check system requirements
-check_requirements() {
-    log_info "Checking system requirements..."
-
-    # Check if running on Raspberry Pi
-    if ! grep -q "BCM" /proc/cpuinfo && ! grep -q "Raspberry Pi" /proc/device-tree/model 2>/dev/null; then
-        log_error "This installer is designed for Raspberry Pi devices only."
-        log_error "Please run on a Raspberry Pi Zero, 3, 4, or 5."
+# Detect Raspberry Pi
+detect_pi() {
+    if [[ ! -f /proc/device-tree/model ]] || ! grep -q "Raspberry Pi" /proc/device-tree/model; then
+        log_error "This script is designed for Raspberry Pi only."
         exit 1
     fi
 
-    # Check Python version
-    if ! command -v python3 &> /dev/null; then
-        log_error "Python 3 is required but not installed."
-        exit 1
-    fi
-
-    PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-    if python3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)"; then
-        log_success "Python $PYTHON_VERSION detected (compatible)"
-    else
-        log_error "Python 3.7 or higher is required. Current version: $PYTHON_VERSION"
-        exit 1
-    fi
-
-    # Check available disk space (need at least 500MB)
-    AVAILABLE_SPACE=$(df / | tail -1 | awk '{print $4}')
-    if [ $AVAILABLE_SPACE -lt 524288 ]; then  # 512MB in KB
-        log_warning "Low disk space detected. Installation may fail."
-        log_warning "Available: $(($AVAILABLE_SPACE / 1024)) MB, Recommended: 500+ MB"
-    fi
-
-    log_success "System requirements check passed"
+    PI_MODEL=$(tr -d '\0' < /proc/device-tree/model)
+    log_info "Detected: $PI_MODEL"
 }
 
 # Install system dependencies
-install_system_deps() {
+install_dependencies() {
     log_info "Installing system dependencies..."
 
-    # Update package list
     sudo apt update
-
-    # Install Python and pip if not present
-    sudo apt install -y python3 python3-pip python3-venv
-
-    # Install cryptography dependencies
-    sudo apt install -y build-essential libssl-dev libffi-dev libsodium-dev
-
-    # Install only essential Pi-specific packages (raspberrypi-userland provides vcgencmd)
-    # Note: raspberrypi-bootloader is NOT needed - it only updates EEPROM firmware
-    log_info "Installing raspberrypi-userland for VideoCore GPU access (provides vcgencmd)..."
-    if sudo apt install -y raspberrypi-userland 2>/dev/null; then
-        log_success "Installed raspberrypi-userland (VideoCore GPU access for mining)"
-    elif sudo apt install -y libraspberrypi-bin 2>/dev/null; then
-        log_success "Installed libraspberrypi-bin (VideoCore GPU access for mining)"
-    else
-        log_warning "VideoCore GPU package not found - mining features may be limited"
-        log_info "PiSecure will still work for wallet and identity features"
-    fi
-
-    # Ensure user is in required groups
-    sudo usermod -a -G gpio,video,i2c $USER || true
-    sudo usermod -a -G dialout $USER || true
+    sudo apt install -y \
+        python3 \
+        python3-pip \
+        python3-venv \
+        git \
+        curl \
+        jq \
+        avahi-daemon \
+        nginx \
+        ufw \
+        fail2ban \
+        unattended-upgrades
 
     log_success "System dependencies installed"
 }
 
-# Create virtual environment and install PiSecure
+# Create service user
+create_service_user() {
+    log_info "Creating PiSecure service user..."
+
+    if ! id "$SERVICE_USER" &>/dev/null; then
+        sudo useradd -r -s /bin/false -m -d "$INSTALL_DIR" "$SERVICE_USER"
+        log_success "Created user: $SERVICE_USER"
+    else
+        log_warning "User $SERVICE_USER already exists"
+    fi
+}
+
+# Setup directories
+setup_directories() {
+    log_info "Setting up directories..."
+
+    sudo mkdir -p "$INSTALL_DIR"
+    sudo mkdir -p "$DATA_DIR"
+    sudo mkdir -p "$CONFIG_DIR"
+    sudo mkdir -p "/var/log/pisecure"
+
+    sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+    sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
+    sudo chown -R "$SERVICE_USER:$SERVICE_USER" "/var/log/pisecure"
+
+    log_success "Directories created and permissions set"
+}
+
+# Clone and install PiSecure
 install_pisecure() {
-    local install_dir="${1:-/opt/pisecure}"
+    log_info "Installing PiSecure..."
 
-    log_info "Installing PiSecure to $install_dir..."
-
-    # Create installation directory
-    sudo mkdir -p "$install_dir"
-    sudo chown $USER:$USER "$install_dir"
-
-    # Create virtual environment
-    cd "$install_dir"
-    python3 -m venv venv
-    source venv/bin/activate
-
-    # Upgrade pip
-    pip install --upgrade pip
-
-    # Install PiSecure from GitHub (with fallback for import issues)
-    log_info "Installing PiSecure dependencies..."
-
-    # Install core dependencies that are known to work
-    pip install cryptography PyNaCl requests click rich python-dateutil flask psutil
-
-    # Clone and install PiSecure manually to handle import issues
-    if [ ! -d "repo" ]; then
-        git clone https://github.com/UnderhillForge/PiSecure.git repo
+    # Clone repository
+    if [[ ! -d "$INSTALL_DIR/.git" ]]; then
+        sudo -u "$SERVICE_USER" git clone "$REPO_URL" "$INSTALL_DIR"
+    else
+        cd "$INSTALL_DIR"
+        sudo -u "$SERVICE_USER" git pull
     fi
 
-    # Copy PiSecure modules to virtual environment
-    mkdir -p venv/lib/python3.*/site-packages/pisecure/
-    cp -r repo/pisecure/* venv/lib/python3.*/site-packages/pisecure/ 2>/dev/null || true
+    # Create virtual environment
+    sudo -u "$SERVICE_USER" python3 -m venv "$INSTALL_DIR/venv"
 
-    # Create launcher script (activates venv and uses simple_cli)
-    cat > launch_pisecure.py << 'EOF'
-#!/bin/bash
-"""
-PiSecure CLI Launcher - Activates virtual environment and runs CLI
-"""
+    # Install PiSecure
+    sudo -u "$SERVICE_USER" bash -c "source $INSTALL_DIR/venv/bin/activate && cd $INSTALL_DIR && pip install -e ."
 
-# Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    log_success "PiSecure installed"
+}
 
-# Activate the virtual environment
-source "$SCRIPT_DIR/venv/bin/activate"
+# Configure firewall
+configure_firewall() {
+    log_info "Configuring firewall..."
 
-# Run the PiSecure CLI
-exec python3 -c "
-import sys
-import os
+    sudo ufw default deny incoming
+    sudo ufw default allow outgoing
+    sudo ufw allow ssh
+    sudo ufw allow 5000/tcp  # Dashboard
+    sudo ufw allow 3141/tcp  # PiSecure P2P (placeholder)
+    sudo ufw --force enable
 
-# Add virtual environment site-packages to path
-venv_site_packages = '$SCRIPT_DIR/venv/lib/python3.*/site-packages'
-sys.path.insert(0, venv_site_packages)
+    log_success "Firewall configured"
+}
 
-# Also add repo directory for fallback
-repo_dir = '$SCRIPT_DIR/repo'
-sys.path.insert(0, repo_dir)
+# Setup hostname
+setup_hostname() {
+    log_info "Setting up hostname..."
 
-try:
-    from pisecure.simple_cli import cli
-    cli()
-except ImportError as e:
-    print(f'Import error: {e}')
-    print('Trying alternative import paths...')
+    CURRENT_HOSTNAME=$(hostname)
+    if [[ "$CURRENT_HOSTNAME" != *"$HOSTNAME_PREFIX"* ]]; then
+        PI_SERIAL=$(grep "Serial" /proc/cpuinfo | awk '{print $3}' | tr '[:upper:]' '[:lower:]')
+        NEW_HOSTNAME="${HOSTNAME_PREFIX}-${PI_SERIAL: -6}"
 
-    try:
-        # Try importing from repo directly
-        sys.path.insert(0, repo_dir)
-        import pisecure.simple_cli as cli_module
-        cli_module.cli()
-    except Exception as e2:
-        print(f'Alternative import failed: {e2}')
-        print()
-        print('PiSecure CLI is having import issues.')
-        print('The web dashboard should still work!')
-        print('Try: python3 -m http.server 5000 (in the dashboard directory)')
-        sys.exit(1)
-"
+        sudo hostnamectl set-hostname "$NEW_HOSTNAME"
+        sudo sed -i "s/127.0.1.1.*/127.0.1.1\t$NEW_HOSTNAME/" /etc/hosts
+
+        log_success "Hostname set to: $NEW_HOSTNAME"
+        log_warning "System will use new hostname after reboot"
+    else
+        log_info "Hostname already configured: $CURRENT_HOSTNAME"
+    fi
+}
+
+# Create configuration
+create_config() {
+    log_info "Creating PiSecure configuration..."
+
+    sudo tee "$CONFIG_DIR/config.json" > /dev/null <<EOF
+{
+    "network": {
+        "listen_port": 3141,
+        "max_connections": 10,
+        "bootstrap_peers": [
+            "https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/peers.json"
+        ]
+    },
+    "mining": {
+        "enabled": true,
+        "max_temperature": 70,
+        "thermal_throttle": true,
+        "daily_limit_hours": 24
+    },
+    "dashboard": {
+        "enabled": true,
+        "port": 5000,
+        "host": "0.0.0.0"
+    },
+    "security": {
+        "auto_updates": true,
+        "certificate_lifetime_days": 365,
+        "key_size": 2048
+    },
+    "data_dir": "$DATA_DIR",
+    "log_level": "INFO"
+}
 EOF
 
-    chmod +x launch_pisecure.py
+    sudo chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG_DIR/config.json"
+    sudo chmod 600 "$CONFIG_DIR/config.json"
 
-    # Create web dashboard launcher (runs Flask app, not static server)
-    cat > launch_dashboard.py << 'EOF'
-#!/bin/bash
-"""
-PiSecure Web Dashboard Launcher - Runs Flask Application
-"""
-
-# Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Activate the virtual environment
-source "$SCRIPT_DIR/venv/bin/activate"
-
-# Change to dashboard directory and run Flask app
-cd "$SCRIPT_DIR/repo/dashboard/web"
-echo "🚀 Starting PiSecure Flask Dashboard..."
-echo "========================================"
-echo "Dashboard will be available at:"
-echo "  Local:   http://localhost:5000"
-echo "  Network: http://[your-pi-ip]:5000"
-echo ""
-echo "Features:"
-echo "  ✅ Real-time system monitoring"
-echo "  ✅ Blockchain status display"
-echo "  ✅ Mining status tracking"
-echo "  ✅ Network peer information"
-echo "  ✅ Auto-refresh every 30 seconds"
-echo ""
-echo "Press Ctrl+C to stop"
-echo ""
-
-# Run the minimal dashboard Flask application
-exec python3 minimal_dashboard.py
-EOF
-
-    chmod +x launch_dashboard.py
-
-    log_success "PiSecure installed successfully"
+    log_success "Configuration created"
 }
 
 # Create systemd services
-create_service() {
-    local install_dir="${1:-/opt/pisecure}"
-
+create_services() {
     log_info "Creating systemd services..."
 
-    # Create PiSecure blockchain monitoring service
-    sudo tee /etc/systemd/system/pisecure.service > /dev/null << EOF
+    # PiSecure mining service
+    sudo tee /etc/systemd/system/pisecure-mining.service > /dev/null <<EOF
 [Unit]
-Description=PiSecure Blockchain Node
+Description=PiSecure Blockchain Mining Service
 After=network.target
 Wants=network.target
 
 [Service]
 Type=simple
-User=$USER
-WorkingDirectory=$install_dir
-ExecStart=$install_dir/venv/bin/python $install_dir/launch_pisecure.py status
+User=$SERVICE_USER
+Group=$SERVICE_USER
+WorkingDirectory=$INSTALL_DIR
+Environment=PATH=$INSTALL_DIR/venv/bin
+ExecStart=$INSTALL_DIR/venv/bin/python -m pisecure.cli mine --background
 Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
+SyslogIdentifier=pisecure-mining
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    # Create PiSecure web dashboard service
-    sudo tee /etc/systemd/system/pisecure-dashboard.service > /dev/null << EOF
+    # PiSecure dashboard service
+    sudo tee /etc/systemd/system/pisecure-dashboard.service > /dev/null <<EOF
 [Unit]
 Description=PiSecure Web Dashboard
-After=network.target pisecure.service
+After=network.target
 Wants=network.target
-Requires=pisecure.service
 
 [Service]
 Type=simple
-User=$USER
-WorkingDirectory=$install_dir/repo/dashboard/web
-ExecStart=$install_dir/venv/bin/python3 $install_dir/repo/dashboard/web/minimal_dashboard.py
+User=$SERVICE_USER
+Group=$SERVICE_USER
+WorkingDirectory=$INSTALL_DIR
+Environment=PATH=$INSTALL_DIR/venv/bin
+ExecStart=$INSTALL_DIR/venv/bin/python dashboard/web/minimal_dashboard.py
 Restart=always
-RestartSec=5
+RestartSec=10
 StandardOutput=journal
 StandardError=journal
-Environment=PYTHONPATH=$install_dir/repo:$install_dir/venv/lib/python3.*/site-packages
-Environment=FLASK_ENV=production
+SyslogIdentifier=pisecure-dashboard
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    # Enable services to start on boot
-    sudo systemctl enable pisecure
-    sudo systemctl enable pisecure-dashboard
+    # PiSecure main service
+    sudo tee /etc/systemd/system/pisecure.service > /dev/null <<EOF
+[Unit]
+Description=PiSecure Blockchain Node
+After=network.target pisecure-mining.service pisecure-dashboard.service
+Wants=network.target
+Requires=pisecure-mining.service pisecure-dashboard.service
 
-    # Reload systemd
-    sudo systemctl daemon-reload
+[Service]
+Type=oneshot
+User=$SERVICE_USER
+Group=$SERVICE_USER
+WorkingDirectory=$INSTALL_DIR
+Environment=PATH=$INSTALL_DIR/venv/bin
+ExecStart=$INSTALL_DIR/venv/bin/python -c "print('PiSecure node started')"
+RemainAfterExit=yes
 
-    log_success "Systemd services created and enabled (blockchain monitoring + web dashboard)"
-}
-
-# Create desktop shortcuts (for Pi with desktop)
-create_shortcuts() {
-    log_info "Creating desktop shortcuts..."
-
-    # Create desktop entry for PiSecure Dashboard
-    mkdir -p ~/.local/share/applications
-
-    cat > ~/.local/share/applications/pisecure-dashboard.desktop << EOF
-[Desktop Entry]
-Name=PiSecure Dashboard
-Comment=PiSecure Blockchain Node Dashboard
-Exec=chromium-browser --app=http://localhost:5000
-Icon=chromium-browser
-Terminal=false
-Type=Application
-Categories=Network;Security;
+[Install]
+WantedBy=multi-user.target
 EOF
 
-    # Make executable
-    chmod +x ~/.local/share/applications/pisecure-dashboard.desktop
-
-    log_success "Desktop shortcuts created"
+    sudo systemctl daemon-reload
+    log_success "Systemd services created"
 }
 
-# Main installation function
+# Setup nginx reverse proxy
+setup_nginx() {
+    log_info "Setting up nginx reverse proxy..."
+
+    sudo tee /etc/nginx/sites-available/pisecure > /dev/null <<EOF
+server {
+    listen 80;
+    server_name _;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # PiSecure Dashboard
+    location / {
+        proxy_pass http://localhost:5000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        # WebSocket support (if needed)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    # API endpoints
+    location /api/ {
+        proxy_pass http://localhost:5000/api/;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+    }
+}
+EOF
+
+    sudo ln -sf /etc/nginx/sites-available/pisecure /etc/nginx/sites-enabled/
+    sudo rm -f /etc/nginx/sites-enabled/default
+    sudo nginx -t && sudo systemctl reload nginx
+
+    log_success "Nginx configured"
+}
+
+# Interactive wallet setup
+setup_wallet() {
+    log_info "Setting up initial wallet..."
+
+    echo
+    echo "========================================"
+    echo "    PiSecure Wallet Setup"
+    echo "========================================"
+    echo
+
+    read -p "Enter wallet name (default: default): " WALLET_NAME
+    WALLET_NAME=${WALLET_NAME:-default}
+
+    read -p "Enter wallet display name: " WALLET_DISPLAY_NAME
+    WALLET_DISPLAY_NAME=${WALLET_DISPLAY_NAME:-"PiSecure Node Wallet"}
+
+    echo
+    log_info "Creating wallet: $WALLET_NAME"
+
+    # Create wallet as service user
+    sudo -u "$SERVICE_USER" bash -c "
+        source $INSTALL_DIR/venv/bin/activate
+        cd $INSTALL_DIR
+        python -c \"
+from pisecure.core.wallet import SignWallet
+wallet = SignWallet()
+result = wallet.create_wallet('$WALLET_NAME', '$WALLET_DISPLAY_NAME')
+if result['success']:
+    print('✅ Wallet created successfully!')
+    print(f'   Address: {result[\"address\"]}')
+else:
+    print(f'❌ Wallet creation failed: {result.get(\"error\")}')
+\"
+    "
+
+    # Save wallet name to config
+    sudo jq --arg wallet "$WALLET_NAME" '.mining.wallet = $wallet' "$CONFIG_DIR/config.json" > /tmp/config.json
+    sudo mv /tmp/config.json "$CONFIG_DIR/config.json"
+
+    log_success "Wallet setup complete"
+}
+
+# Start services
+start_services() {
+    log_info "Starting PiSecure services..."
+
+    sudo systemctl enable pisecure
+    sudo systemctl enable pisecure-mining
+    sudo systemctl enable pisecure-dashboard
+
+    sudo systemctl start pisecure-mining
+    sudo systemctl start pisecure-dashboard
+    sudo systemctl start pisecure
+
+    log_success "Services started"
+}
+
+# Setup automatic updates
+setup_updates() {
+    log_info "Setting up automatic updates..."
+
+    sudo tee /etc/cron.daily/pisecure-updates > /dev/null <<EOF
+#!/bin/bash
+# PiSecure automatic updates
+sudo -u $SERVICE_USER bash -c "
+    source $INSTALL_DIR/venv/bin/activate
+    cd $INSTALL_DIR
+    python -c \"
+from pisecure.updates import OTAUpdater
+updater = OTAUpdater()
+updates = updater.check_for_updates()
+if updates:
+    print(f'Found {len(updates)} updates, installing latest...')
+    # Auto-apply latest update
+    updater.download_update(updates[0])
+    updater.apply_update(updates[0]['local_path'], updates[0])
+else:
+    print('No updates available')
+\"
+"
+EOF
+
+    sudo chmod +x /etc/cron.daily/pisecure-updates
+    log_success "Automatic updates configured"
+}
+
+# Print completion message
+completion_message() {
+    HOSTNAME=$(hostname)
+    WALLET_INFO=$(sudo -u "$SERVICE_USER" bash -c "
+        source $INSTALL_DIR/venv/bin/activate
+        cd $INSTALL_DIR
+        python -c \"
+from pisecure.core.wallet import SignWallet
+wallet = SignWallet()
+wallets = wallet.list_wallets()
+if wallets:
+    w = wallets[0]
+    print(f'{w[\"name\"]} ({w[\"address\"][:16]}...)')
+else:
+    print('No wallet found')
+\"
+    ")
+
+    echo
+    echo "========================================"
+    echo "    🎉 PiSecure Installation Complete!"
+    echo "========================================"
+    echo
+    echo "Your PiSecure node is now running!"
+    echo
+    echo "🌐 Web Dashboard: http://$HOSTNAME.local"
+    echo "    or: http://$(hostname -I | awk '{print $1}')"
+    echo
+    echo "👛 Wallet: $WALLET_INFO"
+    echo
+    echo "📋 Useful commands:"
+    echo "  Check status:  python -m pisecure.cli status"
+    echo "  View wallet:   python -m pisecure.cli wallet"
+    echo "  Start mining:  python -m pisecure.cli mine"
+    echo "  Transfer:      python -m pisecure.cli transfer-tokens <address> <amount> --from-wallet <wallet>"
+    echo
+    echo "🔄 Services:"
+    echo "  Mining:     sudo systemctl status pisecure-mining"
+    echo "  Dashboard:  sudo systemctl status pisecure-dashboard"
+    echo
+    echo "📚 Documentation: https://github.com/UnderhillForge/PiSecure"
+    echo
+    echo "⚠️  IMPORTANT: Backup your wallet data from $DATA_DIR/wallets/"
+    echo
+    log_success "Installation completed successfully!"
+}
+
+# Main installation process
 main() {
-    local install_dir="/opt/pisecure"
-
     echo "========================================"
-    echo "🔐 PiSecure Universal Installer"
+    echo "    🔐 PiSecure Node Installer"
     echo "========================================"
-    echo "Works on all Raspberry Pi models"
-    echo ""
+    echo
+    log_info "Starting PiSecure installation..."
 
-    # Parse command line arguments
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --install-dir)
-                install_dir="$2"
-                shift 2
-                ;;
-            --help)
-                echo "Usage: $0 [--install-dir DIR]"
-                echo ""
-                echo "Options:"
-                echo "  --install-dir DIR    Installation directory (default: /opt/pisecure)"
-                echo "  --help               Show this help message"
-                exit 0
-                ;;
-            *)
-                log_error "Unknown option: $1"
-                echo "Use --help for usage information"
-                exit 1
-                ;;
-        esac
-    done
+    check_root
+    detect_pi
+    install_dependencies
+    create_service_user
+    setup_directories
+    install_pisecure
+    configure_firewall
+    setup_hostname
+    create_config
+    create_services
+    setup_nginx
+    setup_wallet
+    start_services
+    setup_updates
 
-    # Run installation steps
-    detect_pi_model
-    check_requirements
-    install_system_deps
-    install_pisecure "$install_dir"
-    create_service "$install_dir"
-    create_shortcuts
-
-    echo ""
-    echo "========================================"
-    log_success "PiSecure installation completed!"
-    echo ""
-    echo "📍 Installation directory: $install_dir"
-    echo "🚀 Launch PiSecure CLI: $install_dir/launch_pisecure.py"
-    echo "🌐 Web Dashboard: http://localhost:5000 (auto-starts with service)"
-    echo ""
-    echo "Commands:"
-    echo "  $install_dir/launch_pisecure.py --help    # Show CLI help"
-    echo "  $install_dir/launch_pisecure.py status    # Show blockchain status"
-    echo "  $install_dir/launch_pisecure.py verify-hardware  # Verify Pi hardware"
-    echo ""
-    echo "Services (auto-enabled on boot):"
-    echo "  sudo systemctl status pisecure              # Blockchain monitoring"
-    echo "  sudo systemctl status pisecure-dashboard    # Web dashboard"
-    echo "  sudo systemctl restart pisecure             # Restart blockchain service"
-    echo "  sudo systemctl restart pisecure-dashboard   # Restart dashboard service"
-    echo ""
-    echo "Both services are enabled and will start automatically on boot!"
-    echo ""
-    log_warning "Important: Log out and back in for group changes to take effect"
-    echo "========================================"
+    completion_message
 }
 
 # Run main function
