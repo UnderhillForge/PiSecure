@@ -1315,12 +1315,12 @@ def get_network_info():
     }
 
 def get_peer_counts():
-    """Get actual peer counts by scanning network for other PiSecure instances"""
+    """Get actual peer counts from multiple discovery methods"""
     connected_peers = 0
     known_peers = 0
 
     try:
-        # Check for peer database
+        # 1. Check for peer database (known peers)
         peer_db_file = Path("/var/lib/pisecure/peers.json")
         if peer_db_file.exists():
             try:
@@ -1330,68 +1330,20 @@ def get_peer_counts():
             except:
                 known_peers = 0
 
-        # Scan for active PiSecure instances on local network
-        import socket
-        import threading
-        import time
+        # 2. Count local network peers
+        local_peers = get_local_network_peers()
 
-        # Common PiSecure ports
-        pisecure_ports = [3142, 5000, 3141]  # API, Dashboard, Bootstrap
+        # 3. Count STUN-discovered peers
+        stun_peers = get_stun_peers()
 
-        # Get local network range
-        try:
-            # Get local IP to determine network range
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-            s.close()
+        # 4. Count Tor onion peers
+        tor_peers = get_tor_peers()
 
-            # Extract network prefix (e.g., 192.168.1.)
-            ip_parts = local_ip.split('.')
-            network_prefix = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}."
+        # 5. Count community relay peers
+        relay_peers = get_relay_peers()
 
-            # Scan local network for PiSecure instances
-            active_instances = []
-
-            def scan_port(ip, port):
-                try:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(0.5)
-                    result = sock.connect_ex((ip, port))
-                    sock.close()
-                    if result == 0:
-                        active_instances.append(f"{ip}:{port}")
-                except:
-                    pass
-
-            # Scan range 1-254 on local network
-            threads = []
-            for i in range(1, 255):
-                target_ip = f"{network_prefix}{i}"
-                for port in pisecure_ports:
-                    thread = threading.Thread(target=scan_port, args=(target_ip, port))
-                    thread.daemon = True
-                    threads.append(thread)
-                    thread.start()
-
-            # Wait for all scans to complete (with timeout)
-            start_time = time.time()
-            for thread in threads:
-                remaining_time = max(0, 2.0 - (time.time() - start_time))
-                if remaining_time > 0:
-                    thread.join(timeout=remaining_time)
-
-            # Count unique PiSecure instances (avoid counting multiple ports on same IP)
-            unique_ips = set()
-            for instance in active_instances:
-                ip = instance.split(':')[0]
-                unique_ips.add(ip)
-
-            connected_peers = len(unique_ips) - 1  # Subtract self
-
-        except Exception as e:
-            print(f"Network scan error: {e}")
-            connected_peers = 0
+        # Combine all peer counts (deduplicate where possible)
+        connected_peers = local_peers + stun_peers + tor_peers + relay_peers
 
         # Ensure non-negative counts
         connected_peers = max(0, connected_peers)
@@ -1403,6 +1355,137 @@ def get_peer_counts():
         known_peers = 0
 
     return connected_peers, known_peers
+
+def get_local_network_peers():
+    """Count PiSecure peers on local network via port scanning"""
+    try:
+        import socket
+        import threading
+        import time
+
+        # Common PiSecure ports
+        pisecure_ports = [3142, 5000, 3141]  # API, Dashboard, Bootstrap
+
+        # Get local network range
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+
+        # Extract network prefix (e.g., 192.168.1.)
+        ip_parts = local_ip.split('.')
+        network_prefix = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}."
+
+        # Scan local network for PiSecure instances
+        active_instances = []
+
+        def scan_port(ip, port):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(0.5)
+                result = sock.connect_ex((ip, port))
+                sock.close()
+                if result == 0:
+                    active_instances.append(f"{ip}:{port}")
+            except:
+                pass
+
+        # Scan range 1-254 on local network
+        threads = []
+        for i in range(1, 255):
+            target_ip = f"{network_prefix}{i}"
+            for port in pisecure_ports:
+                thread = threading.Thread(target=scan_port, args=(target_ip, port))
+                thread.daemon = True
+                threads.append(thread)
+                thread.start()
+
+        # Wait for all scans to complete (with timeout)
+        start_time = time.time()
+        for thread in threads:
+            remaining_time = max(0, 2.0 - (time.time() - start_time))
+            if remaining_time > 0:
+                thread.join(timeout=remaining_time)
+
+        # Count unique PiSecure instances (avoid counting multiple ports on same IP)
+        unique_ips = set()
+        for instance in active_instances:
+            ip = instance.split(':')[0]
+            unique_ips.add(ip)
+
+        local_peers = len(unique_ips) - 1  # Subtract self
+        return max(0, local_peers)
+
+    except Exception as e:
+        print(f"Local network peer scan error: {e}")
+        return 0
+
+def get_stun_peers():
+    """Count peers discovered via STUN"""
+    try:
+        # Check node discovery file for STUN endpoints
+        discovery_file = Path("/etc/pisecure/node_discovery.json")
+        if discovery_file.exists():
+            with open(discovery_file, 'r') as f:
+                discovery_data = json.load(f)
+
+            endpoints = discovery_data.get('endpoints', [])
+            stun_endpoints = [ep for ep in endpoints if ep.get('type') == 'stun_direct']
+
+            # Count unique STUN-discovered peers
+            stun_peers = len(set(ep.get('ip') for ep in stun_endpoints if ep.get('ip')))
+            return stun_peers
+        return 0
+    except Exception as e:
+        print(f"STUN peer count error: {e}")
+        return 0
+
+def get_tor_peers():
+    """Count peers discovered via Tor onion services"""
+    try:
+        # Check node discovery file for Tor endpoints
+        discovery_file = Path("/etc/pisecure/node_discovery.json")
+        if discovery_file.exists():
+            with open(discovery_file, 'r') as f:
+                discovery_data = json.load(f)
+
+            endpoints = discovery_data.get('endpoints', [])
+            tor_endpoints = [ep for ep in endpoints if ep.get('type') == 'tor_onion']
+
+            # Count Tor onion peers (each onion address is a unique peer)
+            tor_peers = len(tor_endpoints)
+            return tor_peers
+        return 0
+    except Exception as e:
+        print(f"Tor peer count error: {e}")
+        return 0
+
+def get_relay_peers():
+    """Count peers discovered via community relays"""
+    try:
+        # Check for relay connections and peer counts
+        relay_db_file = Path("/var/lib/pisecure/relay_peers.json")
+        if relay_db_file.exists():
+            try:
+                with open(relay_db_file, 'r') as f:
+                    relay_data = json.load(f)
+                    relay_peers = len(relay_data.get('connected_peers', []))
+                    return relay_peers
+            except:
+                pass
+
+        # Fallback: check node discovery for relay count
+        discovery_file = Path("/etc/pisecure/node_discovery.json")
+        if discovery_file.exists():
+            with open(discovery_file, 'r') as f:
+                discovery_data = json.load(f)
+                relay_count = discovery_data.get('relay_count', 0)
+                return relay_count
+
+        return 0
+    except Exception as e:
+        print(f"Relay peer count error: {e}")
+        return 0
 
 def get_recent_blocks():
     """Get recent blocks (simulated for demo)"""
