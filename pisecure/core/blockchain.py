@@ -109,14 +109,18 @@ class SignChain:
                  difficulty: int = 4):
         self.chain_file = Path(chain_file)
         self.pending_file = Path(chain_file).parent / "pending_transactions.json"
+        self.names_file = Path(chain_file).parent / "name_registry.json"
         self.difficulty = difficulty
         self.chain: List[SignBlock] = []
         self.pending_transactions: List[Dict] = []
+        self.name_registry: Dict[str, Dict[str, Any]] = {}  # name -> {address, registered_at, tx_hash}
         self.lock = threading.Lock()
 
         # Load existing chain or create genesis
         self.load_chain()
         self.load_pending_transactions()
+        self.load_name_registry()
+        self._rebuild_name_registry()  # Rebuild from blockchain
 
     def create_genesis_block(self) -> SignBlock:
         """Create the genesis block"""
@@ -237,6 +241,8 @@ class SignChain:
             return self._validate_token_transfer(transaction)
         elif tx_type == 'batch_transfer':
             return self._validate_batch_transfer(transaction)
+        elif tx_type == 'name_registration':
+            return self._validate_name_registration(transaction)
         elif tx_type in ['genesis', 'test_transaction', 'sensor_reading']:
             # These don't require wallet validation
             return {'valid': True}
@@ -609,3 +615,181 @@ class SignChain:
 
         # Cap reward to prevent inflation
         return min(int(total_reward), 30)
+
+    # === PiNS (Pi Name System) Methods ===
+
+    def load_name_registry(self):
+        """Load name registry from file"""
+        if self.names_file.exists():
+            try:
+                with open(self.names_file, 'r') as f:
+                    self.name_registry = json.load(f)
+                    print(f"✅ Loaded name registry with {len(self.name_registry)} registered names")
+            except Exception as e:
+                print(f"❌ Failed to load name registry: {e}")
+                self.name_registry = {}
+
+    def save_name_registry(self):
+        """Save name registry to file"""
+        try:
+            # Ensure directory exists
+            self.names_file.parent.mkdir(parents=True, exist_ok=True)
+
+            with open(self.names_file, 'w') as f:
+                json.dump(self.name_registry, f, indent=2)
+
+        except Exception as e:
+            print(f"❌ Failed to save name registry: {e}")
+
+    def _rebuild_name_registry(self):
+        """Rebuild name registry from blockchain transactions"""
+        self.name_registry = {}
+
+        for block in self.chain:
+            for tx in block.transactions:
+                if tx.get('type') == 'name_registration':
+                    name = tx.get('name')
+                    wallet_address = tx.get('wallet_address')
+                    if name and wallet_address:
+                        tx_hash = hashlib.sha256(json.dumps(tx, sort_keys=True).encode()).hexdigest()
+                        self.name_registry[name] = {
+                            'address': wallet_address,
+                            'registered_at': tx.get('timestamp', block.timestamp),
+                            'tx_hash': tx_hash,
+                            'block_index': block.index
+                        }
+
+        # Save the rebuilt registry
+        self.save_name_registry()
+
+    def _validate_name_registration(self, transaction: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate name registration transaction"""
+        try:
+            # Required fields
+            required_fields = ['name', 'wallet_address', 'registration_fee', 'signature']
+            for field in required_fields:
+                if field not in transaction:
+                    return {
+                        'valid': False,
+                        'error': f'Missing required field: {field}'
+                    }
+
+            name = transaction['name']
+            wallet_address = transaction['wallet_address']
+            registration_fee = transaction['registration_fee']
+
+            # Validate name format
+            if not isinstance(name, str) or len(name) < 3 or len(name) > 32:
+                return {
+                    'valid': False,
+                    'error': 'Name must be 3-32 characters long'
+                }
+
+            # Name can only contain alphanumeric characters and hyphens
+            if not name.replace('-', '').isalnum():
+                return {
+                    'valid': False,
+                    'error': 'Name can only contain letters, numbers, and hyphens'
+                }
+
+            # Check if name is already registered
+            if name in self.name_registry:
+                return {
+                    'valid': False,
+                    'error': f'Name "{name}" is already registered'
+                }
+
+            # Validate registration fee
+            if registration_fee != 5.0:  # Fixed fee for now
+                return {
+                    'valid': False,
+                    'error': f'Invalid registration fee: {registration_fee}. Must be 5.0 tokens'
+                }
+
+            # Check wallet balance (simplified - should verify the fee can be paid)
+            wallet_balance = self._get_wallet_balance(wallet_address)
+            if wallet_balance < registration_fee:
+                return {
+                    'valid': False,
+                    'error': f'Insufficient balance for registration fee: {wallet_balance} < {registration_fee}'
+                }
+
+            # Reserved names (for system use)
+            reserved_names = {'foundation', 'genesis', 'admin', 'system', 'pisecure'}
+            if name.lower() in reserved_names:
+                return {
+                    'valid': False,
+                    'error': f'Name "{name}" is reserved for system use'
+                }
+
+            return {'valid': True}
+
+        except Exception as e:
+            return {
+                'valid': False,
+                'error': f'Name registration validation error: {e}'
+            }
+
+    def register_name(self, name: str, wallet_address: str) -> str:
+        """Register a name for a wallet address"""
+        # Validate the name registration
+        validation_result = self._validate_name_registration({
+            'type': 'name_registration',
+            'name': name,
+            'wallet_address': wallet_address,
+            'registration_fee': 5.0,
+            'timestamp': time.time(),
+            'signature': f'name_registration_{name}_{wallet_address}'
+        })
+
+        if not validation_result['valid']:
+            raise ValueError(f"Name registration failed: {validation_result['error']}")
+
+        # Create the registration transaction
+        transaction = {
+            'type': 'name_registration',
+            'name': name,
+            'wallet_address': wallet_address,
+            'registration_fee': 5.0,
+            'timestamp': time.time(),
+            'signature': f'name_registration_{name}_{wallet_address}'
+        }
+
+        # Add to pending transactions
+        tx_hash = self.add_transaction(transaction)
+
+        # Update local registry immediately for validation
+        self.name_registry[name] = {
+            'address': wallet_address,
+            'registered_at': time.time(),
+            'tx_hash': tx_hash,
+            'block_index': None  # Will be set when mined
+        }
+
+        return tx_hash
+
+    def resolve_name(self, name: str) -> Optional[str]:
+        """Resolve a name to wallet address"""
+        if name in self.name_registry:
+            return self.name_registry[name]['address']
+        return None
+
+    def check_name_availability(self, name: str) -> bool:
+        """Check if a name is available for registration"""
+        return name not in self.name_registry
+
+    def get_name_info(self, name: str) -> Optional[Dict[str, Any]]:
+        """Get information about a registered name"""
+        return self.name_registry.get(name)
+
+    def get_registered_names(self) -> List[str]:
+        """Get list of all registered names"""
+        return list(self.name_registry.keys())
+
+    def get_wallet_names(self, wallet_address: str) -> List[str]:
+        """Get all names registered to a wallet address"""
+        names = []
+        for name, info in self.name_registry.items():
+            if info['address'] == wallet_address:
+                names.append(name)
+        return names

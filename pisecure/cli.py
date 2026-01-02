@@ -887,18 +887,52 @@ def list_backups():
 
 @cli.command()
 @click.argument('wallet_name')
-@click.option('--name', help='Human-readable wallet name')
+@click.option('--name', help='Human-readable wallet name (optional)')
 def create_wallet(wallet_name, name):
-    """Create a new wallet"""
+    """Create a new wallet with optional custom name registration"""
     try:
         try:
             # Try relative import first
             from .core.wallet import SignWallet
+            from .core.blockchain import SignChain
         except ImportError:
             # Fall back to absolute import
             from core.wallet import SignWallet
+            from core.blockchain import SignChain
 
         wallet = SignWallet()
+
+        if name:
+            # User wants a custom name - check if it's available and show fee warning
+            blockchain = SignChain()
+
+            if not blockchain.check_name_availability(name):
+                console.print(f"[red]❌ Name '{name}' is already registered[/red]")
+                return
+
+            # Check bootstrap wallet balance for fee
+            bootstrap_wallet = "node-" + wallet_name.split('-')[-1] if '-' in wallet_name else wallet_name
+            try:
+                bootstrap_balance = blockchain.get_wallet_balance(wallet_name)  # Assume current wallet is bootstrap
+                if bootstrap_balance < 5.0:
+                    console.print(f"[yellow]⚠️ Insufficient balance for name registration[/yellow]")
+                    console.print(f"   Current balance: {bootstrap_balance} tokens")
+                    console.print(f"   Required: 5.0 tokens")
+                    console.print(f"   Mine more tokens first, then run: pisecure register-name {name}")
+                    name = None  # Don't register name
+                else:
+                    console.print(f"[blue]🏷️ Custom Name Registration[/blue]")
+                    console.print(f"   Name: {name}")
+                    console.print(f"   Fee: 5 PiSecure tokens")
+                    console.print(f"   Current balance: {bootstrap_balance} tokens")
+                    console.print(f"   After registration: {bootstrap_balance - 5.0} tokens")
+
+                    if not click.confirm("Continue with name registration?", default=True):
+                        console.print("[dim]Name registration cancelled[/dim]")
+                        name = None
+            except:
+                console.print(f"[yellow]⚠️ Could not check balance - name registration disabled[/yellow]")
+                name = None
 
         console.print(f"[blue]🔐 Creating wallet: {wallet_name}[/blue]")
 
@@ -910,11 +944,222 @@ def create_wallet(wallet_name, name):
             console.print(f"   Address: {result['address']}")
             console.print(f"   Key file: {result['key_file']}")
             console.print(f"   Data file: {result['wallet_file']}")
+
+            if name:
+                console.print(f"   Custom Name: {name} (PiNS registered)")
+                console.print(f"   Registration Fee: 5 tokens deducted")
         else:
             console.print(f"[red]❌ Wallet creation failed: {result.get('error')}[/red]")
 
     except Exception as e:
         console.print(f"[red]❌ Create wallet error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('name')
+@click.option('--wallet', help='Wallet address to register name for (uses config wallet if not specified)')
+def register_name(name, wallet):
+    """Register a PiNS name for your wallet"""
+    try:
+        try:
+            # Try relative import first
+            from .core.blockchain import SignChain
+        except ImportError:
+            # Fall back to absolute import
+            from core.blockchain import SignChain
+
+        blockchain = SignChain()
+
+        # Determine wallet address
+        if not wallet:
+            # Try to load from config
+            try:
+                import json
+                config_path = "/etc/pisecure/config.json"
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                wallet = config.get('mining', {}).get('wallet_address')
+            except (FileNotFoundError, json.JSONDecodeError, KeyError):
+                console.print("[red]❌ No wallet configured. Use --wallet to specify wallet address[/red]")
+                return
+
+        if not wallet:
+            console.print("[red]❌ No wallet address available[/red]")
+            return
+
+        # Check name availability
+        if not blockchain.check_name_availability(name):
+            console.print(f"[red]❌ Name '{name}' is already registered[/red]")
+            return
+
+        # Check wallet balance
+        balance = blockchain.get_wallet_balance(wallet)
+        if balance < 5.0:
+            console.print(f"[red]❌ Insufficient balance for registration[/red]")
+            console.print(f"   Required: 5.0 tokens")
+            console.print(f"   Current balance: {balance} tokens")
+            console.print(f"   Mine more tokens first!")
+            return
+
+        console.print(f"[blue]🏷️ Registering PiNS name: {name}[/blue]")
+        console.print(f"   Wallet: {wallet[:24]}...")
+        console.print(f"   Fee: 5 PiSecure tokens")
+        console.print(f"   Current balance: {balance} tokens")
+        console.print(f"   After registration: {balance - 5.0} tokens")
+
+        if not click.confirm("Register this name?", default=True):
+            console.print("[dim]Name registration cancelled[/dim]")
+            return
+
+        # Register the name
+        tx_hash = blockchain.register_name(name, wallet)
+
+        console.print("[green]✅ Name registration submitted![/green]")
+        console.print(f"   Name: {name}")
+        console.print(f"   Wallet: {wallet}")
+        console.print(f"   Transaction: {tx_hash[:16]}...")
+        console.print(f"   Status: Pending (will be mined in next block)")
+
+        # Mine the transaction immediately if possible
+        console.print("[dim]Mining registration transaction...[/dim]")
+        block = blockchain.mine_pending_transactions(verbose=False)
+        if block:
+            console.print(f"[green]✅ Name registered in block #{block.index}![/green]")
+            console.print(f"   Fee deducted: 5 tokens")
+        else:
+            console.print("[yellow]⚠️ Name registration pending - will be mined in next block[/yellow]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Name registration error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('name')
+def resolve_name(name):
+    """Resolve a PiNS name to wallet address"""
+    try:
+        try:
+            # Try relative import first
+            from .core.blockchain import SignChain
+        except ImportError:
+            # Fall back to absolute import
+            from core.blockchain import SignChain
+
+        blockchain = SignChain()
+
+        address = blockchain.resolve_name(name)
+
+        if address:
+            console.print(f"[green]✅ Name Resolution[/green]")
+            console.print(f"   Name: {name}")
+            console.print(f"   Address: {address}")
+
+            # Show registration info
+            name_info = blockchain.get_name_info(name)
+            if name_info:
+                console.print(f"   Registered: {time.ctime(name_info['registered_at'])}")
+                console.print(f"   Block: #{name_info.get('block_index', 'pending')}")
+        else:
+            console.print(f"[red]❌ Name '{name}' not found[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Name resolution error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('name')
+def check_name(name):
+    """Check if a PiNS name is available"""
+    try:
+        try:
+            # Try relative import first
+            from .core.blockchain import SignChain
+        except ImportError:
+            # Fall back to absolute import
+            from core.blockchain import SignChain
+
+        blockchain = SignChain()
+
+        available = blockchain.check_name_availability(name)
+
+        if available:
+            console.print(f"[green]✅ Name '{name}' is available for registration[/green]")
+            console.print(f"   Registration fee: 5 PiSecure tokens")
+        else:
+            name_info = blockchain.get_name_info(name)
+            if name_info:
+                console.print(f"[red]❌ Name '{name}' is already registered[/red]")
+                console.print(f"   Owner: {name_info['address'][:24]}...")
+                console.print(f"   Registered: {time.ctime(name_info['registered_at'])}")
+
+    except Exception as e:
+        console.print(f"[red]❌ Name check error: {e}[/red]")
+
+
+@cli.command()
+@click.argument('wallet_address')
+def wallet_names(wallet_address):
+    """List all PiNS names registered to a wallet"""
+    try:
+        try:
+            # Try relative import first
+            from .core.blockchain import SignChain
+        except ImportError:
+            # Fall back to absolute import
+            from core.blockchain import SignChain
+
+        blockchain = SignChain()
+
+        names = blockchain.get_wallet_names(wallet_address)
+
+        if names:
+            console.print(f"[green]🏷️ PiNS Names for {wallet_address[:24]}...[/green]")
+            for name in names:
+                name_info = blockchain.get_name_info(name)
+                console.print(f"   • {name} (registered {time.ctime(name_info['registered_at'])})")
+        else:
+            console.print(f"[dim]No PiNS names registered for this wallet[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Wallet names error: {e}[/red]")
+
+
+@cli.command()
+def list_names():
+    """List all registered PiNS names"""
+    try:
+        try:
+            # Try relative import first
+            from .core.blockchain import SignChain
+        except ImportError:
+            # Fall back to absolute import
+            from core.blockchain import SignChain
+
+        blockchain = SignChain()
+
+        names = blockchain.get_registered_names()
+
+        if names:
+            table = Table(title="🏷️ Registered PiNS Names")
+            table.add_column("Name", style="cyan")
+            table.add_column("Address", style="green", no_wrap=True)
+            table.add_column("Registered", style="blue")
+
+            for name in sorted(names):
+                name_info = blockchain.get_name_info(name)
+                table.add_row(
+                    name,
+                    name_info['address'][:24] + "...",
+                    time.ctime(name_info['registered_at'])
+                )
+
+            console.print(table)
+        else:
+            console.print("[dim]No PiNS names registered yet[/dim]")
+            console.print("[dim]Register your first name with: pisecure register-name <name>[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]❌ List names error: {e}[/red]")
 
 
 @cli.command()
