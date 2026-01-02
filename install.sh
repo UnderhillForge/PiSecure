@@ -335,19 +335,37 @@ setup_wallet() {
 
     # Generate unique wallet name based on system identifier
     if [[ -f /proc/cpuinfo ]] && grep -q "Serial" /proc/cpuinfo; then
-        # Raspberry Pi - use CPU serial
+        # Raspberry Pi - use CPU serial (guaranteed unique)
         SYSTEM_ID=$(grep "Serial" /proc/cpuinfo | awk '{print $3}' | tr '[:upper:]' '[:lower:]')
         WALLET_NAME="node-${SYSTEM_ID: -6}"
         WALLET_DISPLAY_NAME="PiSecure Node Wallet"
     else
-        # Non-Pi system - use hostname or random identifier
-        HOSTNAME_PART=$(hostname | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g' | cut -c1-6)
-        if [[ -z "$HOSTNAME_PART" ]]; then
-            # Fallback to random if hostname is empty
+        # Non-Pi system - create unique name with collision detection
+        BASE_HOSTNAME=$(hostname | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g' | cut -c1-8)
+
+        if [[ -z "$BASE_HOSTNAME" ]]; then
+            # Fallback to random if hostname is empty/unusable
             RANDOM_ID=$(od -An -N3 -tu1 /dev/urandom | tr -d ' ')
-            HOSTNAME_PART=$(printf "%06d" $((RANDOM_ID % 1000000)))
+            BASE_HOSTNAME=$(printf "rnd%06d" $((RANDOM_ID % 1000000)))
         fi
-        WALLET_NAME="host-${HOSTNAME_PART}"
+
+        # Check for wallet name collisions and add suffix if needed
+        WALLET_NAME="host-${BASE_HOSTNAME}"
+        COUNTER=1
+
+        # Check if wallet already exists (basic check)
+        while [[ -f "/var/lib/pisecure/wallets/${WALLET_NAME}.json" ]]; do
+            WALLET_NAME="host-${BASE_HOSTNAME}${COUNTER}"
+            ((COUNTER++))
+            # Prevent infinite loop
+            if [[ $COUNTER -gt 99 ]]; then
+                # Ultimate fallback - add timestamp
+                TIMESTAMP=$(date +%s | tail -c 4)
+                WALLET_NAME="host-${BASE_HOSTNAME}-${TIMESTAMP}"
+                break
+            fi
+        done
+
         WALLET_DISPLAY_NAME="PiSecure Host Wallet"
     fi
 
