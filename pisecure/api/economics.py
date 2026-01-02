@@ -717,8 +717,24 @@ class TokenEconomics:
 
 # Global instances
 fee_distributor = FeeDistribution()
-foundation_trust = FoundationTrust()
+foundation_trust = None  # Lazy loaded - only created when needed
 token_economics = TokenEconomics()
+
+
+def get_foundation_trust():
+    """
+    Lazy load foundation trust only when needed for foundation operations.
+    This allows the API server to start without requiring genesis keys.
+    """
+    global foundation_trust
+    if foundation_trust is None:
+        try:
+            foundation_trust = FoundationTrust()
+        except RuntimeError as e:
+            # If genesis keys are not available, foundation operations are disabled
+            # This is normal for end-user installations
+            return None
+    return foundation_trust
 
 __all__ = [
     'TrustType',

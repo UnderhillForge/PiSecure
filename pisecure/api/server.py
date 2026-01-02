@@ -461,7 +461,16 @@ class BlockchainAPI:
         @self.app.route(f'/api/{self.api_version}/foundation/status', methods=['GET'])
         def foundation_status():
             try:
-                status = token_economics.get_foundation_status()
+                foundation = get_foundation_trust()
+                if foundation is None:
+                    return jsonify({
+                        'error': 'Foundation trust not available - genesis keys not found',
+                        'genesis_key_loaded': False,
+                        'address': 'foundation_314st',
+                        'balance': 0
+                    }), 503
+
+                status = foundation.get_status()
                 return jsonify(status)
 
             except Exception as e:
@@ -471,9 +480,12 @@ class BlockchainAPI:
         @self.app.route(f'/api/{self.api_version}/foundation/grant', methods=['POST'])
         def create_grant():
             try:
-                grant_data = request.get_json()
+                foundation = get_foundation_trust()
+                if foundation is None:
+                    return jsonify({'error': 'Foundation trust not available'}), 503
 
-                grant_id = foundation_trust.create_grant(grant_data)
+                grant_data = request.get_json()
+                grant_id = foundation.create_grant(grant_data)
 
                 return jsonify({
                     'success': True,
@@ -488,12 +500,16 @@ class BlockchainAPI:
         @self.app.route(f'/api/{self.api_version}/foundation/grant/<grant_id>/vote', methods=['POST'])
         def vote_on_grant(grant_id):
             try:
+                foundation = get_foundation_trust()
+                if foundation is None:
+                    return jsonify({'error': 'Foundation trust not available'}), 503
+
                 vote_data = request.get_json()
                 voter_address = vote_data.get('voter_address')
                 vote = vote_data.get('vote')  # True for yes, False for no
                 voting_power = vote_data.get('voting_power', 1.0)
 
-                foundation_trust.vote_on_grant(grant_id, voter_address, vote, voting_power)
+                foundation.vote_on_grant(grant_id, voter_address, vote, voting_power)
 
                 return jsonify({'success': True, 'message': 'Vote recorded'})
 
@@ -504,9 +520,12 @@ class BlockchainAPI:
         @self.app.route(f'/api/{self.api_version}/economics/fees', methods=['GET'])
         def fee_distribution_info():
             try:
+                foundation = get_foundation_trust()
+                allocation_rules = foundation.allocation_rules if foundation else {}
+
                 return jsonify({
                     'distribution_rules': fee_distributor.distribution_rules,
-                    'foundation_allocation': foundation_trust.allocation_rules
+                    'foundation_allocation': allocation_rules
                 })
 
             except Exception as e:
@@ -518,13 +537,17 @@ class BlockchainAPI:
         @self.app.route(f'/api/{self.api_version}/foundation/sign-transaction', methods=['POST'])
         def sign_foundation_transaction():
             try:
+                foundation = get_foundation_trust()
+                if foundation is None:
+                    return jsonify({'error': 'Foundation trust not available - genesis keys required'}), 503
+
                 tx_data = request.get_json()
 
                 if not tx_data:
                     return jsonify({'error': 'No transaction data provided'}), 400
 
                 # Sign with genesis private key
-                signature = foundation_trust.sign_foundation_transaction(tx_data)
+                signature = foundation.sign_foundation_transaction(tx_data)
 
                 return jsonify({
                     'success': True,
@@ -540,6 +563,10 @@ class BlockchainAPI:
         @self.app.route(f'/api/{self.api_version}/foundation/execute-transaction', methods=['POST'])
         def execute_foundation_transaction():
             try:
+                foundation = get_foundation_trust()
+                if foundation is None:
+                    return jsonify({'error': 'Foundation trust not available - genesis keys required'}), 503
+
                 signed_tx_data = request.get_json()
 
                 if not signed_tx_data:
@@ -552,7 +579,7 @@ class BlockchainAPI:
                     return jsonify({'error': 'Transaction and signature required'}), 400
 
                 # Execute transaction if signature is valid
-                result = foundation_trust.execute_foundation_transaction(transaction, signature)
+                result = foundation.execute_foundation_transaction(transaction, signature)
 
                 return jsonify(result)
 
@@ -563,12 +590,21 @@ class BlockchainAPI:
         @self.app.route(f'/api/{self.api_version}/foundation/transactions', methods=['GET'])
         def get_foundation_transactions():
             try:
+                foundation = get_foundation_trust()
+                if foundation is None:
+                    return jsonify({
+                        'error': 'Foundation trust not available',
+                        'transactions': [],
+                        'total_count': 0,
+                        'limit': 0
+                    }), 503
+
                 limit = min(int(request.args.get('limit', 50)), 200)
-                transactions = foundation_trust.get_transaction_history(limit)
+                transactions = foundation.get_transaction_history(limit)
 
                 return jsonify({
                     'transactions': transactions,
-                    'total_count': len(foundation_trust.transaction_log),
+                    'total_count': len(foundation.transaction_log),
                     'limit': limit
                 })
 
@@ -579,6 +615,10 @@ class BlockchainAPI:
         @self.app.route(f'/api/{self.api_version}/foundation/verify-transaction', methods=['POST'])
         def verify_foundation_transaction():
             try:
+                foundation = get_foundation_trust()
+                if foundation is None:
+                    return jsonify({'error': 'Foundation trust not available - genesis keys required'}), 503
+
                 verify_data = request.get_json()
 
                 if not verify_data:
@@ -590,7 +630,7 @@ class BlockchainAPI:
                 if not transaction or not signature:
                     return jsonify({'error': 'Transaction and signature required'}), 400
 
-                is_valid = foundation_trust.verify_foundation_transaction(transaction, signature)
+                is_valid = foundation.verify_foundation_transaction(transaction, signature)
 
                 return jsonify({
                     'is_valid': is_valid,
