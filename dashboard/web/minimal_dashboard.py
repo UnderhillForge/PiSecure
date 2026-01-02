@@ -1267,7 +1267,7 @@ def get_mining_info():
     }
 
 def get_network_info():
-    """Get network information"""
+    """Get network information including peer counts"""
     # Check for node discovery status
     node_discovery_enabled = False
     public_endpoints = []
@@ -1299,9 +1299,12 @@ def get_network_info():
         print(f"Node discovery check error: {e}")
         node_discovery_enabled = False
 
+    # Get real peer counts
+    connected_peers, known_peers = get_peer_counts()
+
     return {
-        'connected_peers': 0,      # Would check actual peer connections
-        'known_peers': 0,          # Would check peer database
+        'connected_peers': connected_peers,
+        'known_peers': known_peers,
         'sync_progress': '0%',     # Would check sync status
         'ip_address': 'Scanning...', # Already handled in system info
         'network_recv': 0,         # Already handled in system info
@@ -1310,6 +1313,96 @@ def get_network_info():
         'discovery_methods': discovery_methods,
         'relay_count': relay_count
     }
+
+def get_peer_counts():
+    """Get actual peer counts by scanning network for other PiSecure instances"""
+    connected_peers = 0
+    known_peers = 0
+
+    try:
+        # Check for peer database
+        peer_db_file = Path("/var/lib/pisecure/peers.json")
+        if peer_db_file.exists():
+            try:
+                with open(peer_db_file, 'r') as f:
+                    peer_data = json.load(f)
+                    known_peers = len(peer_data.get('known_peers', []))
+            except:
+                known_peers = 0
+
+        # Scan for active PiSecure instances on local network
+        import socket
+        import threading
+        import time
+
+        # Common PiSecure ports
+        pisecure_ports = [3142, 5000, 3141]  # API, Dashboard, Bootstrap
+
+        # Get local network range
+        try:
+            # Get local IP to determine network range
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+
+            # Extract network prefix (e.g., 192.168.1.)
+            ip_parts = local_ip.split('.')
+            network_prefix = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}."
+
+            # Scan local network for PiSecure instances
+            active_instances = []
+
+            def scan_port(ip, port):
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(0.5)
+                    result = sock.connect_ex((ip, port))
+                    sock.close()
+                    if result == 0:
+                        active_instances.append(f"{ip}:{port}")
+                except:
+                    pass
+
+            # Scan range 1-254 on local network
+            threads = []
+            for i in range(1, 255):
+                target_ip = f"{network_prefix}{i}"
+                for port in pisecure_ports:
+                    thread = threading.Thread(target=scan_port, args=(target_ip, port))
+                    thread.daemon = True
+                    threads.append(thread)
+                    thread.start()
+
+            # Wait for all scans to complete (with timeout)
+            start_time = time.time()
+            for thread in threads:
+                remaining_time = max(0, 2.0 - (time.time() - start_time))
+                if remaining_time > 0:
+                    thread.join(timeout=remaining_time)
+
+            # Count unique PiSecure instances (avoid counting multiple ports on same IP)
+            unique_ips = set()
+            for instance in active_instances:
+                ip = instance.split(':')[0]
+                unique_ips.add(ip)
+
+            connected_peers = len(unique_ips) - 1  # Subtract self
+
+        except Exception as e:
+            print(f"Network scan error: {e}")
+            connected_peers = 0
+
+        # Ensure non-negative counts
+        connected_peers = max(0, connected_peers)
+        known_peers = max(0, known_peers)
+
+    except Exception as e:
+        print(f"Peer count error: {e}")
+        connected_peers = 0
+        known_peers = 0
+
+    return connected_peers, known_peers
 
 def get_recent_blocks():
     """Get recent blocks (simulated for demo)"""
