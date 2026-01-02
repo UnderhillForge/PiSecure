@@ -36,6 +36,10 @@ from ..core.blockchain import SignChain
 from ..core.wallet import SignWallet
 from ..network.discovery import PeerDiscovery
 from ..updates.auth import UpdateAuthority
+from .economics import (
+    TokenEconomics, DeveloperTrust, TrustType, TrustVisibility,
+    token_economics, fee_distributor, foundation_trust
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -282,6 +286,228 @@ class BlockchainAPI:
                 result = self.update_authority.verify_update_signature(manifest, signatures)
 
                 return jsonify(result)
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # === 314ST ECONOMICS ENDPOINTS ===
+
+        # Create developer trust
+        @self.app.route(f'/api/{self.api_version}/trust', methods=['POST'])
+        def create_trust():
+            try:
+                trust_data = request.get_json()
+
+                if not trust_data:
+                    return jsonify({'error': 'No trust data provided'}), 400
+
+                developer_address = trust_data.get('developer_address')
+                trust_type_str = trust_data.get('trust_type', 'public')
+                initial_funding = trust_data.get('initial_funding', 0)
+
+                if not developer_address:
+                    return jsonify({'error': 'Developer address required'}), 400
+
+                # Map string to enum
+                trust_type_map = {
+                    'public': TrustType.PUBLIC,
+                    'subscriber_all': TrustType.SUBSCRIBER_ALL,
+                    'subscriber_individual': TrustType.SUBSCRIBER_INDIVIDUAL,
+                    'hybrid': TrustType.HYBRID
+                }
+
+                trust_type = trust_type_map.get(trust_type_str, TrustType.PUBLIC)
+                trust_id = f"trust_{hashlib.sha256(developer_address.encode()).hexdigest()[:16]}"
+
+                trust = token_economics.create_developer_trust(
+                    trust_id, developer_address, trust_type, initial_funding
+                )
+
+                return jsonify({
+                    'success': True,
+                    'trust_id': trust_id,
+                    'status': trust.get_status()
+                })
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Get trust status
+        @self.app.route(f'/api/{self.api_version}/trust/<trust_id>', methods=['GET'])
+        def get_trust(trust_id):
+            try:
+                trust = token_economics.get_trust(trust_id)
+                if not trust:
+                    return jsonify({'error': 'Trust not found'}), 404
+
+                return jsonify(trust.get_status())
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Fund trust
+        @self.app.route(f'/api/{self.api_version}/trust/<trust_id>/fund', methods=['POST'])
+        def fund_trust(trust_id):
+            try:
+                fund_data = request.get_json()
+                amount = fund_data.get('amount', 0)
+
+                trust = token_economics.get_trust(trust_id)
+                if not trust:
+                    return jsonify({'error': 'Trust not found'}), 404
+
+                success = trust.fund_trust(amount)
+                if success:
+                    return jsonify({'success': True, 'new_balance': trust.balance})
+                else:
+                    return jsonify({'error': 'Funding failed'}), 400
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Create subscription plan
+        @self.app.route(f'/api/{self.api_version}/trust/<trust_id>/plan', methods=['POST'])
+        def create_subscription_plan(trust_id):
+            try:
+                plan_data = request.get_json()
+
+                trust = token_economics.get_trust(trust_id)
+                if not trust:
+                    return jsonify({'error': 'Trust not found'}), 404
+
+                plan_id = trust.create_subscription_plan(plan_data)
+
+                return jsonify({
+                    'success': True,
+                    'plan_id': plan_id,
+                    'plan': plan_data
+                })
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Subscribe user
+        @self.app.route(f'/api/{self.api_version}/trust/<trust_id>/subscribe', methods=['POST'])
+        def subscribe_user(trust_id):
+            try:
+                sub_data = request.get_json()
+                user_id = sub_data.get('user_id')
+                plan_id = sub_data.get('plan_id')
+
+                if not user_id or not plan_id:
+                    return jsonify({'error': 'user_id and plan_id required'}), 400
+
+                trust = token_economics.get_trust(trust_id)
+                if not trust:
+                    return jsonify({'error': 'Trust not found'}), 404
+
+                success = trust.add_subscriber(user_id, plan_id)
+                if success:
+                    return jsonify({'success': True, 'message': 'User subscribed'})
+                else:
+                    return jsonify({'error': 'Subscription failed'}), 400
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Grant free access
+        @self.app.route(f'/api/{self.api_version}/trust/<trust_id>/free-access', methods=['POST'])
+        def grant_free_access(trust_id):
+            try:
+                access_data = request.get_json()
+                user_id = access_data.get('user_id')
+
+                trust = token_economics.get_trust(trust_id)
+                if not trust:
+                    return jsonify({'error': 'Trust not found'}), 404
+
+                success = trust.grant_free_access(user_id)
+                if success:
+                    return jsonify({'success': True, 'message': 'Free access granted'})
+                else:
+                    return jsonify({'error': 'Failed to grant free access'}), 400
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Check user access (for end-user API calls)
+        @self.app.route(f'/api/{self.api_version}/trust/<trust_id>/access/<user_id>', methods=['POST'])
+        def check_user_access(trust_id, user_id):
+            try:
+                access_data = request.get_json()
+                operation = access_data.get('operation', 'unknown')
+                params = access_data.get('params', {})
+
+                # Calculate operation cost
+                operation_cost = token_economics.calculate_api_cost(operation, params)
+
+                trust = token_economics.get_trust(trust_id)
+                if not trust:
+                    return jsonify({'error': 'Trust not found'}), 404
+
+                can_access, message = trust.check_access(user_id, operation_cost)
+
+                return jsonify({
+                    'can_access': can_access,
+                    'message': message,
+                    'cost': operation_cost,
+                    'trust_balance': trust.balance if trust else 0
+                })
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Foundation status
+        @self.app.route(f'/api/{self.api_version}/foundation/status', methods=['GET'])
+        def foundation_status():
+            try:
+                status = token_economics.get_foundation_status()
+                return jsonify(status)
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Create grant proposal
+        @self.app.route(f'/api/{self.api_version}/foundation/grant', methods=['POST'])
+        def create_grant():
+            try:
+                grant_data = request.get_json()
+
+                grant_id = foundation_trust.create_grant(grant_data)
+
+                return jsonify({
+                    'success': True,
+                    'grant_id': grant_id,
+                    'status': 'pending_review'
+                })
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Vote on grant
+        @self.app.route(f'/api/{self.api_version}/foundation/grant/<grant_id>/vote', methods=['POST'])
+        def vote_on_grant(grant_id):
+            try:
+                vote_data = request.get_json()
+                voter_address = vote_data.get('voter_address')
+                vote = vote_data.get('vote')  # True for yes, False for no
+                voting_power = vote_data.get('voting_power', 1.0)
+
+                foundation_trust.vote_on_grant(grant_id, voter_address, vote, voting_power)
+
+                return jsonify({'success': True, 'message': 'Vote recorded'})
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Get fee distribution info
+        @self.app.route(f'/api/{self.api_version}/economics/fees', methods=['GET'])
+        def fee_distribution_info():
+            try:
+                return jsonify({
+                    'distribution_rules': fee_distributor.distribution_rules,
+                    'foundation_allocation': foundation_trust.allocation_rules
+                })
 
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
