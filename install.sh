@@ -370,9 +370,9 @@ from pisecure.core.wallet import SignWallet
 wallet = SignWallet()
 result = wallet.create_wallet('$WALLET_NAME', '$WALLET_DISPLAY_NAME')
 if result['success']:
-    print(f'SUCCESS:{result[\"address\"]}')
+    print('SUCCESS:' + result['address'])
 else:
-    print(f'FAILED:{result.get(\"error\", \"Unknown error\")}')
+    print('FAILED:' + result.get('error', 'Unknown error'))
 \"
     ")
 
