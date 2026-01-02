@@ -2080,7 +2080,7 @@ def export_identity():
 
 
 @cli.command()
-@click.argument('identity_file', type=click.Path(exists=True))
+@click.argument('plugin_name')
 def import_identity(identity_file):
     """Import device identity from backup"""
     try:
@@ -2096,6 +2096,431 @@ def import_identity(identity_file):
 
     except Exception as e:
         console.print(f"[red]❌ Identity import error: {e}[/red]")
+
+
+# === ENHANCED UPDATE SYSTEM ===
+
+@cli.command()
+@click.option('--type', 'update_type', help='Filter by update type (critical, safe, compatible, breaking)')
+def update_check(update_type):
+    """Check for available software updates"""
+    try:
+        try:
+            # Try relative import first
+            from .updates.updater import OTAUpdater
+            from .updates.update_classifier import UpdateType
+        except ImportError:
+            # Fall back to absolute import
+            from updates.updater import OTAUpdater
+            from updates.update_classifier import UpdateType
+
+        updater = OTAUpdater()
+
+        console.print("[blue]🔍 Checking for PiSecure updates...[/blue]")
+
+        # Get current version
+        current_version = updater._get_current_version()
+        console.print(f"   Current version: {current_version}")
+
+        # Check for updates
+        available_updates = updater.check_for_updates(current_version)
+
+        if not available_updates:
+            console.print("[green]✅ Your PiSecure installation is up to date![/green]")
+            return
+
+        # Filter by type if requested
+        if update_type:
+            try:
+                type_filter = UpdateType(update_type.lower())
+                available_updates = [u for u in available_updates if u.get('type') == type_filter.value]
+            except ValueError:
+                console.print(f"[red]❌ Invalid update type: {update_type}[/red]")
+                console.print("[dim]Valid types: critical, safe, compatible, breaking[/dim]")
+                return
+
+        console.print(f"\n[yellow]📦 Found {len(available_updates)} available update(s):[/yellow]\n")
+
+        # Display updates
+        for update in available_updates[:5]:  # Show latest 5
+            update_type_display = update.get('type', 'unknown').upper()
+            version = update.get('version', 'unknown')
+            description = update.get('description', 'No description')[:60]
+
+            # Color code by type
+            if update_type_display == 'CRITICAL':
+                type_color = "[red]"
+            elif update_type_display == 'SAFE':
+                type_color = "[green]"
+            elif update_type_display == 'COMPATIBLE':
+                type_color = "[yellow]"
+            else:
+                type_color = "[red]"
+
+            console.print(f"{type_color}• {version} - {description}[/{type_color.replace('[', '').replace(']', '')}]")
+
+        if len(available_updates) > 5:
+            console.print(f"[dim]... and {len(available_updates) - 5} more[/dim]")
+
+        # Recommendations
+        critical_updates = [u for u in available_updates if u.get('type') == 'critical']
+        if critical_updates:
+            console.print(f"\n[red]🚨 {len(critical_updates)} critical update(s) available![/red]")
+            console.print("[dim]Run 'pisecure update apply' to install immediately[/dim]")
+
+        safe_updates = [u for u in available_updates if u.get('type') == 'safe']
+        if safe_updates and not critical_updates:
+            console.print(f"\n[green]✨ {len(safe_updates)} safe update(s) available[/green]")
+            console.print("[dim]Run 'pisecure update apply' to install[/dim]")
+
+        breaking_updates = [u for u in available_updates if u.get('type') == 'breaking']
+        if breaking_updates:
+            console.print(f"\n[red]⚠️  {len(breaking_updates)} breaking update(s) require network coordination[/red]")
+            console.print("[dim]These may change consensus rules and need community approval[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Update check failed: {e}[/red]")
+
+
+@cli.command()
+@click.argument('version', required=False)
+@click.option('--force', is_flag=True, help='Force application (skip safety checks)')
+@click.option('--skip-backup', is_flag=True, help='Skip backup creation (not recommended)')
+def update_apply(version, force, skip_backup):
+    """Apply available software updates"""
+    try:
+        try:
+            # Try relative import first
+            from .updates.updater import OTAUpdater
+            from .updates.update_classifier import UpdateClassifier, UpdateType
+        except ImportError:
+            # Fall back to absolute import
+            from updates.updater import OTAUpdater
+            from updates.update_classifier import UpdateClassifier, UpdateType
+
+        updater = OTAUpdater()
+        classifier = UpdateClassifier()
+
+        console.print("[blue]🔄 Applying PiSecure updates...[/blue]")
+
+        # Get current version
+        current_version = updater._get_current_version()
+        console.print(f"   Current version: {current_version}")
+
+        # Get available updates
+        available_updates = updater.check_for_updates(current_version)
+
+        if not available_updates:
+            console.print("[green]✅ No updates available - already up to date![/green]")
+            return
+
+        # Select update to apply
+        target_update = None
+        if version:
+            # Find specific version
+            for update in available_updates:
+                if update.get('version') == version:
+                    target_update = update
+                    break
+            if not target_update:
+                console.print(f"[red]❌ Version {version} not found in available updates[/red]")
+                return
+        else:
+            # Apply latest safe update
+            safe_updates = [u for u in available_updates if u.get('type') in ['critical', 'safe']]
+            if safe_updates:
+                target_update = safe_updates[0]  # Latest safe update
+            else:
+                console.print("[yellow]⚠️  No safe updates available[/yellow]")
+                console.print("[dim]Use --version to specify a specific update[/dim]")
+                return
+
+        update_version = target_update.get('version')
+        update_type = target_update.get('type', 'unknown')
+
+        console.print(f"   Target update: {update_version}")
+        console.print(f"   Update type: {update_type.upper()}")
+
+        # Safety check for non-critical updates
+        if not force and update_type not in ['critical']:
+            console.print(f"\n[yellow]⚠️  This is a {update_type.upper()} update[/yellow]")
+
+            if update_type == 'breaking':
+                console.print("[red]Breaking updates may change consensus rules[/red]")
+                console.print("[red]Network coordination required - do not apply without community approval[/red]")
+                return
+            elif update_type == 'compatible':
+                console.print("[yellow]Compatible updates may require testing[/yellow]")
+                if not click.confirm("Continue with update?", default=False):
+                    console.print("[dim]Update cancelled[/dim]")
+                    return
+
+        # Download update
+        console.print("[dim]Downloading update...[/dim]")
+        download_result = updater.download_update(target_update)
+
+        if not download_result['success']:
+            console.print(f"[red]❌ Download failed: {download_result['error']}[/red]")
+            return
+
+        package_path = download_result['local_path']
+
+        # Verify update
+        console.print("[dim]Verifying update...[/dim]")
+        verify_result = updater.verify_update(package_path, target_update)
+
+        if not verify_result['verified']:
+            console.print(f"[red]❌ Verification failed: {verify_result['error']}[/red]")
+            return
+
+        manifest = verify_result['manifest']
+
+        # Additional safety check using classifier
+        changed_files = manifest.get('changed_files', [])
+        is_safe, safety_reason = classifier.verify_update_safety(manifest, changed_files)
+
+        if not is_safe and not force:
+            console.print(f"[red]❌ Safety check failed: {safety_reason}[/red]")
+            console.print("[dim]Use --force to override (not recommended)[/dim]")
+            return
+
+        # Apply update
+        console.print("[dim]Applying update...[/dim]")
+
+        apply_result = updater.apply_update(
+            package_path,
+            manifest,
+            progress_callback=lambda current, total: console.print(f"[dim]Installing... {current}/{total} files[/dim]")
+        )
+
+        if apply_result['success']:
+            console.print("[green]✅ Update applied successfully![/green]")
+            console.print(f"   New version: {apply_result['version']}")
+            console.print(f"   Backup ID: {apply_result['backup_id']}")
+
+            # Check if restart needed
+            if manifest.get('restart_required', True):
+                console.print("[yellow]🔄 System restart recommended[/yellow]")
+                if click.confirm("Restart services now?", default=False):
+                    # Restart services
+                    import subprocess
+                    try:
+                        subprocess.run(['sudo', 'systemctl', 'restart', 'pisecure*'], shell=True, check=True)
+                        console.print("[green]✅ Services restarted[/green]")
+                    except Exception as e:
+                        console.print(f"[red]❌ Service restart failed: {e}[/red]")
+                        console.print("[dim]Manual restart may be required[/dim]")
+        else:
+            console.print(f"[red]❌ Update failed: {apply_result.get('error', 'Unknown error')}[/red]")
+
+            # Check if rollback was attempted
+            if apply_result.get('rollback_attempted'):
+                console.print("[yellow]⚠️  Automatic rollback was attempted[/yellow]")
+                if not apply_result.get('rollback_attempted'):
+                    console.print("[red]Manual intervention may be required[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Update application failed: {e}[/red]")
+
+
+@cli.command()
+def update_status():
+    """Show current update system status"""
+    try:
+        try:
+            # Try relative import first
+            from .updates.updater import OTAUpdater
+        except ImportError:
+            # Fall back to absolute import
+            from updates.updater import OTAUpdater
+
+        updater = OTAUpdater()
+
+        console.print("[blue]📊 PiSecure Update System Status[/blue]")
+        console.print("=" * 40)
+
+        # Get system status
+        status = updater.get_system_status()
+
+        console.print(f"[cyan]Current Version:[/cyan] {status['current_version']}")
+        console.print(f"[cyan]Available Updates:[/cyan] {status['available_updates']}")
+        console.print(f"[cyan]Backups Available:[/cyan] {status['backups_count']}")
+        console.print(f"[cyan]Cached Updates:[/cyan] {status['cached_updates']}")
+        console.print(f"[cyan]Update History:[/cyan] {status['update_history']}")
+
+        # Last update check
+        import time
+        last_check = time.ctime(status.get('last_update_check', 0))
+        console.print(f"[cyan]Last Update Check:[/cyan] {last_check}")
+
+        # Recent update history
+        history = updater.get_update_history()
+        if history:
+            console.print(f"\n[cyan]Recent Updates:[/cyan]")
+            for entry in history[-3:]:  # Last 3 updates
+                event_type = entry.get('event_type', 'unknown')
+                version = entry.get('version', 'unknown')
+                timestamp = time.ctime(entry.get('timestamp', 0))
+
+                if event_type == 'applied':
+                    console.print(f"   ✅ {version} - Applied on {timestamp}")
+                elif event_type == 'rolled_back':
+                    console.print(f"   🔄 {version} - Rolled back on {timestamp}")
+                else:
+                    console.print(f"   • {version} - {event_type.title()} on {timestamp}")
+
+        # Update recommendations
+        if status['available_updates'] > 0:
+            console.print(f"\n[yellow]💡 {status['available_updates']} update(s) available[/yellow]")
+            console.print("[dim]Run 'pisecure update check' for details[/dim]")
+            console.print("[dim]Run 'pisecure update apply' to install safe updates[/dim]")
+
+        if status['backups_count'] == 0:
+            console.print(f"\n[yellow]⚠️  No update backups available[/yellow]")
+            console.print("[dim]Consider creating a manual backup before major updates[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Update status check failed: {e}[/red]")
+
+
+@cli.command()
+@click.argument('version', required=False)
+def update_rollback(version):
+    """Rollback to previous version"""
+    try:
+        try:
+            # Try relative import first
+            from .updates.updater import OTAUpdater
+        except ImportError:
+            # Fall back to absolute import
+            from updates.updater import OTAUpdater
+
+        updater = OTAUpdater()
+
+        if version:
+            console.print(f"[blue]🔄 Rolling back to version: {version}[/blue]")
+        else:
+            console.print("[blue]🔄 Rolling back to latest backup[/blue]")
+
+        if not click.confirm("This will revert system changes. Continue?", default=False):
+            console.print("[dim]Rollback cancelled[/dim]")
+            return
+
+        result = updater.rollback_update(version)
+
+        if result['success']:
+            console.print("[green]✅ Rollback completed successfully![/green]")
+            console.print("[yellow]🔄 System restart recommended[/yellow]")
+
+            if click.confirm("Restart services now?", default=False):
+                import subprocess
+                try:
+                    subprocess.run(['sudo', 'systemctl', 'restart', 'pisecure*'], shell=True, check=True)
+                    console.print("[green]✅ Services restarted[/green]")
+                except Exception as e:
+                    console.print(f"[red]❌ Service restart failed: {e}[/red]")
+        else:
+            console.print(f"[red]❌ Rollback failed: {result.get('error', 'Unknown error')}[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Rollback failed: {e}[/red]")
+
+
+@cli.command()
+def update_history():
+    """Show update history and changelog"""
+    try:
+        try:
+            # Try relative import first
+            from .updates.updater import OTAUpdater
+        except ImportError:
+            # Fall back to absolute import
+            from updates.updater import OTAUpdater
+
+        updater = OTAUpdater()
+
+        console.print("[blue]📚 PiSecure Update History[/blue]")
+        console.print("=" * 35)
+
+        history = updater.get_update_history()
+
+        if not history:
+            console.print("[yellow]📭 No update history available[/yellow]")
+            return
+
+        for entry in reversed(history[-10:]):  # Show last 10 entries
+            import time
+            timestamp = time.ctime(entry.get('timestamp', 0))
+            event_type = entry.get('event_type', 'unknown')
+            version = entry.get('version', 'unknown')
+
+            if event_type == 'applied':
+                console.print(f"✅ {timestamp} - Applied {version}")
+            elif event_type == 'rolled_back':
+                error = entry.get('error', 'Unknown reason')
+                console.print(f"🔄 {timestamp} - Rolled back {version} ({error})")
+            elif event_type == 'manual_rollback':
+                console.print(f"🔄 {timestamp} - Manual rollback to {version}")
+            else:
+                console.print(f"• {timestamp} - {event_type.title()} {version}")
+
+    except Exception as e:
+        console.print(f"[red]❌ Update history retrieval failed: {e}[/red]")
+
+
+@cli.command()
+def update_emergency_rollback():
+    """Perform emergency rollback to last known good state"""
+    try:
+        console.print("[red]🚨 EMERGENCY ROLLBACK[/red]")
+        console.print("[red]This will revert to the last known good system state[/red]")
+        console.print("[red]Only use in case of critical system failure[/red]")
+        console.print()
+
+        if not click.confirm("Are you sure you want to perform emergency rollback?", default=False):
+            console.print("[dim]Emergency rollback cancelled[/dim]")
+            return
+
+        try:
+            # Try relative import first
+            from .updates.updater import OTAUpdater
+        except ImportError:
+            # Fall back to absolute import
+            from updates.updater import OTAUpdater
+
+        updater = OTAUpdater()
+
+        console.print("[yellow]Initiating emergency rollback...[/yellow]")
+
+        result = updater.emergency_rollback()
+
+        if result['success']:
+            console.print("[green]✅ Emergency rollback completed[/green]")
+            console.print("[yellow]🔄 System restart required[/yellow]")
+        else:
+            console.print(f"[red]❌ Emergency rollback failed: {result.get('error', 'Unknown error')}[/red]")
+            console.print("[red]Manual system recovery may be required[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Emergency rollback failed: {e}[/red]")
+
+
+# Alias for backward compatibility
+@cli.command()
+def update():
+    """Check for and apply updates (alias for update apply)"""
+    console.print("[blue]🔄 Running 'pisecure update apply'[/blue]")
+    console.print()
+
+    # Call the apply command
+    from click.testing import CliRunner
+    runner = CliRunner()
+    result = runner.invoke(update_apply, [])
+
+    if result.exit_code != 0:
+        console.print(f"[red]❌ Update failed: {result.output}[/red]")
+    else:
+        console.print(result.output)
 
 
 @cli.command()
