@@ -54,6 +54,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - 🔄 **Async Support**: Built on tokio for concurrent operations
 - ⚡ **Fast**: Optimized for high-throughput applications
 - 🛡️ **Type Safe**: Compile-time guarantees
+- 💰 **314ST Token Economics**: Built-in token-powered access control
+- 🏦 **Developer Trust Funds**: Subscription and funding models
+- 🏛️ **Foundation Governance**: Community-controlled development
+- 👥 **End User Abstraction**: Blockchain invisible to users
 
 ## API Reference
 

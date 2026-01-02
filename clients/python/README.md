@@ -44,6 +44,10 @@ print(f"Transaction submitted: {tx_hash}")
 - 🔄 **Retry Logic**: Handles network failures gracefully
 - 📝 **Type Hints**: Full Python type annotations
 - 🔒 **Secure**: TLS encryption, input validation
+- 💰 **314ST Token Economics**: Built-in token-powered access control
+- 🏦 **Developer Trust Funds**: Subscription and funding models
+- 🏛️ **Foundation Governance**: Community-controlled development
+- 👥 **End User Abstraction**: Blockchain invisible to users
 
 ## API Reference
 
@@ -80,6 +84,19 @@ client = PiSecureClient(
 - `get_network_peers()` - Get known peers
 - `health_check()` - API health check
 
+#### 314ST Economics Operations
+- `create_developer_trust(developer_address, trust_type, initial_funding)` - Create trust fund
+- `get_trust(trust_id)` - Get trust status
+- `fund_trust(trust_id, amount)` - Add tokens to trust
+- `create_subscription_plan(trust_id, plan_data)` - Create subscription plan
+- `add_subscriber(trust_id, user_id, plan_id)` - Subscribe user to plan
+- `grant_free_access(trust_id, user_id)` - Grant free access to user
+- `check_user_access(trust_id, user_id, operation_cost)` - Check access permissions
+- `get_foundation_status()` - Get foundation information
+- `create_grant(project_data)` - Submit grant proposal
+- `vote_on_grant(grant_id, voter_address, vote, voting_power)` - Vote on grants
+- `calculate_api_cost(operation, params)` - Calculate operation costs
+
 ## Error Handling
 
 ```python
@@ -107,6 +124,89 @@ client = PiSecureClient(
         'https://my-node.com/peers.json',
         'http://trusted-peer.local:3142'
     ]
+)
+```
+
+### 314ST Token Economics
+
+#### Developer Trust Funds
+
+```python
+# Create a public trust (free access, developer pays)
+trust = client.create_developer_trust(
+    developer_address="dev_wallet_123",
+    trust_type="public",
+    initial_funding=1000.0  # 1000 314ST
+)
+print(f"Trust created: {trust['trust_id']}")
+
+# Fund the trust
+client.fund_trust(trust['trust_id'], 500.0)
+
+# Check trust status
+status = client.get_trust(trust['trust_id'])
+print(f"Trust balance: {status['balance']} 314ST")
+```
+
+#### Subscription Models
+
+```python
+# Create subscription plan
+plan = client.create_subscription_plan(trust['trust_id'], {
+    'name': 'Premium Access',
+    'monthly_cost': 50.0,  # 50 314ST/month
+    'features': ['unlimited_api', 'priority_support'],
+    'limits': {'daily_calls': 10000}
+})
+
+# Subscribe a user
+client.add_subscriber(trust['trust_id'], 'user_456', plan['plan_id'])
+
+# Grant free access to specific user
+client.grant_free_access(trust['trust_id'], 'free_user_789')
+```
+
+#### End User API Access
+
+```python
+# Check if user can access (invisible to end user)
+access_result = client.check_user_access(
+    trust_id=trust['trust_id'],
+    user_id='end_user_123',
+    operation='submit_sensor_data',
+    params={'data_size': 100}
+)
+
+if access_result['can_access']:
+    # User can proceed with operation
+    result = submit_sensor_data(sensor_data)
+    print(f"Data submitted: {result}")
+else:
+    print(f"Access denied: {access_result['message']}")
+```
+
+#### Foundation Governance
+
+```python
+# Get foundation status
+foundation = client.get_foundation_status()
+print(f"Foundation balance: {foundation['balance']} 314ST")
+
+# Submit grant proposal
+grant = client.create_grant({
+    'project_name': 'PiSecure Mobile App',
+    'developer': 'mobile_dev_team',
+    'funding_requested': 10000,
+    'milestones': ['MVP', 'Beta Release', 'Launch'],
+    'description': 'Native mobile wallet for PiSecure'
+})
+
+# Vote on grants (requires token holding)
+client.vote_on_grant(
+    grant_id=grant['grant_id'],
+    voter_address='your_wallet',
+    vote=True,  # True = approve, False = reject
+    voting_power=100.0  # Based on token balance
 )
 ```
 

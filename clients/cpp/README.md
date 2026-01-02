@@ -91,6 +91,10 @@ int main() {
 - 🔄 **Async Support**: C++20 coroutines and futures
 - ⚡ **Fast**: Direct C bindings with minimal overhead
 - 🏗️ **Modern C++**: Uses C++17 features extensively
+- 💰 **314ST Token Economics**: Built-in token-powered access control
+- 🏦 **Developer Trust Funds**: Subscription and funding models
+- 🏛️ **Foundation Governance**: Community-controlled development
+- 👥 **End User Abstraction**: Blockchain invisible to users
 
 ## API Reference
 

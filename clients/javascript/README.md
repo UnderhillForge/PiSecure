@@ -116,6 +116,10 @@ main();
 - ⚖️ **Load Balancing**: Distributes requests across nodes
 - 🔄 **Retry Logic**: Handles network failures
 - 🔒 **Secure**: HTTPS/TLS support
+- 💰 **314ST Token Economics**: Built-in token-powered access control
+- 🏦 **Developer Trust Funds**: Subscription and funding models
+- 🏛️ **Foundation Governance**: Community-controlled development
+- 👥 **End User Abstraction**: Blockchain invisible to users
 
 ## API Reference
 
@@ -188,6 +192,54 @@ const peers: string[] = await client.getNetworkPeers();
 
 // Health check
 const health: HealthStatus = await client.healthCheck();
+```
+
+#### 314ST Economics Operations
+```typescript
+// Trust fund management
+const trust = await client.createDeveloperTrust(
+    'developer_address',
+    'public',  // 'public', 'subscriber_all', 'subscriber_individual', 'hybrid'
+    1000.0    // Initial funding in 314ST
+);
+
+const trustStatus = await client.getTrust(trust.trust_id);
+await client.fundTrust(trust.trust_id, 500.0);
+
+// Subscription management
+const plan = await client.createSubscriptionPlan(trust.trust_id, {
+    name: 'Premium Plan',
+    monthly_cost: 50.0,
+    features: ['unlimited_access', 'priority_support'],
+    limits: { daily_calls: 10000 }
+});
+
+await client.addSubscriber(trust.trust_id, 'user_123', plan.plan_id);
+await client.grantFreeAccess(trust.trust_id, 'free_user_456');
+
+// Access control
+const accessResult = await client.checkUserAccess(
+    trust.trust_id,
+    'user_123',
+    'submit_data',
+    { data_size: 100 }
+);
+
+// Foundation governance
+const foundation = await client.getFoundationStatus();
+const grant = await client.createGrant({
+    project_name: 'PiSecure Mobile SDK',
+    developer: 'mobile_team',
+    funding_requested: 15000,
+    milestones: ['Design', 'Development', 'Testing', 'Release']
+});
+
+await client.voteOnGrant(
+    grant.grant_id,
+    'voter_wallet',
+    true,   // approve
+    100.0   // voting power based on token balance
+);
 ```
 
 ## Type Definitions
