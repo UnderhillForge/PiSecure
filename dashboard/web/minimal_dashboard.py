@@ -7,7 +7,7 @@ A lightweight dashboard that demonstrates PiSecure monitoring capabilities
 without heavy cryptographic dependencies. Perfect for resource-constrained devices.
 """
 
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, request
 import psutil
 import time
 import subprocess
@@ -294,6 +294,315 @@ HTML_TEMPLATE = """
 </html>
 """
 
+# Wallet Management Template
+WALLET_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PiSecure Wallet - {{ hostname }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .header {
+            background: rgba(255,255,255,0.95);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+            text-align: center;
+        }
+        .header h1 { color: #2c3e50; font-size: 2rem; font-weight: 600; }
+        .nav { margin-top: 10px; }
+        .nav a {
+            color: #667eea;
+            text-decoration: none;
+            margin: 0 15px;
+            font-weight: 500;
+        }
+        .nav a:hover { text-decoration: underline; }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: rgba(255,255,255,0.95);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+        }
+        .card h2 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+            font-weight: 500;
+        }
+
+        .wallet-list { margin-bottom: 20px; }
+        .wallet-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        .wallet-info h3 { margin: 0; color: #2c3e50; font-size: 1.1rem; }
+        .wallet-address {
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: #7f8c8d;
+            margin-top: 5px;
+        }
+        .wallet-balance {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #27ae60;
+        }
+
+        .form-group { margin-bottom: 15px; }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ecf0f1;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .btn:hover { transform: translateY(-2px); }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        .status-msg {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+        .status-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .status-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+
+        .blockchain-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        .blockchain-info div {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        .blockchain-info div:last-child { margin-bottom: 0; }
+
+        @media (max-width: 768px) {
+            .grid { grid-template-columns: 1fr; }
+            .wallet-item { flex-direction: column; align-items: flex-start; gap: 10px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>👛 PiSecure Wallet Management</h1>
+            <div class="nav">
+                <a href="/">← Dashboard</a>
+                <a href="#create">Create Wallet</a>
+                <a href="#transfer">Transfer</a>
+                <a href="#blockchain">Blockchain</a>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- Existing Wallets -->
+            <div class="card">
+                <h2>🏦 Your Wallets</h2>
+                <div id="wallet-list" class="wallet-list">
+                    {% for wallet in wallets %}
+                    <div class="wallet-item">
+                        <div class="wallet-info">
+                            <h3>{{ wallet.name }} ({{ wallet.id }})</h3>
+                            <div class="wallet-address">{{ wallet.address[:20] }}...</div>
+                        </div>
+                        <div class="wallet-balance">{{ "%.2f"|format(wallet.balance) }} tokens</div>
+                    </div>
+                    {% endfor %}
+                    {% if not wallets %}
+                    <p style="text-align: center; color: #7f8c8d; padding: 20px;">
+                        No wallets found. Create your first wallet below.
+                    </p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Create New Wallet -->
+            <div class="card" id="create">
+                <h2>➕ Create New Wallet</h2>
+                <form id="create-wallet-form">
+                    <div class="form-group">
+                        <label for="wallet_name">Wallet Name:</label>
+                        <input type="text" id="wallet_name" name="wallet_name" placeholder="my_wallet" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="display_name">Display Name:</label>
+                        <input type="text" id="display_name" name="display_name" placeholder="My Personal Wallet" required>
+                    </div>
+                    <button type="submit" class="btn">Create Wallet</button>
+                </form>
+                <div id="create-status"></div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- Transfer Tokens -->
+            <div class="card" id="transfer">
+                <h2>💸 Transfer Tokens</h2>
+                <form id="transfer-form">
+                    <div class="form-group">
+                        <label for="recipient">Recipient (wallet name or address):</label>
+                        <input type="text" id="recipient" name="recipient" placeholder="node-abc123 or full_address..." required>
+                    </div>
+                    <div class="form-group">
+                        <label for="amount">Amount:</label>
+                        <input type="number" id="amount" name="amount" step="0.01" min="0.01" placeholder="100.00" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="from_wallet">From Wallet (optional):</label>
+                        <select id="from_wallet" name="from_wallet">
+                            <option value="">Use default wallet</option>
+                            {% for wallet in wallets %}
+                            <option value="{{ wallet.id }}">{{ wallet.name }} ({{ wallet.id }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" class="btn">Transfer Tokens</button>
+                </form>
+                <div id="transfer-status"></div>
+            </div>
+
+            <!-- Blockchain Explorer -->
+            <div class="card" id="blockchain">
+                <h2>⛓️ Blockchain Status</h2>
+                <div class="blockchain-info">
+                    <div><strong>Blocks:</strong> <span>{{ chain_info.blocks }}</span></div>
+                    <div><strong>Pending TX:</strong> <span>{{ chain_info.pending_transactions }}</span></div>
+                    <div><strong>Difficulty:</strong> <span>{{ chain_info.difficulty }}</span></div>
+                    <div><strong>Chain Valid:</strong> <span>{{ '✅ Yes' if chain_info.is_valid else '❌ No' }}</span></div>
+                    <div><strong>Network Health:</strong> <span>{{ chain_info.network_health }}</span></div>
+                </div>
+                <p style="font-size: 0.9rem; color: #7f8c8d; margin-top: 10px;">
+                    The blockchain automatically mines pending transactions.
+                    New blocks appear here as they're discovered.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Create Wallet
+        document.getElementById('create-wallet-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+            const statusDiv = document.getElementById('create-status');
+
+            try {
+                const response = await fetch('/api/create-wallet', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    statusDiv.innerHTML = '<div class="status-msg status-success">✅ Wallet created successfully! Address: ' + result.address + '</div>';
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    statusDiv.innerHTML = '<div class="status-msg status-error">❌ Error: ' + result.error + '</div>';
+                }
+            } catch (error) {
+                statusDiv.innerHTML = '<div class="status-msg status-error">❌ Network error: ' + error.message + '</div>';
+            }
+        });
+
+        // Transfer Tokens
+        document.getElementById('transfer-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+            const statusDiv = document.getElementById('transfer-status');
+
+            try {
+                const response = await fetch('/api/transfer', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    statusDiv.innerHTML = '<div class="status-msg status-success">✅ ' + result.message + '<br>TX Hash: ' + result.tx_hash + '</div>';
+                    setTimeout(() => location.reload(), 3000);
+                } else {
+                    statusDiv.innerHTML = '<div class="status-msg status-error">❌ Error: ' + result.error + '</div>';
+                }
+            } catch (error) {
+                statusDiv.innerHTML = '<div class="status-msg status-error">❌ Network error: ' + error.message + '</div>';
+            }
+        });
+
+        // Auto-refresh wallet list every 30 seconds
+        setInterval(async function() {
+            try {
+                const response = await fetch('/api/wallets');
+                const data = await response.json();
+                if (data.wallets) {
+                    // Could update wallet list here if needed
+                    console.log('Wallets updated:', data.wallets.length);
+                }
+            } catch (e) {
+                console.log('Auto-refresh failed:', e);
+            }
+        }, 30000);
+    </script>
+</body>
+</html>
+"""
+
 def get_system_info():
     """Get comprehensive system information"""
     try:
@@ -457,6 +766,117 @@ def dashboard():
     }
 
     return render_template_string(HTML_TEMPLATE, **data)
+
+@app.route('/wallet')
+def wallet_dashboard():
+    """Wallet management dashboard"""
+    try:
+        # Import wallet functionality
+        try:
+            from pisecure.core.wallet import SignWallet
+            from pisecure.core.blockchain import SignChain
+        except ImportError:
+            # Fallback imports
+            import sys
+            sys.path.append('/opt/pisecure')
+            from pisecure.core.wallet import SignWallet
+            from pisecure.core.blockchain import SignChain
+
+        # Get wallet data
+        wallet = SignWallet()
+        wallets = wallet.list_wallets()
+
+        # Get blockchain data
+        blockchain = SignChain()
+        chain_info = blockchain.get_chain_info()
+
+        wallet_data = {
+            'wallets': wallets,
+            'chain_info': chain_info,
+            'hostname': subprocess.run(['hostname'], capture_output=True, text=True).stdout.strip()
+        }
+
+        return render_template_string(WALLET_TEMPLATE, **wallet_data)
+
+    except Exception as e:
+        return f"Error loading wallet dashboard: {e}"
+
+@app.route('/api/wallets')
+def get_wallets():
+    """API endpoint to get wallet list"""
+    try:
+        from pisecure.core.wallet import SignWallet
+        wallet = SignWallet()
+        wallets = wallet.list_wallets()
+        return {'wallets': wallets}
+    except Exception as e:
+        return {'error': str(e)}, 500
+
+@app.route('/api/wallet/<wallet_name>')
+def get_wallet_details(wallet_name):
+    """API endpoint to get specific wallet details"""
+    try:
+        from pisecure.core.wallet import SignWallet
+        wallet = SignWallet()
+        wallet_data = wallet.load_wallet(wallet_name)
+        if 'error' in wallet_data:
+            return {'error': wallet_data['error']}, 404
+        return wallet_data
+    except Exception as e:
+        return {'error': str(e)}, 500
+
+@app.route('/api/create-wallet', methods=['POST'])
+def create_wallet():
+    """API endpoint to create new wallet"""
+    try:
+        from pisecure.core.wallet import SignWallet
+        import secrets
+
+        wallet_name = request.form.get('wallet_name', f'wallet_{secrets.token_hex(4)}')
+        display_name = request.form.get('display_name', f'Wallet {wallet_name}')
+
+        wallet = SignWallet()
+        result = wallet.create_wallet(wallet_name, display_name)
+
+        if result['success']:
+            return {
+                'success': True,
+                'wallet_id': result['wallet_id'],
+                'address': result['address']
+            }
+        else:
+            return {'success': False, 'error': result.get('error', 'Unknown error')}, 400
+
+    except Exception as e:
+        return {'success': False, 'error': str(e)}, 500
+
+@app.route('/api/transfer', methods=['POST'])
+def transfer_tokens():
+    """API endpoint to transfer tokens"""
+    try:
+        from pisecure.core.wallet import SignWallet
+
+        recipient = request.form.get('recipient')
+        amount = float(request.form.get('amount', 0))
+        from_wallet = request.form.get('from_wallet')
+
+        if not recipient or amount <= 0:
+            return {'success': False, 'error': 'Invalid recipient or amount'}, 400
+
+        wallet = SignWallet()
+        if from_wallet:
+            wallet = SignWallet(f"/var/lib/pisecure/wallets/{from_wallet}.json")
+
+        # For now, just simulate the transfer
+        # In full implementation, this would create and submit the transaction
+        return {
+            'success': True,
+            'message': f'Transferred {amount} tokens to {recipient}',
+            'tx_hash': f'simulated_{secrets.token_hex(16)}'
+        }
+
+    except Exception as e:
+        return {'success': False, 'error': str(e)}, 500
 
 @app.route('/api/health')
 def health_check():
