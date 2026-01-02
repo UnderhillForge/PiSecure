@@ -19,7 +19,7 @@ from cryptography.exceptions import InvalidSignature
 class UpdateAuthority:
     """Manages authorized update publishers and their cryptographic keys"""
 
-    def __init__(self, blockchain=None, config_file: str = "pisecure/updates/update_auth.json"):
+    def __init__(self, blockchain=None, config_file: str = "/var/lib/pisecure/update_auth.json"):
         self.blockchain = blockchain
         self.config_file = Path(config_file)
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -354,7 +354,7 @@ class UpdateAuthority:
 class UpdateSigner:
     """Handles signing of updates with authorized private keys"""
 
-    def __init__(self, private_key_path: str = "pisecure/updates/genesis_auth_priv.key"):
+    def __init__(self, private_key_path: str = "/opt/pisecure/pisecure/updates/genesis_auth_priv.key"):
         self.private_key_path = Path(private_key_path)
         self._private_key = None
 
