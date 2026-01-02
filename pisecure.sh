@@ -6,12 +6,12 @@
 # Provides executable commands without requiring python -m syntax.
 #
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_DIR="/opt/pisecure"
 PYTHON_CMD="${PYTHON_CMD:-python3}"
 
 # Check if virtual environment exists
-if [[ -f "$SCRIPT_DIR/venv/bin/activate" ]]; then
-    source "$SCRIPT_DIR/venv/bin/activate"
+if [[ -f "$INSTALL_DIR/venv/bin/activate" ]]; then
+    source "$INSTALL_DIR/venv/bin/activate"
 fi
 
 # Main command processing
