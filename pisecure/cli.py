@@ -101,25 +101,68 @@ def create_tx(count):
 @cli.command()
 @click.option('--interactive/--background', default=True,
               help='Interactive mining with progress display')
-def mine(interactive):
+@click.option('--wallet', help='Wallet address to receive mining rewards')
+def mine(interactive, wallet):
     """Start blockchain mining"""
     try:
-        miner = SignTokenMiner(SignChain())
+        blockchain = SignChain()
+
+        # Determine miner wallet address
+        miner_wallet = wallet
+        if not miner_wallet:
+            # Try to load from config
+            try:
+                import json
+                config_path = "/etc/pisecure/config.json"
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                miner_wallet = config.get('mining', {}).get('wallet_address')
+            except (FileNotFoundError, json.JSONDecodeError, KeyError):
+                pass
+
+        if not miner_wallet:
+            console.print("[yellow]⚠️ No miner wallet configured[/yellow]")
+            console.print("[dim]Use --wallet to specify wallet address, or set mining.wallet_address in /etc/pisecure/config.json[/dim]")
+            miner_wallet = None
 
         if interactive:
             console.print("[green]⛏️ Starting interactive mining...[/green]")
+            if miner_wallet:
+                console.print(f"[dim]Rewards will go to: {miner_wallet}[/dim]")
             console.print("[dim]Press Ctrl-C to stop[/dim]\n")
 
-            success = miner.start_interactive_mining()
-            if not success:
-                console.print("[red]❌ Mining failed - hardware verification required[/red]")
+            try:
+                while True:
+                    # Mine a single block
+                    block = blockchain.mine_pending_transactions(miner_wallet, verbose=True)
+                    if block:
+                        console.print(f"[green]✅ Block mined! #{block.index}[/green]")
+                        # Brief pause before next mining attempt
+                        time.sleep(2)
+                    else:
+                        # No transactions to mine, wait a bit
+                        console.print("[dim]No pending transactions, waiting...[/dim]")
+                        time.sleep(5)
+
+            except KeyboardInterrupt:
+                console.print("\n[yellow]⏹️ Mining stopped by user[/yellow]")
         else:
             console.print("[green]⛏️ Starting background mining...[/green]")
-            success = miner.start_mining()
-            if success:
-                console.print("[green]✅ Background mining started[/green]")
+            if miner_wallet:
+                console.print(f"[dim]Rewards will go to: {miner_wallet}[/dim]")
+
+            # For background mining, mine one block at a time
+            block = blockchain.mine_pending_transactions(miner_wallet, verbose=False)
+            if block:
+                console.print(f"[green]✅ Background mining completed - Block #{block.index} mined[/green]")
+                if miner_wallet:
+                    # Count mining reward transactions in the block
+                    reward_txs = [tx for tx in block.transactions if tx.get('type') == 'mining_reward']
+                    if reward_txs:
+                        reward_amount = reward_txs[0].get('amount', 0)
+                        console.print(f"[green]💰 Mining reward: {reward_amount} tokens credited to {miner_wallet}[/green]")
             else:
-                console.print("[red]❌ Mining blocked - hardware verification failed[/red]")
+                console.print("[yellow]⚠️ No transactions to mine[/yellow]")
 
     except KeyboardInterrupt:
         console.print("\n[yellow]⏹️ Mining stopped by user[/yellow]")

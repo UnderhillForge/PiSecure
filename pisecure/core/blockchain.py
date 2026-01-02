@@ -420,20 +420,47 @@ class SignChain:
 
         return wallet_transactions
 
-    def mine_pending_transactions(self, verbose: bool = False) -> Optional[SignBlock]:
-        """Mine a new block with pending transactions"""
+    def mine_pending_transactions(self, miner_wallet_address: str = None, verbose: bool = False) -> Optional[SignBlock]:
+        """Mine a new block with pending transactions and distribute mining rewards"""
         if not self.pending_transactions:
             return None
 
         with self.lock:
+            # Create mining reward transaction if miner wallet is specified
+            block_transactions = self.pending_transactions.copy()
+
+            if miner_wallet_address:
+                # Calculate mining reward
+                mining_reward = self.calculate_mining_reward(None, {})  # Simplified for now
+
+                # Create mining reward transaction
+                reward_tx = {
+                    "type": "mining_reward",
+                    "recipient_address": miner_wallet_address,
+                    "amount": mining_reward,
+                    "block_index": len(self.chain),  # Will be set when block is created
+                    "timestamp": time.time(),
+                    "signature": f"mining-reward-{len(self.chain)}"
+                }
+
+                # Add reward transaction at the beginning
+                block_transactions.insert(0, reward_tx)
+
+                if verbose:
+                    print(f"💰 Mining reward: {mining_reward} tokens to {miner_wallet_address}")
+
             # Create new block
             last_block = self.chain[-1]
             new_block = SignBlock(
                 index=last_block.index + 1,
-                transactions=self.pending_transactions.copy(),
+                transactions=block_transactions,
                 timestamp=time.time(),
                 previous_hash=last_block.hash
             )
+
+            # Update block index in reward transaction
+            if miner_wallet_address and block_transactions:
+                block_transactions[0]["block_index"] = new_block.index
 
             # Mine the block
             if new_block.mine_block(self.difficulty, verbose):
@@ -444,7 +471,9 @@ class SignChain:
                 # Clear pending transactions
                 self.pending_transactions.clear()
 
-                print(f"✅ Mined new block: {new_block.index} with {len(new_block.transactions)} transactions")
+                total_txs = len(new_block.transactions)
+                reward_info = f" (+{mining_reward} reward)" if miner_wallet_address else ""
+                print(f"✅ Mined new block: #{new_block.index} with {total_txs} transactions{reward_info}")
                 return new_block
             else:
                 print("❌ Failed to mine block")
