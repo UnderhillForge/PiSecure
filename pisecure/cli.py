@@ -332,84 +332,378 @@ def verify_update(package_path):
         console.print(f"[red]❌ Verification error: {e}[/red]")
 
 
-@cli.command()
-@click.option('--apply/--no-apply', default=False, help='Apply the update after verification')
-def check_updates(apply):
-    """Check for available updates"""
+@click.group()
+def update():
+    """Update system management commands"""
+    pass
+
+@update.command()
+@click.option('--type', 'update_type', help='Filter by update type (critical, safe, compatible, breaking)')
+@click.option('--git', is_flag=True, help='Use direct GitHub updates instead of blockchain-based')
+def check(update_type, git):
+    """Check for available software updates"""
     try:
-        try:
-            # Try relative import first
-            from .updates import OTAUpdater
-        except ImportError:
-            # Fall back to absolute import
-            from updates import OTAUpdater
+        if git:
+            # Git-based updates
+            try:
+                from .updates.git_updater import git_updater
+            except ImportError:
+                from updates.git_updater import git_updater
 
-        updater = OTAUpdater()
+            console.print("[blue]🔍 Checking for GitHub updates...[/blue]")
 
-        console.print(f"[blue]🔍 Checking for updates (current: {__import__('pisecure').__version__})[/blue]\n")
-
-        updates = updater.check_for_updates(__import__('pisecure').__version__)
-
-        if not updates:
-            console.print("[green]✅ No updates available - you have the latest version[/green]")
-            return
-
-        console.print(f"[yellow]📦 Found {len(updates)} available update(s):[/yellow]\n")
-
-        # Show available updates
-        table = Table(title="📦 Available Updates")
-        table.add_column("Version", style="cyan", no_wrap=True)
-        table.add_column("Publisher", style="green")
-        table.add_column("Size", style="magenta", justify="right")
-        table.add_column("Description", style="white")
-
-        for update in updates:
-            size_mb = update.get('size', 0) / (1024 * 1024) if update.get('size') else 0
-            table.add_row(
-                update.get('version', 'unknown'),
-                update.get('publisher', 'unknown'),
-                f"{size_mb:.1f} MB" if size_mb > 0 else "unknown",
-                update.get('description', 'No description')[:50] + "..." if len(update.get('description', '')) > 50 else update.get('description', 'No description')
-            )
-
-        console.print(table)
-
-        if apply and updates:
-            # Apply latest update
-            latest_update = updates[0]
-            console.print(f"\n[yellow]📥 Downloading latest update: {latest_update.get('version')}[/yellow]")
-
-            download_result = updater.download_update(latest_update)
-            if not download_result['success']:
-                console.print(f"[red]❌ Download failed: {download_result.get('error')}[/red]")
+            # Check Git status first
+            git_status = git_updater.get_git_status()
+            if git_status.get('error'):
+                console.print(f"[red]❌ Git status error: {git_status['error']}[/red]")
                 return
 
+            console.print(f"   Current commit: {git_status['current_commit'][:8] if git_status['current_commit'] else 'unknown'}")
+            console.print(f"   Branch: {git_status['branch']}")
+            console.print(f"   Working directory: {'clean' if git_status['is_clean'] else 'modified'}")
+
+            if not git_status['github_accessible']:
+                console.print("[yellow]⚠️  Cannot access GitHub API[/yellow]")
+                return
+
+            # Check for updates
+            available_updates = git_updater.check_git_updates()
+
+            if not available_updates:
+                console.print("[green]✅ Your PiSecure installation is up to date with GitHub![/green]")
+                return
+
+            console.print(f"\n[yellow]📦 Found {len(available_updates)} available Git update(s):[/yellow]\n")
+
+            # Display updates
+            for update in available_updates[-5:]:  # Show latest 5
+                update_type_display = update.get('type', 'unknown').upper()
+                version = update.get('version', 'unknown')
+                description = update.get('description', 'No description')[:50]
+                commit_short = update.get('commit', '')[:8]
+
+                # Color code by type
+                if update_type_display == 'CRITICAL':
+                    type_color = "[red]"
+                elif update_type_display == 'SAFE':
+                    type_color = "[green]"
+                elif update_type_display == 'COMPATIBLE':
+                    type_color = "[yellow]"
+                else:
+                    type_color = "[red]"
+
+                console.print(f"{type_color}• {version} ({commit_short}) - {description}[/{type_color.replace('[', '').replace(']', '')}]")
+
+            if len(available_updates) > 5:
+                console.print(f"[dim]... and {len(available_updates) - 5} more older commits[/dim]")
+
+            # Recommendations
+            safe_updates = [u for u in available_updates if u.get('type') in ['critical', 'safe']]
+            if safe_updates:
+                console.print(f"\n[green]✨ {len(safe_updates)} safe update(s) available[/green]")
+                console.print("[dim]Run 'pisecure update apply --git' to update to latest[/dim]")
+
+            breaking_updates = [u for u in available_updates if u.get('type') == 'breaking']
+            if breaking_updates:
+                console.print(f"\n[red]⚠️  {len(breaking_updates)} breaking update(s) detected[/red]")
+                console.print("[dim]Use --force with apply command if needed[/dim]")
+
+        else:
+            # Blockchain-based updates (original system)
+            try:
+                from .updates.updater import OTAUpdater
+                from .updates.update_classifier import UpdateType
+            except ImportError:
+                from updates.updater import OTAUpdater
+                from updates.update_classifier import UpdateType
+
+            updater = OTAUpdater()
+
+            console.print("[blue]🔍 Checking for PiSecure blockchain updates...[/blue]")
+
+            # Get current version
+            current_version = updater._get_current_version()
+            console.print(f"   Current version: {current_version}")
+
+            # Check for updates
+            available_updates = updater.check_for_updates(current_version)
+
+            if not available_updates:
+                console.print("[green]✅ Your PiSecure installation is up to date![/green]")
+                return
+
+            # Filter by type if requested
+            if update_type:
+                try:
+                    type_filter = UpdateType(update_type.lower())
+                    available_updates = [u for u in available_updates if u.get('type') == type_filter.value]
+                except ValueError:
+                    console.print(f"[red]❌ Invalid update type: {update_type}[/red]")
+                    console.print("[dim]Valid types: critical, safe, compatible, breaking[/dim]")
+                    return
+
+            console.print(f"\n[yellow]📦 Found {len(available_updates)} available update(s):[/yellow]\n")
+
+            # Display updates
+            for update in available_updates[:5]:  # Show latest 5
+                update_type_display = update.get('type', 'unknown').upper()
+                version = update.get('version', 'unknown')
+                description = update.get('description', 'No description')[:60]
+
+                # Color code by type
+                if update_type_display == 'CRITICAL':
+                    type_color = "[red]"
+                elif update_type_display == 'SAFE':
+                    type_color = "[green]"
+                elif update_type_display == 'COMPATIBLE':
+                    type_color = "[yellow]"
+                else:
+                    type_color = "[red]"
+
+                console.print(f"{type_color}• {version} - {description}[/{type_color.replace('[', '').replace(']', '')}]")
+
+            if len(available_updates) > 5:
+                console.print(f"[dim]... and {len(available_updates) - 5} more[/dim]")
+
+            # Recommendations
+            critical_updates = [u for u in available_updates if u.get('type') == 'critical']
+            if critical_updates:
+                console.print(f"\n[red]🚨 {len(critical_updates)} critical update(s) available![/red]")
+                console.print("[dim]Run 'pisecure update apply' to install immediately[/dim]")
+
+            safe_updates = [u for u in available_updates if u.get('type') == 'safe']
+            if safe_updates and not critical_updates:
+                console.print(f"\n[green]✨ {len(safe_updates)} safe update(s) available[/green]")
+                console.print("[dim]Run 'pisecure update apply' to install[/dim]")
+
+            breaking_updates = [u for u in available_updates if u.get('type') == 'breaking']
+            if breaking_updates:
+                console.print(f"\n[red]⚠️  {len(breaking_updates)} breaking update(s) require network coordination[/red]")
+                console.print("[dim]These may change consensus rules and need community approval[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Update check failed: {e}[/red]")
+
+@update.command()
+@click.argument('version', required=False)
+@click.option('--force', is_flag=True, help='Force application (skip safety checks)')
+@click.option('--skip-backup', is_flag=True, help='Skip backup creation (not recommended)')
+@click.option('--git', is_flag=True, help='Apply Git-based update to specific commit')
+def apply(version, force, skip_backup, git):
+    """Apply available software updates"""
+    try:
+        if git:
+            # Git-based updates
+            try:
+                from .updates.git_updater import git_updater
+            except ImportError:
+                from updates.git_updater import git_updater
+
+            console.print("[blue]🔄 Applying Git-based PiSecure updates...[/blue]")
+
+            # Check Git status first
+            git_status = git_updater.get_git_status()
+            if git_status.get('error'):
+                console.print(f"[red]❌ Git status error: {git_status['error']}[/red]")
+                return
+
+            console.print(f"   Current commit: {git_status['current_commit'][:8] if git_status['current_commit'] else 'unknown'}")
+
+            if not git_status['github_accessible']:
+                console.print("[yellow]⚠️  Cannot access GitHub API[/yellow]")
+                return
+
+            # Get available updates
+            available_updates = git_updater.check_git_updates()
+
+            if not available_updates:
+                console.print("[green]✅ Already up to date with GitHub![/green]")
+                return
+
+            # Select commit to apply
+            target_commit = None
+            if version:
+                # Find specific commit
+                for update in available_updates:
+                    if update.get('commit', '').startswith(version) or update.get('version', '').endswith(version):
+                        target_commit = update.get('commit')
+                        break
+                if not target_commit:
+                    console.print(f"[red]❌ Commit {version} not found in available updates[/red]")
+                    return
+            else:
+                # Apply latest safe update
+                safe_updates = [u for u in available_updates if u.get('type') in ['critical', 'safe']]
+                if safe_updates:
+                    target_commit = safe_updates[0].get('commit')
+                else:
+                    console.print("[yellow]⚠️  No safe Git updates available[/yellow]")
+                    console.print("[dim]Use --force to apply latest anyway[/dim]")
+                    if not force:
+                        return
+                    target_commit = available_updates[0].get('commit')
+
+            console.print(f"   Target commit: {target_commit[:8]}")
+
+            # Safety check for breaking changes
+            update_info = next((u for u in available_updates if u.get('commit') == target_commit), {})
+            if update_info.get('type') == 'breaking' and not force:
+                console.print("[red]⚠️  This commit contains breaking changes[/red]")
+                console.print("[dim]Use --force to apply anyway[/dim]")
+                return
+
+            # Apply Git update
+            apply_result = git_updater.apply_git_update(target_commit, force=force)
+
+            if apply_result['success']:
+                console.print("[green]✅ Git update applied successfully![/green]")
+                console.print(f"   New commit: {apply_result['commit'][:8]}")
+                console.print(f"   Version: {apply_result['version']}")
+
+                if apply_result.get('services_restarted'):
+                    console.print("[green]✅ Services restarted[/green]")
+                else:
+                    console.print("[yellow]🔄 Service restart recommended[/yellow]")
+            else:
+                console.print(f"[red]❌ Git update failed: {apply_result.get('error', 'Unknown error')}[/red]")
+
+        else:
+            # Blockchain-based updates (original system)
+            try:
+                from .updates.updater import OTAUpdater
+                from .updates.update_classifier import UpdateClassifier, UpdateType
+            except ImportError:
+                from updates.updater import OTAUpdater
+                from updates.update_classifier import UpdateClassifier, UpdateType
+
+            updater = OTAUpdater()
+            classifier = UpdateClassifier()
+
+            console.print("[blue]🔄 Applying PiSecure blockchain updates...[/blue]")
+
+            # Get current version
+            current_version = updater._get_current_version()
+            console.print(f"   Current version: {current_version}")
+
+            # Get available updates
+            available_updates = updater.check_for_updates(current_version)
+
+            if not available_updates:
+                console.print("[green]✅ No updates available - already up to date![/green]")
+                return
+
+            # Select update to apply
+            target_update = None
+            if version:
+                # Find specific version
+                for update in available_updates:
+                    if update.get('version') == version:
+                        target_update = update
+                        break
+                if not target_update:
+                    console.print(f"[red]❌ Version {version} not found in available updates[/red]")
+                    return
+            else:
+                # Apply latest safe update
+                safe_updates = [u for u in available_updates if u.get('type') in ['critical', 'safe']]
+                if safe_updates:
+                    target_update = safe_updates[0]  # Latest safe update
+                else:
+                    console.print("[yellow]⚠️  No safe updates available[/yellow]")
+                    console.print("[dim]Use --version to specify a specific update[/dim]")
+                    return
+
+            update_version = target_update.get('version')
+            update_type = target_update.get('type', 'unknown')
+
+            console.print(f"   Target update: {update_version}")
+            console.print(f"   Update type: {update_type.upper()}")
+
+            # Safety check for non-critical updates
+            if not force and update_type not in ['critical']:
+                console.print(f"\n[yellow]⚠️  This is a {update_type.upper()} update[/yellow]")
+
+                if update_type == 'breaking':
+                    console.print("[red]Breaking updates may change consensus rules[/red]")
+                    console.print("[red]Network coordination required - do not apply without community approval[/red]")
+                    return
+                elif update_type == 'compatible':
+                    console.print("[yellow]Compatible updates may require testing[/yellow]")
+                    if not click.confirm("Continue with update?", default=False):
+                        console.print("[dim]Update cancelled[/dim]")
+                        return
+
+            # Download update
+            console.print("[dim]Downloading update...[/dim]")
+            download_result = updater.download_update(target_update)
+
+            if not download_result['success']:
+                console.print(f"[red]❌ Download failed: {download_result['error']}[/red]")
+                return
+
+            package_path = download_result['local_path']
+
             # Verify update
-            verify_result = updater.verify_update(download_result['local_path'], latest_update)
+            console.print("[dim]Verifying update...[/dim]")
+            verify_result = updater.verify_update(package_path, target_update)
+
             if not verify_result['verified']:
                 console.print(f"[red]❌ Verification failed: {verify_result.get('error')}[/red]")
                 return
 
+            manifest = verify_result['manifest']
+
+            # Additional safety check using classifier
+            changed_files = manifest.get('changed_files', [])
+            is_safe, safety_reason = classifier.verify_update_safety(manifest, changed_files)
+
+            if not is_safe and not force:
+                console.print(f"[red]❌ Safety check failed: {safety_reason}[/red]")
+                console.print("[dim]Use --force to override (not recommended)[/dim]")
+                return
+
             # Apply update
+            console.print("[dim]Applying update...[/dim]")
+
             apply_result = updater.apply_update(
-                download_result['local_path'],
-                verify_result['manifest']
+                package_path,
+                manifest,
+                progress_callback=lambda current, total: console.print(f"[dim]Installing... {current}/{total} files[/dim]")
             )
 
             if apply_result['success']:
-                console.print(f"[green]✅ Update applied successfully: {apply_result.get('version')}[/green]")
-                console.print("[yellow]🔄 Restarting services may be required[/yellow]")
+                console.print("[green]✅ Update applied successfully![/green]")
+                console.print(f"   New version: {apply_result['version']}")
+                console.print(f"   Backup ID: {apply_result['backup_id']}")
+
+                # Check if restart needed
+                if manifest.get('restart_required', True):
+                    console.print("[yellow]🔄 System restart recommended[/yellow]")
+                    if click.confirm("Restart services now?", default=False):
+                        # Restart services
+                        import subprocess
+                        try:
+                            subprocess.run(['sudo', 'systemctl', 'restart', 'pisecure*'], shell=True, check=True)
+                            console.print("[green]✅ Services restarted[/green]")
+                        except Exception as e:
+                            console.print(f"[red]❌ Service restart failed: {e}[/red]")
+                            console.print("[dim]Manual restart may be required[/dim]")
             else:
-                console.print(f"[red]❌ Update failed: {apply_result.get('error')}[/red]")
+                console.print(f"[red]❌ Update failed: {apply_result.get('error', 'Unknown error')}[/red]")
+
+                # Check if rollback was attempted
+                if apply_result.get('rollback_attempted'):
+                    console.print("[yellow]⚠️  Automatic rollback was attempted[/yellow]")
+                    if not apply_result.get('rollback_attempted'):
+                        console.print("[red]Manual intervention may be required[/red]")
 
     except Exception as e:
-        console.print(f"[red]❌ Update check error: {e}[/red]")
+        console.print(f"[red]❌ Update application failed: {e}[/red]")
 
-
-@cli.command()
+@update.command()
 @click.argument('update_hash')
 @click.option('--apply/--no-apply', default=False, help='Apply the update after download')
-def download_update(update_hash, apply):
+def download(update_hash, apply):
     """Download specific update by hash"""
     try:
         try:
@@ -2934,6 +3228,9 @@ def wallet_info(wallet):
     except Exception as e:
         console.print(f"[red]❌ Wallet info error: {e}[/red]")
 
+
+# Register subcommand groups
+cli.add_command(update)
 
 def main():
     """Main entry point for the CLI"""
