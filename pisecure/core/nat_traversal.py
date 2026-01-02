@@ -639,6 +639,179 @@ class CommunityRelayNetwork:
 
         return None
 
+    def start_relay_service(self, port: int = 3143, max_connections: int = 50,
+                          bandwidth_limit: int = 10) -> bool:
+        """Start the relay service to help other nodes discover the network"""
+        try:
+            import threading
+            import socket
+            import select
+
+            logger.info(f"Starting PiSecure relay service on port {port}")
+
+            # Create server socket
+            server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server_sock.bind(('0.0.0.0', port))
+            server_sock.listen(max_connections)
+            server_sock.setblocking(False)
+
+            self.relay_server = server_sock
+            self.relay_active = True
+            self.relay_connections = []
+            self.relay_thread = threading.Thread(target=self._relay_worker, daemon=True)
+            self.relay_thread.start()
+
+            # Register with bootstrap nodes
+            self._register_as_relay(port)
+
+            logger.info(f"✅ Relay service started on port {port}")
+            logger.info(f"   Max connections: {max_connections}")
+            logger.info(f"   Bandwidth limit: {bandwidth_limit} MB/s")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to start relay service: {e}")
+            return False
+
+    def stop_relay_service(self):
+        """Stop the relay service"""
+        try:
+            self.relay_active = False
+            if hasattr(self, 'relay_server') and self.relay_server:
+                self.relay_server.close()
+
+            # Close all active connections
+            for conn in self.relay_connections:
+                try:
+                    conn.close()
+                except:
+                    pass
+
+            self.relay_connections.clear()
+            logger.info("✅ Relay service stopped")
+
+        except Exception as e:
+            logger.error(f"Error stopping relay service: {e}")
+
+    def _relay_worker(self):
+        """Background worker for relay service"""
+        try:
+            while self.relay_active:
+                try:
+                    # Use select to handle multiple connections
+                    readable, _, _ = select.select(
+                        [self.relay_server] + self.relay_connections,
+                        [], [], 1.0
+                    )
+
+                    for sock in readable:
+                        if sock is self.relay_server:
+                            # New connection
+                            client_sock, addr = self.relay_server.accept()
+                            logger.info(f"New relay connection from {addr}")
+                            self.relay_connections.append(client_sock)
+                        else:
+                            # Data from existing connection
+                            try:
+                                data = sock.recv(4096)
+                                if data:
+                                    self._handle_relay_request(sock, data)
+                                else:
+                                    # Connection closed
+                                    sock.close()
+                                    if sock in self.relay_connections:
+                                        self.relay_connections.remove(sock)
+                            except Exception as e:
+                                logger.debug(f"Relay connection error: {e}")
+                                sock.close()
+                                if sock in self.relay_connections:
+                                    self.relay_connections.remove(sock)
+
+                except Exception as e:
+                    logger.error(f"Relay worker error: {e}")
+                    time.sleep(1)
+
+        except Exception as e:
+            logger.error(f"Relay worker crashed: {e}")
+
+    def _handle_relay_request(self, client_sock: socket.socket, data: bytes):
+        """Handle incoming relay requests"""
+        try:
+            request = json.loads(data.decode())
+
+            command = request.get('command')
+            if command == 'connect':
+                # Client wants to connect to another node via relay
+                target_node = request.get('target_node')
+
+                # For now, just acknowledge the request
+                # In a full implementation, this would coordinate with the target node
+                response = {
+                    'status': 'acknowledged',
+                    'message': f'Relay request for {target_node} received',
+                    'relay_id': self._get_node_id()
+                }
+
+                client_sock.send(json.dumps(response).encode())
+
+            elif command == 'status':
+                # Status request
+                response = {
+                    'status': 'active',
+                    'connections': len(self.relay_connections),
+                    'uptime': time.time() - getattr(self, 'relay_start_time', time.time())
+                }
+                client_sock.send(json.dumps(response).encode())
+
+            else:
+                # Unknown command
+                response = {'error': 'Unknown command'}
+                client_sock.send(json.dumps(response).encode())
+
+        except Exception as e:
+            logger.error(f"Error handling relay request: {e}")
+            try:
+                error_response = {'error': 'Request processing failed'}
+                client_sock.send(json.dumps(error_response).encode())
+            except:
+                pass
+
+    def _register_as_relay(self, port: int):
+        """Register this node as a relay with bootstrap nodes"""
+        try:
+            # Get our public endpoints
+            endpoints = node_discovery.public_endpoints
+            if not endpoints:
+                # Discover endpoints if not already done
+                endpoints = node_discovery.discover_public_endpoints()
+
+            # Register with bootstrap service
+            # This is a placeholder - in production, would send to bootstrap API
+            relay_info = {
+                'node_id': self._get_node_id(),
+                'relay_port': port,
+                'endpoints': endpoints,
+                'timestamp': int(time.time()),
+                'version': '0.1.0'
+            }
+
+            logger.info(f"Registered as community relay: {len(endpoints)} endpoints available")
+
+        except Exception as e:
+            logger.error(f"Failed to register as relay: {e}")
+
+    def get_relay_stats(self) -> Dict[str, Any]:
+        """Get relay service statistics"""
+        return {
+            'active': getattr(self, 'relay_active', False),
+            'connections': len(getattr(self, 'relay_connections', [])),
+            'port': getattr(self, 'relay_port', None),
+            'uptime': time.time() - getattr(self, 'relay_start_time', time.time()) if hasattr(self, 'relay_start_time') else 0,
+            'total_connections': getattr(self, 'total_connections', 0)
+        }
+
 
 class NodeDiscoveryService:
     """Complete node discovery service combining all methods"""

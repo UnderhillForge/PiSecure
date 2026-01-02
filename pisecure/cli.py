@@ -1365,6 +1365,10 @@ def network_health():
         console.print(f"   Active Endpoints: {len(discovery_status['endpoints'])}")
         console.print(f"   Community Relays: {discovery_status['relay_count']}")
 
+        # Check if this node is a relay
+        is_relay = _check_if_relay_node()
+        console.print(f"   Relay Status: {'✅ Active' if is_relay else '❌ Not participating'}")
+
         # PiNS statistics
         names_count = len(blockchain.get_registered_names())
         console.print(f"   PiNS Names: {names_count}")
@@ -1386,6 +1390,8 @@ def network_health():
         console.print("[cyan]Recommendations:[/cyan]")
         if len(discovery_status['endpoints']) == 0:
             console.print("   • Run 'pisecure setup-public-access' to enable worldwide access")
+        if not is_relay and len(discovery_status['endpoints']) > 0:
+            console.print("   • Consider becoming a relay node: 'pisecure become-relay-node'")
         if chain_info['pending_transactions'] > 10:
             console.print("   • High pending transactions - mining may be slow")
         if health['participation'] < 0.5:
@@ -1395,6 +1401,281 @@ def network_health():
 
     except Exception as e:
         console.print(f"[red]❌ Network health check error: {e}[/red]")
+
+
+def _check_if_relay_node():
+    """Check if this node is configured as a relay node"""
+    try:
+        import json
+        config_path = "/etc/pisecure/config.json"
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        return config.get('network', {}).get('relay_enabled', False)
+    except:
+        return False
+
+
+@cli.command()
+@click.option('--port', default=3143, help='Port to run relay service on')
+@click.option('--max-connections', default=50, help='Maximum concurrent relay connections')
+@click.option('--bandwidth-limit', default=10, help='Bandwidth limit in MB/s (0 = unlimited)')
+def become_relay_node(port, max_connections, bandwidth_limit):
+    """Become a community relay node to help other users discover the network"""
+    try:
+        console.print("[blue]🌐 Becoming a PiSecure Community Relay Node[/blue]")
+        console.print()
+        console.print("[yellow]⚠️  Important Information:[/yellow]")
+        console.print("   • Relay nodes help new users discover the PiSecure network")
+        console.print("   • You will receive mining rewards for relay services")
+        console.print("   • Your node will be publicly listed as a community relay")
+        console.print("   • You can stop being a relay at any time")
+        console.print()
+        console.print("[cyan]Configuration:[/cyan]")
+        console.print(f"   • Relay Port: {port}")
+        console.print(f"   • Max Connections: {max_connections}")
+        console.print(f"   • Bandwidth Limit: {bandwidth_limit} MB/s" if bandwidth_limit > 0 else "   • Bandwidth Limit: Unlimited")
+        console.print()
+
+        if not click.confirm("Do you want to become a community relay node?", default=True):
+            console.print("[dim]Relay node setup cancelled[/dim]")
+            return
+
+        # Check if node has public access
+        try:
+            from .core.nat_traversal import node_discovery
+            discovery_status = node_discovery.get_discovery_status()
+            if len(discovery_status['endpoints']) == 0:
+                console.print("[yellow]⚠️  Your node doesn't have public access configured[/yellow]")
+                console.print("[dim]Setting up public access first...[/dim]")
+                # Run setup-public-access
+                from .core.nat_traversal import node_discovery
+                results = node_discovery.make_node_discoverable()
+                if results['success_count'] == 0:
+                    console.print("[red]❌ Could not configure public access[/red]")
+                    console.print("[dim]Please run 'pisecure setup-public-access' first[/dim]")
+                    return
+        except Exception as e:
+            console.print(f"[red]❌ Error checking public access: {e}[/red]")
+            return
+
+        # Configure relay settings
+        relay_config = {
+            'enabled': True,
+            'port': port,
+            'max_connections': max_connections,
+            'bandwidth_limit': bandwidth_limit,
+            'node_id': None  # Will be set when relay service starts
+        }
+
+        # Update system configuration
+        try:
+            import json
+            config_path = "/etc/pisecure/config.json"
+
+            # Read existing config
+            try:
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+            except FileNotFoundError:
+                config = {}
+
+            # Update network config
+            if 'network' not in config:
+                config['network'] = {}
+            config['network']['relay_enabled'] = True
+            config['network']['relay_config'] = relay_config
+
+            # Write updated config
+            with open(config_path, 'w') as f:
+                json.dump(config, f, indent=2)
+
+        except Exception as e:
+            console.print(f"[red]❌ Error updating configuration: {e}[/red]")
+            return
+
+        # Create relay service
+        relay_service_path = "/etc/systemd/system/pisecure-relay.service"
+        try:
+            relay_service = f"""[Unit]
+Description=PiSecure Community Relay Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/PiSecure
+ExecStart=/home/pi/PiSecure/pisecure_env/bin/python -c "
+from pisecure.core.nat_traversal import CommunityRelayNetwork
+import time
+relay = CommunityRelayNetwork()
+relay.start_relay_service(port={port}, max_connections={max_connections}, bandwidth_limit={bandwidth_limit})
+"
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pisecure-relay
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+            with open(relay_service_path, 'w') as f:
+                f.write(relay_service)
+
+            # Reload systemd and start service
+            import subprocess
+            subprocess.run(['sudo', 'systemctl', 'daemon-reload'], check=True)
+            subprocess.run(['sudo', 'systemctl', 'enable', 'pisecure-relay'], check=True)
+            subprocess.run(['sudo', 'systemctl', 'start', 'pisecure-relay'], check=True)
+
+        except Exception as e:
+            console.print(f"[red]❌ Error creating relay service: {e}[/red]")
+            return
+
+        console.print("[green]✅ Successfully became a community relay node![/green]")
+        console.print()
+        console.print("[cyan]Relay Node Details:[/cyan]")
+        console.print(f"   • Status: Active")
+        console.print(f"   • Port: {port}")
+        console.print(f"   • Max Connections: {max_connections}")
+        console.print(f"   • Bandwidth Limit: {bandwidth_limit} MB/s" if bandwidth_limit > 0 else "   • Bandwidth Limit: Unlimited")
+        console.print()
+        console.print("[green]🎉 Thank you for supporting the PiSecure network![/green]")
+        console.print("[dim]You will receive mining rewards for relay services[/dim]")
+        console.print()
+        console.print("[cyan]Management Commands:[/cyan]")
+        console.print("   • Check status: sudo systemctl status pisecure-relay")
+        console.print("   • View logs: sudo journalctl -u pisecure-relay -f")
+        console.print("   • Stop relay: pisecure stop-relay-node")
+
+    except Exception as e:
+        console.print(f"[red]❌ Become relay node error: {e}[/red]")
+
+
+@cli.command()
+def stop_relay_node():
+    """Stop being a community relay node"""
+    try:
+        console.print("[blue]🛑 Stopping PiSecure Community Relay Service[/blue]")
+        console.print()
+
+        # Stop and disable service
+        import subprocess
+        try:
+            subprocess.run(['sudo', 'systemctl', 'stop', 'pisecure-relay'], check=True)
+            subprocess.run(['sudo', 'systemctl', 'disable', 'pisecure-relay'], check=True)
+            console.print("[green]✅ Relay service stopped[/green]")
+        except subprocess.CalledProcessError as e:
+            console.print(f"[yellow]⚠️  Error stopping relay service: {e}[/yellow]")
+
+        # Update configuration
+        try:
+            import json
+            config_path = "/etc/pisecure/config.json"
+
+            try:
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+            except FileNotFoundError:
+                config = {}
+
+            if 'network' in config:
+                config['network']['relay_enabled'] = False
+                if 'relay_config' in config['network']:
+                    config['network']['relay_config']['enabled'] = False
+
+            with open(config_path, 'w') as f:
+                json.dump(config, f, indent=2)
+
+            console.print("[green]✅ Relay configuration disabled[/green]")
+
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Error updating configuration: {e}[/yellow]")
+
+        # Remove service file
+        try:
+            import os
+            service_path = "/etc/systemd/system/pisecure-relay.service"
+            if os.path.exists(service_path):
+                os.remove(service_path)
+                subprocess.run(['sudo', 'systemctl', 'daemon-reload'], check=True)
+                console.print("[green]✅ Relay service files cleaned up[/green]")
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Error cleaning up service files: {e}[/yellow]")
+
+        console.print()
+        console.print("[green]✅ Successfully stopped being a relay node[/green]")
+        console.print("[dim]Thank you for your service to the PiSecure community![/dim]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Stop relay node error: {e}[/red]")
+
+
+@cli.command()
+def relay_status():
+    """Show relay node status and statistics"""
+    try:
+        console.print("[blue]📡 PiSecure Relay Node Status[/blue]")
+        console.print("=" * 40)
+
+        # Check if relay is enabled in config
+        is_relay = _check_if_relay_node()
+        console.print(f"[cyan]Relay Status:[/cyan] {'✅ Enabled' if is_relay else '❌ Disabled'}")
+
+        if is_relay:
+            # Check service status
+            import subprocess
+            try:
+                result = subprocess.run(['sudo', 'systemctl', 'is-active', 'pisecure-relay'],
+                                      capture_output=True, text=True)
+                service_active = result.stdout.strip() == 'active'
+                console.print(f"[cyan]Service Status:[/cyan] {'✅ Running' if service_active else '❌ Stopped'}")
+            except:
+                console.print(f"[cyan]Service Status:[/cyan] ❓ Unknown")
+
+            # Show relay configuration
+            try:
+                import json
+                config_path = "/etc/pisecure/config.json"
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+
+                relay_config = config.get('network', {}).get('relay_config', {})
+                if relay_config:
+                    console.print()
+                    console.print(f"[cyan]Relay Configuration:[/cyan]")
+                    console.print(f"   • Port: {relay_config.get('port', 'unknown')}")
+                    console.print(f"   • Max Connections: {relay_config.get('max_connections', 'unknown')}")
+                    console.print(f"   • Bandwidth Limit: {relay_config.get('bandwidth_limit', 'unknown')} MB/s")
+            except:
+                pass
+
+            # Show relay statistics (placeholder - would be implemented in relay service)
+            console.print()
+            console.print(f"[cyan]Relay Statistics:[/cyan]")
+            console.print("   • Active Connections: (feature coming soon)"            console.print("   • Total Connections: (feature coming soon)"            console.print("   • Data Relayed: (feature coming soon)"            console.print("   • Uptime: (feature coming soon)"        else:
+            console.print()
+            console.print("[yellow]⚠️  This node is not configured as a relay[/yellow]")
+            console.print("[dim]Run 'pisecure become-relay-node' to become a relay[/dim]")
+
+        # Show network relay statistics
+        try:
+            from .core.nat_traversal import CommunityRelayNetwork
+            relay_network = CommunityRelayNetwork()
+            relay_network.update_relay_list()
+
+            console.print()
+            console.print(f"[cyan]Network Relay Statistics:[/cyan]")
+            console.print(f"   • Available Relays: {len(relay_network.relays)}")
+            console.print(f"   • Last Updated: {time.ctime(relay_network.last_update) if relay_network.last_update else 'Never'}")
+
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Could not load network relay stats: {e}[/yellow]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Relay status error: {e}[/red]")
 
 
 @cli.command()

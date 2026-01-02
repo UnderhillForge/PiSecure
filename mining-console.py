@@ -36,10 +36,12 @@ try:
     # Try relative imports first (for package installation)
     from pisecure.core.blockchain import SignChain
     from pisecure.core.hardware import HardwareVerifier
+    from pisecure.core.nat_traversal import node_discovery
 except ImportError:
     # Fall back to absolute imports (for direct execution)
     from core.blockchain import SignChain
     from core.hardware import HardwareVerifier
+    from core.nat_traversal import node_discovery
 
 console = Console()
 
@@ -367,6 +369,71 @@ class MiningConsole:
         except Exception as e:
             console.print(f"[red]❌ Error getting wallet info: {e}[/red]")
 
+    def toggle_relay_node(self):
+        """Toggle relay node status"""
+        is_relay = self._check_if_relay_node()
+
+        if is_relay:
+            # Stop being a relay
+            console.print("[blue]🛑 Stopping relay node service...[/blue]")
+            try:
+                # Run stop-relay-node command
+                import subprocess
+                result = subprocess.run([
+                    'python', '-m', 'pisecure.cli', 'stop-relay-node'
+                ], capture_output=True, text=True, cwd='/home/pi/PiSecure')
+
+                if result.returncode == 0:
+                    console.print("[green]✅ Relay node stopped successfully![/green]")
+                    console.print("[dim]Thank you for your service to the PiSecure community![/dim]")
+                else:
+                    console.print(f"[red]❌ Failed to stop relay node: {result.stderr}[/red]")
+            except Exception as e:
+                console.print(f"[red]❌ Error stopping relay node: {e}[/red]")
+        else:
+            # Become a relay
+            console.print("[blue]🌐 Becoming a community relay node...[/blue]")
+            console.print("[yellow]⚠️ This will help other users discover the network[/yellow]")
+            console.print("[dim]You will receive mining rewards for relay services[/dim]")
+
+            # Ask for confirmation in interactive mode
+            try:
+                import select
+                import sys
+                console.print("[cyan]Press 'Y' to confirm, any other key to cancel:[/cyan] ")
+
+                if select.select([sys.stdin], [], [], 10)[0]:  # 10 second timeout
+                    response = sys.stdin.read(1).lower().strip()
+                    if response == 'y':
+                        # Run become-relay-node command
+                        import subprocess
+                        result = subprocess.run([
+                            'python', '-m', 'pisecure.cli', 'become-relay-node'
+                        ], capture_output=True, text=True, cwd='/home/pi/PiSecure')
+
+                        if result.returncode == 0:
+                            console.print("[green]✅ Successfully became a relay node![/green]")
+                            console.print("[dim]🎉 Thank you for supporting the PiSecure network![/dim]")
+                        else:
+                            console.print(f"[red]❌ Failed to become relay node: {result.stderr}[/red]")
+                    else:
+                        console.print("[dim]Relay node setup cancelled[/dim]")
+                else:
+                    console.print("[dim]Timeout - relay node setup cancelled[/dim]")
+            except Exception as e:
+                console.print(f"[red]❌ Error setting up relay node: {e}[/red]")
+
+    def _check_if_relay_node(self):
+        """Check if this node is configured as a relay node"""
+        try:
+            import json
+            config_path = "/etc/pisecure/config.json"
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+            return config.get('network', {}).get('relay_enabled', False)
+        except:
+            return False
+
     def run(self):
         """Run the interactive mining console"""
         console.clear()
@@ -407,6 +474,8 @@ class MiningConsole:
                             self.create_test_transaction()
                         elif key == 'w':
                             self.show_wallet_info()
+                        elif key == 'r':
+                            self.toggle_relay_node()
                         elif key == 'h':
                             console.print("\n[bold cyan]Help - Mining Console Controls:[/bold cyan]")
                             console.print("[green]S[/green] - Start Mining")
