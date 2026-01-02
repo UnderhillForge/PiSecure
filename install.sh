@@ -515,7 +515,7 @@ wallet = SignWallet()
 wallets = wallet.list_wallets()
 if wallets:
     w = wallets[0]
-    print(f'{w[\"name\"]} ({w[\"address\"][:16]}...)')
+    print(w['name'] + ' (' + w['address'][:16] + '...)')
 else:
     print('No wallet found')
 \"
