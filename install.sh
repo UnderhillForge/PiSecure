@@ -340,33 +340,23 @@ setup_wallet() {
         WALLET_NAME="node-${SYSTEM_ID: -6}"
         WALLET_DISPLAY_NAME="PiSecure Node Wallet"
     else
-        # Non-Pi system - create unique name with collision detection
-        BASE_HOSTNAME=$(hostname | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g' | cut -c1-8)
+        # Non-Pi system - use multi-source unique identifier
+        UNIQUE_ID=$(generate_system_unique_id)
+        WALLET_NAME="host-${UNIQUE_ID}"
+        WALLET_DISPLAY_NAME="PiSecure Host Wallet"
 
-        if [[ -z "$BASE_HOSTNAME" ]]; then
-            # Fallback to random if hostname is empty/unusable
-            RANDOM_ID=$(od -An -N3 -tu1 /dev/urandom | tr -d ' ')
-            BASE_HOSTNAME=$(printf "rnd%06d" $((RANDOM_ID % 1000000)))
-        fi
-
-        # Check for wallet name collisions and add suffix if needed
-        WALLET_NAME="host-${BASE_HOSTNAME}"
+        # Final collision check (belt and suspenders)
         COUNTER=1
-
-        # Check if wallet already exists (basic check)
+        ORIGINAL_NAME="$WALLET_NAME"
         while [[ -f "/var/lib/pisecure/wallets/${WALLET_NAME}.json" ]]; do
-            WALLET_NAME="host-${BASE_HOSTNAME}${COUNTER}"
+            WALLET_NAME="${ORIGINAL_NAME}${COUNTER}"
             ((COUNTER++))
-            # Prevent infinite loop
             if [[ $COUNTER -gt 99 ]]; then
-                # Ultimate fallback - add timestamp
                 TIMESTAMP=$(date +%s | tail -c 4)
-                WALLET_NAME="host-${BASE_HOSTNAME}-${TIMESTAMP}"
+                WALLET_NAME="${ORIGINAL_NAME}-${TIMESTAMP}"
                 break
             fi
         done
-
-        WALLET_DISPLAY_NAME="PiSecure Host Wallet"
     fi
 
     log_info "Creating wallet: $WALLET_NAME (based on system identifier)"
@@ -400,6 +390,54 @@ else:
     fi
 
     log_success "Wallet setup complete"
+}
+
+# Generate unique system identifier using multiple sources
+generate_system_unique_id() {
+    local UNIQUE_ID=""
+
+    # Try multiple sources for uniqueness (in order of preference)
+
+    # 1. Machine ID (Linux systems - very unique)
+    if [[ -f /etc/machine-id ]]; then
+        UNIQUE_ID=$(head -c 8 /etc/machine-id | tr '[:upper:]' '[:lower:]')
+    elif [[ -f /var/lib/dbus/machine-id ]]; then
+        UNIQUE_ID=$(head -c 8 /var/lib/dbus/machine-id | tr '[:upper:]' '[:lower:]')
+    fi
+
+    # 2. Hardware UUID (dmidecode - works on physical hardware)
+    if [[ -z "$UNIQUE_ID" ]] && command -v dmidecode &> /dev/null; then
+        HW_UUID=$(sudo dmidecode -s system-uuid 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d '-')
+        if [[ -n "$HW_UUID" ]] && [[ "$HW_UUID" != " "* ]]; then
+            UNIQUE_ID="${HW_UUID:0:8}"
+        fi
+    fi
+
+    # 3. Network MAC address (fallback - can be spoofed but still useful)
+    if [[ -z "$UNIQUE_ID" ]]; then
+        # Get first non-loopback MAC address
+        MAC_ADDR=$(ip link show | grep -A1 "state UP" | grep "link/" | head -1 | awk '{print $2}' | tr -d ':' | tr '[:upper:]' '[:lower:]')
+        if [[ -n "$MAC_ADDR" ]]; then
+            UNIQUE_ID="${MAC_ADDR:0:8}"
+        fi
+    fi
+
+    # 4. CPU info hash (fallback for systems without hardware IDs)
+    if [[ -z "$UNIQUE_ID" ]] && [[ -f /proc/cpuinfo ]]; then
+        CPU_HASH=$(grep -E "(model name|cpu MHz|cache size)" /proc/cpuinfo | sort | md5sum 2>/dev/null | cut -c1-8)
+        if [[ -n "$CPU_HASH" ]]; then
+            UNIQUE_ID="$CPU_HASH"
+        fi
+    fi
+
+    # 5. Ultimate fallback - random with timestamp seed
+    if [[ -z "$UNIQUE_ID" ]]; then
+        TIMESTAMP=$(date +%s)
+        RANDOM_ID=$(echo "$TIMESTAMP$RANDOM" | md5sum | cut -c1-8)
+        UNIQUE_ID="rnd${RANDOM_ID:0:6}"
+    fi
+
+    echo "$UNIQUE_ID"
 }
 
 # Install system-wide command
