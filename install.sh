@@ -352,8 +352,8 @@ with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
 # Move to final location with sudo
 discovery_file = '/etc/pisecure/node_discovery.json'
 os.system(f'sudo mv {temp_file} {discovery_file}')
-os.system(f'sudo chown {SERVICE_USER}:{SERVICE_USER} {discovery_file}')
-os.system(f'sudo chmod 644 {discovery_file}')
+os.system('sudo chown pi:pi {discovery_file}')
+os.system('sudo chmod 644 {discovery_file}')
 
 print(f'✅ Node discovery configured: {results[\"success_count\"]} methods successful')
 print(f'📄 Discovery results saved to: {discovery_file}')
