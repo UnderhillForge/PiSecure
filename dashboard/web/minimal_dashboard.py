@@ -1423,6 +1423,9 @@ def get_local_network_peers():
 def get_stun_peers():
     """Count peers discovered via STUN"""
     try:
+        # Check if we need to refresh discovery data
+        _refresh_discovery_if_needed()
+
         # Check node discovery file for STUN endpoints
         discovery_file = Path("/etc/pisecure/node_discovery.json")
         if discovery_file.exists():
@@ -1443,6 +1446,9 @@ def get_stun_peers():
 def get_tor_peers():
     """Count peers discovered via Tor onion services"""
     try:
+        # Check if we need to refresh discovery data
+        _refresh_discovery_if_needed()
+
         # Check node discovery file for Tor endpoints
         discovery_file = Path("/etc/pisecure/node_discovery.json")
         if discovery_file.exists():
@@ -1459,6 +1465,63 @@ def get_tor_peers():
     except Exception as e:
         print(f"Tor peer count error: {e}")
         return 0
+
+def _refresh_discovery_if_needed():
+    """Refresh STUN/Tor discovery data if it's stale"""
+    try:
+        discovery_file = Path("/etc/pisecure/node_discovery.json")
+        if not discovery_file.exists():
+            # No discovery file yet, try to run discovery
+            _run_discovery_update()
+            return
+
+        # Check file modification time
+        import time
+        file_age = time.time() - discovery_file.stat().st_mtime
+
+        # Refresh every 5 minutes (300 seconds)
+        if file_age > 300:
+            _run_discovery_update()
+
+    except Exception as e:
+        print(f"Discovery refresh check error: {e}")
+
+def _run_discovery_update():
+    """Run a discovery update to refresh STUN/Tor peer data"""
+    try:
+        # Try to trigger node discovery update
+        try:
+            from pisecure.core.nat_traversal import node_discovery
+            # Run a quick discovery update
+            results = node_discovery.make_node_discoverable()
+            print(f"Discovery update completed: {results.get('success_count', 0)} methods successful")
+        except ImportError:
+            # Fallback: try to run the setup command
+            import subprocess
+            try:
+                # Run a quick discovery check
+                result = subprocess.run([
+                    'python3', '-c',
+                    '''
+import sys
+sys.path.insert(0, "/opt/pisecure")
+try:
+    from pisecure.core.nat_traversal import node_discovery
+    results = node_discovery.make_node_discoverable()
+    print(f"Discovery updated: {results.get('success_count', 0)} methods")
+except Exception as e:
+    print(f"Discovery update failed: {e}")
+'''
+                ], capture_output=True, text=True, timeout=30)
+                if result.returncode == 0:
+                    print(f"Discovery update result: {result.stdout.strip()}")
+            except subprocess.TimeoutExpired:
+                print("Discovery update timed out")
+            except Exception as e:
+                print(f"Discovery update subprocess error: {e}")
+
+    except Exception as e:
+        print(f"Discovery update error: {e}")
 
 def get_relay_peers():
     """Count peers discovered via community relays"""
