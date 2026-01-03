@@ -78,7 +78,9 @@ install_dependencies() {
         nginx \
         ufw \
         fail2ban \
-        unattended-upgrades
+        unattended-upgrades \
+        python3-dev \
+        build-essential
 
     log_success "System dependencies installed"
 }
@@ -117,7 +119,7 @@ install_pisecure() {
     pip install --upgrade pip
 
     # Install PiSecure dependencies
-    pip install flask flask-cors flask-limiter cryptography requests psutil
+    pip install flask flask-cors flask-limiter cryptography requests psutil rich click
 
     # Install PiSecure (must be in the correct directory)
     cd "$INSTALL_DIR"
@@ -130,6 +132,54 @@ install_pisecure() {
     }
 
     log_success "PiSecure installed successfully"
+}
+
+# Install CLI command
+install_cli() {
+    log_info "Installing PiSecure CLI command..."
+
+    # Create CLI wrapper script
+    sudo tee /usr/local/bin/pisecure > /dev/null <<EOF
+#!/usr/bin/env python3
+"""
+PiSecure CLI Wrapper - Fixed Import Issues
+
+This wrapper sets the correct Python path and runs the PiSecure CLI.
+"""
+
+import sys
+import os
+
+# Add PiSecure to Python path
+pisecure_path = "/home/pi/PiSecure"
+if pisecure_path not in sys.path:
+    sys.path.insert(0, pisecure_path)
+
+try:
+    # Import and run the fixed CLI
+    from pisecure.cli_fixed import main
+    main()
+except ImportError as e:
+    print(f"❌ Import error: {e}")
+    print("Make sure you're in the pisecure_env virtual environment")
+    sys.exit(1)
+except Exception as e:
+    print(f"❌ CLI error: {e}")
+    sys.exit(1)
+EOF
+
+    # Make CLI executable
+    sudo chmod +x /usr/local/bin/pisecure
+
+    # Test CLI installation
+    if command -v pisecure >/dev/null 2>&1; then
+        pisecure --help >/dev/null 2>&1 && log_success "CLI command installed successfully" || {
+            log_warning "CLI installed but may have issues - check manually"
+        }
+    else
+        log_error "CLI command installation failed"
+        exit 1
+    fi
 }
 
 # Configure firewall
@@ -464,6 +514,7 @@ main() {
     install_dependencies
     setup_directories
     install_pisecure
+    install_cli
     configure_firewall
     setup_hostname
     create_config
