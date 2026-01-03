@@ -1136,17 +1136,33 @@ class MiningLogic:
                     if self.stop_mining.is_set():
                         self._send_activity_message("🛑 Mining stopped by user request")
                         print("[MINING STOP] Stopped before mining attempt")
+                        logging.info("Mining stopped by user request before mining attempt")
                         break
 
+                    # Log mining attempt details
+                    logging.info(f"Starting mining attempt for block #{block_index}")
+                    logging.info(f"Blockchain difficulty: {self.blockchain.difficulty}")
+                    logging.info(f"Mining algorithm: {self.blockchain.mining_algorithm}")
+                    logging.info(f"Current chain length: {len(self.blockchain.chain)}")
+
                     # Start mining without timeout - mining will complete when block is found
+                    start_mining_time = time.time()
+                    logging.info(f"Mining attempt started at {time.ctime(start_mining_time)}")
+
                     block = self.blockchain.mine_pending_transactions(self.miner_wallet, False)
+
+                    mining_duration = time.time() - start_mining_time
+                    logging.info(f"Mining attempt completed in {mining_duration:.2f} seconds")
 
                     if block is None:
                         # Mining failed for some reason
                         self._send_activity_message("❌ Block mining failed, retrying...")
                         print(f"[MINING FAILED] Block mining failed, will retry")
+                        logging.error(f"Block mining failed for block #{block_index} after {mining_duration:.2f} seconds")
                         time.sleep(5)  # Brief wait before retry
                         continue
+
+                    logging.info(f"Block mining successful - Block #{block.index} created")
 
                 except Exception as e:
                     if self.stop_mining.is_set():
