@@ -307,7 +307,7 @@ class FoundationTrust:
     def _load_genesis_private_key(self):
         """Load genesis private key from file"""
         try:
-            priv_key_path = Path(__file__).parent.parent / 'updates' / 'genesis_auth_priv.key'
+            priv_key_path = Path(__file__).parent.parent / 'private' / 'genesis_auth_priv.key'
             with open(priv_key_path, 'rb') as f:
                 private_key_data = f.read()
 
@@ -323,7 +323,7 @@ class FoundationTrust:
     def _load_genesis_public_key(self):
         """Load genesis public key from file"""
         try:
-            pub_key_path = Path(__file__).parent.parent / 'updates' / 'genesis_auth_pub.key'
+            pub_key_path = Path(__file__).parent.parent / 'private' / 'genesis_auth_pub.key'
             with open(pub_key_path, 'rb') as f:
                 public_key_data = f.read()
 

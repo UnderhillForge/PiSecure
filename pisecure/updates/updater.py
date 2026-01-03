@@ -16,6 +16,7 @@ from .verifier import UpdateVerifier
 from .fetcher import UpdateFetcher
 from .rollback import RollbackManager
 from .auth import UpdateAuthority, UpdateSigner
+from .update_classifier import UpdateClassifier, DependencyManager, UpdateType
 
 
 class OTAUpdater:

@@ -17,7 +17,7 @@ def main():
     """Main entry point for the launcher"""
     # Now try to import and run PiSecure CLI
     try:
-        from pisecure.simple_cli import cli
+        from pisecure.cli_fixed import cli
         cli()
     except ImportError as e:
         print(f"Import error: {e}")
@@ -27,7 +27,7 @@ def main():
         try:
             # Direct module import
             sys.path.insert(0, '/opt/pisecure/repo')
-            from pisecure.simple_cli import cli
+            from pisecure.cli_fixed import cli
             cli()
         except Exception as e2:
             print(f"Alternative import failed: {e2}")

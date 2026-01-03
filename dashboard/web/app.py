@@ -14,6 +14,7 @@ import json
 import time
 import threading
 import subprocess
+import hashlib
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -39,7 +40,8 @@ class PiSecureDashboard:
         self.app = Flask(__name__,
                         static_folder='static',
                         template_folder='templates')
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*")
+        # Fix CORS for proper Socket.IO connection
+        self.socketio = SocketIO(self.app, cors_allowed_origins=["*"], async_mode='threading')
 
         # PiSecure components
         self.blockchain = None
@@ -248,8 +250,8 @@ class PiSecureDashboard:
     def collect_system_stats(self) -> Dict[str, Any]:
         """Collect system statistics"""
         try:
-            # CPU usage
-            cpu_percent = psutil.cpu_percent(interval=1)
+            # CPU usage - faster monitoring for better performance
+            cpu_percent = psutil.cpu_percent(interval=0.1)
 
             # Memory usage
             memory = psutil.virtual_memory()

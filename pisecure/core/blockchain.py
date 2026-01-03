@@ -372,24 +372,42 @@ class SignChain:
             }
 
     def _get_wallet_balance(self, wallet_address: str) -> float:
-        """Get wallet balance (simplified implementation)"""
-        # In production, this would query a wallet database or service
-        # For now, return a mock balance
-        # This should be replaced with actual wallet balance checking
+        """Get wallet balance by tracking all transactions in the blockchain"""
+        balance = 0.0
 
-        # Mock implementation - check if wallet has been seen in recent transactions
-        for block in reversed(self.chain[-10:]):  # Check last 10 blocks
+        # Track all transactions involving this wallet
+        for block in self.chain:
             for tx in block.transactions:
-                if tx.get('type') in ['token_transfer', 'batch_transfer']:
-                    # If wallet was recipient, add to balance
-                    if tx.get('recipient_address') == wallet_address:
-                        # This is very simplified - real implementation would track balances properly
-                        return 1000.0  # Mock balance
-                    # If wallet was sender, subtract from balance
-                    elif tx.get('sender_address') == wallet_address:
-                        return 500.0  # Mock balance
+                tx_type = tx.get('type', '')
 
-        return 100.0  # Default mock balance
+                if tx_type == 'mining_reward':
+                    # Mining rewards add to balance
+                    if tx.get('recipient_address') == wallet_address:
+                        balance += tx.get('amount', 0)
+
+                elif tx_type == 'token_transfer':
+                    # Token transfers
+                    if tx.get('recipient_address') == wallet_address:
+                        balance += tx.get('amount', 0)
+                    elif tx.get('sender_address') == wallet_address:
+                        balance -= tx.get('amount', 0)
+
+                elif tx_type == 'batch_transfer':
+                    # Batch transfers
+                    transfers = tx.get('transfers', [])
+                    for transfer in transfers:
+                        if transfer.get('recipient') == wallet_address:
+                            balance += transfer.get('amount', 0)
+                    # Subtract total from sender
+                    if tx.get('sender_address') == wallet_address:
+                        balance -= tx.get('total_amount', 0)
+
+                elif tx_type == 'name_registration':
+                    # Name registration fee
+                    if tx.get('wallet_address') == wallet_address:
+                        balance -= tx.get('registration_fee', 5.0)
+
+        return max(0.0, balance)  # Ensure balance never goes negative
 
     def _get_wallet_public_key(self, wallet_address: str) -> Optional[str]:
         """Get wallet public key (placeholder)"""

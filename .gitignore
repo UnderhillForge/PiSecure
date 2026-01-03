@@ -133,6 +133,9 @@ dmypy.json
 /etc/pisecure/
 /tmp/pisecure*
 
+# PRIVATE: Foundation and governance files - never commit
+private/
+
 # CRITICAL: Never commit cryptographic keys or certificates
 *.key
 *.pem
@@ -142,6 +145,9 @@ dmypy.json
 genesis_auth_*
 auth_keys/
 keys/
+
+# EXCEPTIONS: Trusted public keys for verification (safe to commit)
+!pisecure/trusted_keys/*.key
 
 # Test keys/certificates (allowed in test directories only)
 !test_keys/
