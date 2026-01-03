@@ -9,9 +9,11 @@ This script installs PiSecure as a complete blockchain node with:
 - REST API server
 - Web dashboard
 - Automatic startup and peer discovery
+- Scalable hybrid storage (block files + SQLite database)
 
 NOTE: This script uses virtual environments to avoid system Python conflicts.
 Genesis keys are OPTIONAL - the system works without them for normal operations.
+Hybrid storage is enabled by default for optimal performance.
 
 Usage: curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/install.sh | bash
 """
@@ -119,7 +121,7 @@ install_pisecure() {
     pip install --upgrade pip
 
     # Install PiSecure dependencies
-    pip install flask flask-cors flask-limiter cryptography requests psutil rich click
+    pip install flask flask-cors flask-limiter cryptography requests psutil rich click textual
 
     # Install PiSecure (must be in the correct directory)
     cd "$INSTALL_DIR"

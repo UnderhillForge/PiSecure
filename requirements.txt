@@ -7,6 +7,9 @@ rich>=13.0.0
 textual>=0.41.0
 python-dateutil>=2.8.2
 
+# Database for scalable storage
+sqlite3  # Built-in to Python 3.7+
+
 # Optional dependencies (uncomment as needed)
 # ipfshttpclient>=0.8.0  # For IPFS integration
 # RPi.GPIO>=0.7.0       # For GPIO access on Pi

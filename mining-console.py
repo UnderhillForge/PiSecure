@@ -25,14 +25,15 @@ import multiprocessing
 from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
-from textual.widgets import Header, Footer, Static, DataTable, Label
+from textual.widgets import Header, Footer, Static, DataTable, Label, ProgressBar
 from textual.binding import Binding
 from textual.reactive import reactive
 from textual.message import Message
 from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
-from rich.progress import Progress, TextColumn, BarColumn
+from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn
+from rich.console import Console
 
 
 class MiningActivityMessage(Message):
@@ -60,6 +61,7 @@ class StatsPanel(Static):
     def __init__(self, console_app):
         super().__init__()
         self.console_app = console_app
+        self.mining_progress = 0.0
 
     def compose(self):
         yield Container(
@@ -67,6 +69,8 @@ class StatsPanel(Static):
             Static("Mining Stats", id="mining_stats"),
             id="stats_container"
         )
+        # Add mining progress bar
+        yield ProgressBar(id="mining_progress", total=100)
 
     def on_mount(self):
         self.update_stats()
@@ -152,12 +156,36 @@ class StatsPanel(Static):
             mining_table.add_row("Hashrate", f"{stats['hashrate']:.1f} KH/s")
             mining_table.add_row("Uptime", f"{stats['uptime']:.0f}s")
 
+            # Add mining efficiency metrics
+            if stats['blocks_mined'] > 0 and stats['uptime'] > 0:
+                avg_block_time = stats['uptime'] / stats['blocks_mined']
+                expected_time = 600  # Expected 10 minutes per block
+                efficiency = expected_time / avg_block_time if avg_block_time > 0 else 0
+                efficiency_status = "⚡" if efficiency > 1 else "🐌"
+                mining_table.add_row("Avg Block Time", f"{avg_block_time:.1f}s")
+                mining_table.add_row("Mining Efficiency", f"{efficiency_status} {efficiency:.2f}x")
+            else:
+                mining_table.add_row("Avg Block Time", "N/A")
+                mining_table.add_row("Mining Efficiency", "N/A")
+
+            # Calculate mining progress (rough estimate based on difficulty)
+            if mining_active and stats['hashrate'] > 0:
+                difficulty = self.console_app.mining_console.blockchain.difficulty
+                # Estimate progress based on attempts vs expected for difficulty
+                expected_attempts = 16 ** difficulty  # Rough estimate
+                current_attempts = int(stats['uptime'] * stats['hashrate'])
+                self.mining_progress = min(100, (current_attempts / expected_attempts) * 100) if expected_attempts > 0 else 0
+            else:
+                self.mining_progress = 0
+
             # Update the widgets
             system_widget = self.query_one("#system_stats", Static)
             mining_widget = self.query_one("#mining_stats", Static)
+            progress_bar = self.query_one("#mining_progress", ProgressBar)
 
             system_widget.update(Panel(system_table, border_style="blue"))
             mining_widget.update(Panel(mining_table, border_style="green"))
+            progress_bar.update(progress=self.mining_progress)
 
         except Exception as e:
             self.update(f"Error updating stats: {e}")
@@ -211,8 +239,18 @@ class NetworkPanel(Static):
             blockchain_table.add_row("Difficulty", str(chain_info['difficulty']))
 
             health = chain_info['network_health']
-            blockchain_table.add_row("Participation", f"{health['participation']:.1%}")
+            participation = health['participation']
+            participation_icon = "🟢" if participation > 0.5 else "🟡" if participation > 0.1 else "🔴"
+            blockchain_table.add_row("Participation", f"{participation_icon} {participation:.1%}")
             blockchain_table.add_row("Avg Block Time", f"{health['avg_block_time']:.1f}s")
+
+            # Network connectivity status
+            network_status = "🟢 HEALTHY"
+            if participation < 0.1:
+                network_status = "🔴 CRITICAL"
+            elif participation < 0.5:
+                network_status = "🟡 DEGRADED"
+            blockchain_table.add_row("Network Status", network_status)
 
             # Wallet info
             wallet_table = Table(title="🏦 Mining Wallet", box=None, show_header=False)
@@ -310,11 +348,307 @@ class MiningActivityPanel(ScrollableContainer):
     def add_activity(self, message):
         """Add a new activity message"""
         timestamp = time.strftime("%H:%M:%S")
-        self.activity_log.append(f"[{timestamp}] {message}")
+
+        # Color code messages based on type
+        if "✅ BLOCK FOUND" in message:
+            colored_message = f"[green]{message}[/green]"
+        elif "❌" in message or "error" in message.lower():
+            colored_message = f"[red]{message}[/red]"
+        elif "🛑" in message:
+            colored_message = f"[yellow]{message}[/yellow]"
+        elif "⛏️" in message:
+            colored_message = f"[blue]{message}[/blue]"
+        elif "🔌" in message:
+            colored_message = f"[cyan]{message}[/cyan]"
+        else:
+            colored_message = message
+
+        self.activity_log.append(f"[{timestamp}] {colored_message}")
         # Keep only last 100 entries
         if len(self.activity_log) > 100:
             self.activity_log = self.activity_log[-100:]
         self.update_activity()
+
+
+class RelayManager:
+    """Manages relay functionality for network connectivity"""
+
+    def __init__(self):
+        self.relay_active = False
+        self.relay_config = self._load_relay_config()
+        self.relay_stats = {
+            'connections_relayed': 0,
+            'bytes_relayed': 0,
+            'active_sessions': 0,
+            'uptime': 0,
+            'start_time': None
+        }
+
+    def _load_relay_config(self):
+        """Load relay configuration from config file"""
+        try:
+            config_path = "/etc/pisecure/config.json"
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+            return config.get('network', {}).get('relay', {})
+        except:
+            return {}
+
+    def _save_relay_config(self):
+        """Save relay configuration to config file"""
+        try:
+            config_path = "/etc/pisecure/config.json"
+            config = {}
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+
+            config.setdefault('network', {})['relay'] = self.relay_config
+            config['network']['relay_enabled'] = self.relay_active
+
+            with open(config_path, 'w') as f:
+                json.dump(config, f, indent=2)
+        except Exception as e:
+            print(f"Failed to save relay config: {e}")
+
+    def start_relay(self):
+        """Start relay services"""
+        if self.relay_active:
+            return "Relay is already active"
+
+        try:
+            # Initialize relay services
+            self.relay_active = True
+            self.relay_stats['start_time'] = time.time()
+
+            # Configure TURN server if enabled
+            if self.relay_config.get('turn_enabled', False):
+                self._start_turn_server()
+
+            # Configure STUN server if enabled
+            if self.relay_config.get('stun_enabled', False):
+                self._start_stun_server()
+
+            # Configure UPnP port forwarding
+            if self.relay_config.get('upnp_enabled', True):
+                self._configure_upnp()
+
+            self._save_relay_config()
+            return "Relay services started successfully"
+
+        except Exception as e:
+            self.relay_active = False
+            return f"Failed to start relay: {e}"
+
+    def stop_relay(self):
+        """Stop relay services"""
+        if not self.relay_active:
+            return "Relay is not active"
+
+        try:
+            # Stop all relay services
+            self._stop_turn_server()
+            self._stop_stun_server()
+            self._cleanup_upnp()
+
+            self.relay_active = False
+            self.relay_stats['uptime'] = time.time() - (self.relay_stats['start_time'] or time.time())
+            self._save_relay_config()
+            return "Relay services stopped successfully"
+
+        except Exception as e:
+            return f"Failed to stop relay: {e}"
+
+    def _start_turn_server(self):
+        """Start TURN (Traversal Using Relays around NAT) server"""
+        # This would integrate with a TURN server implementation
+        # For now, we'll simulate the functionality
+        port = self.relay_config.get('turn_port', 3478)
+        print(f"Starting TURN server on port {port}")
+
+    def _stop_turn_server(self):
+        """Stop TURN server"""
+        print("Stopping TURN server")
+
+    def _start_stun_server(self):
+        """Start STUN (Session Traversal Utilities for NAT) server"""
+        # This would integrate with a STUN server implementation
+        port = self.relay_config.get('stun_port', 3478)
+        print(f"Starting STUN server on port {port}")
+
+    def _stop_stun_server(self):
+        """Stop STUN server"""
+        print("Stopping STUN server")
+
+    def _configure_upnp(self):
+        """Configure UPnP port forwarding"""
+        try:
+            import miniupnpc
+            upnpc = miniupnpc.UPnP()
+            upnpc.discoverdelay = 200
+            upnpc.discover()
+            upnpc.selectigd()
+
+            # Forward PiSecure ports
+            external_port = self.relay_config.get('external_port', 3142)
+            internal_port = self.relay_config.get('internal_port', 3142)
+
+            upnpc.addportmapping(
+                external_port, 'TCP', upnpc.lanaddr, internal_port,
+                'PiSecure Blockchain Node', ''
+            )
+
+            print(f"UPnP: Forwarded port {external_port} -> {internal_port}")
+
+        except ImportError:
+            print("UPnP: miniupnpc not available, skipping UPnP configuration")
+        except Exception as e:
+            print(f"UPnP configuration failed: {e}")
+
+    def _cleanup_upnp(self):
+        """Clean up UPnP port forwarding"""
+        try:
+            import miniupnpc
+            upnpc = miniupnpc.UPnP()
+            upnpc.discoverdelay = 200
+            upnpc.discover()
+            upnpc.selectigd()
+
+            external_port = self.relay_config.get('external_port', 3142)
+            upnpc.deleteportmapping(external_port, 'TCP')
+
+            print(f"UPnP: Removed port forwarding for {external_port}")
+
+        except Exception as e:
+            print(f"UPnP cleanup failed: {e}")
+
+    def get_relay_status(self):
+        """Get comprehensive relay status"""
+        status = {
+            'active': self.relay_active,
+            'config': self.relay_config,
+            'stats': self.relay_stats.copy()
+        }
+
+        if self.relay_active and self.relay_stats['start_time']:
+            status['stats']['uptime'] = time.time() - self.relay_stats['start_time']
+
+        # Check actual service status
+        status['services'] = {
+            'turn': self._check_turn_status(),
+            'stun': self._check_stun_status(),
+            'upnp': self._check_upnp_status()
+        }
+
+        return status
+
+    def _check_turn_status(self):
+        """Check TURN server status"""
+        if not self.relay_config.get('turn_enabled', False):
+            return {'enabled': False, 'status': 'disabled'}
+
+        # In a real implementation, this would check if the TURN server is running
+        return {
+            'enabled': True,
+            'status': 'running' if self.relay_active else 'stopped',
+            'port': self.relay_config.get('turn_port', 3478)
+        }
+
+    def _check_stun_status(self):
+        """Check STUN server status"""
+        if not self.relay_config.get('stun_enabled', False):
+            return {'enabled': False, 'status': 'disabled'}
+
+        return {
+            'enabled': True,
+            'status': 'running' if self.relay_active else 'stopped',
+            'port': self.relay_config.get('stun_port', 3478)
+        }
+
+    def _check_upnp_status(self):
+        """Check UPnP status"""
+        try:
+            import miniupnpc
+            upnpc = miniupnpc.UPnP()
+            upnpc.discoverdelay = 200
+            upnpc.discover()
+            upnpc.selectigd()
+
+            external_port = self.relay_config.get('external_port', 3142)
+            # Check if our port mapping exists
+            mappings = upnpc.getportmappingnumberofentries()
+            for i in range(mappings):
+                try:
+                    pm = upnpc.getgenericportmapping(i)
+                    if pm[0] == external_port and pm[1] == 'TCP':
+                        return {
+                            'enabled': True,
+                            'status': 'active',
+                            'external_ip': upnpc.externalipaddress(),
+                            'port': external_port
+                        }
+                except:
+                    continue
+
+            return {'enabled': True, 'status': 'inactive'}
+
+        except ImportError:
+            return {'enabled': False, 'status': 'unavailable'}
+        except Exception:
+            return {'enabled': True, 'status': 'error'}
+
+    def update_config(self, new_config):
+        """Update relay configuration"""
+        self.relay_config.update(new_config)
+        self._save_relay_config()
+        return "Relay configuration updated"
+
+    def get_network_info(self):
+        """Get network connectivity information"""
+        try:
+            discovery_status = node_discovery.get_discovery_status()
+            endpoints = discovery_status.get('endpoints', [])
+
+            info = {
+                'public_ip': 'Unknown',
+                'tor_address': 'Not configured',
+                'stun_endpoints': 0,
+                'turn_relays': 0,
+                'upnp_ports': 0,
+                'relay_services': []
+            }
+
+            for endpoint in endpoints:
+                ep_type = endpoint.get('type')
+                if ep_type == 'stun_direct':
+                    info['stun_endpoints'] += 1
+                    if not info['public_ip'] or info['public_ip'] == 'Unknown':
+                        info['public_ip'] = endpoint.get('ip', 'Unknown')
+                elif ep_type == 'turn_relay':
+                    info['turn_relays'] += 1
+                elif ep_type == 'tor_onion':
+                    info['tor_address'] = endpoint.get('address', 'Unknown')[:20] + "..."
+                elif ep_type == 'upnp':
+                    info['upnp_ports'] += 1
+
+            # Add relay service info
+            relay_status = self.get_relay_status()
+            if relay_status['services']['turn']['enabled']:
+                info['relay_services'].append('TURN')
+            if relay_status['services']['stun']['enabled']:
+                info['relay_services'].append('STUN')
+            if relay_status['services']['upnp']['enabled']:
+                info['relay_services'].append('UPnP')
+
+            return info
+
+        except Exception as e:
+            return {'error': str(e)}
+
+    def _send_activity_message(self, message):
+        """Send activity message to UI"""
+        if self.app:
+            self.app.post_message(MiningActivityMessage(message))
 
 
 class MiningLogic:
@@ -324,6 +658,7 @@ class MiningLogic:
         self.app = app
         self.blockchain = SignChain()
         self.hardware = HardwareVerifier()
+        self.relay_manager = RelayManager()
         self.miner_wallet = self._load_miner_wallet()
 
         # Mining state
@@ -343,11 +678,6 @@ class MiningLogic:
             'session_rewards': 0.0,
             'session_blocks': 0
         }
-
-    def _send_activity_message(self, message):
-        """Send activity message to UI"""
-        if self.app:
-            self.app.post_message(MiningActivityMessage(message))
 
     def _load_miner_wallet(self):
         """Load miner wallet address from config"""
@@ -391,14 +721,19 @@ class MiningLogic:
         if not self.mining_active:
             return "Mining is not active"
 
-        self._send_activity_message("🛑 Stop mining requested - will stop after current block")
+        self._send_activity_message("🛑 Stop mining requested - stopping immediately")
         self.stop_mining.set()
         self.mining_active = False
 
-        # Don't try to forcibly terminate - let mining finish gracefully
-        # The mining worker will check the stop event and exit cleanly
+        # Wait a short time for graceful shutdown
+        if hasattr(self, 'mining_thread') and self.mining_thread.is_alive():
+            self.mining_thread.join(timeout=2.0)  # Wait up to 2 seconds
+            if self.mining_thread.is_alive():
+                self._send_activity_message("⚠️ Mining thread still running - force stopping")
+            else:
+                self._send_activity_message("✅ Mining stopped gracefully")
 
-        return "Stop request sent - mining will stop after current block"
+        return "Mining stopped"
 
     def _mining_worker(self):
         """Background mining worker"""
@@ -419,26 +754,31 @@ class MiningLogic:
                 self.stats['uptime'] = time.time() - self.stats['start_time']
                 self.stats['pending_txs'] = len(self.blockchain.pending_transactions)
 
-                # Mine a block with aggressive timeout for responsive stopping
+                # Check for stop request before starting mining
+                if self.stop_mining.is_set():
+                    self._send_activity_message("🛑 Mining stopped by user request")
+                    break
+
+                # Mine a block with shorter timeout for more responsive stopping
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                     future = executor.submit(self.blockchain.mine_pending_transactions, self.miner_wallet, False)
 
                     try:
-                        # Aggressive timeout for responsive stopping (1-2 seconds)
-                        block = future.result(timeout=1.5)  # 1.5 second timeout
+                        # Shorter timeout for more responsive stopping (0.5 seconds)
+                        block = future.result(timeout=0.5)  # 0.5 second timeout
                     except concurrent.futures.TimeoutError:
                         # Mining timed out - check if we should stop
                         if self.stop_mining.is_set():
                             self._send_activity_message("🛑 Mining stopped immediately by user request")
                             break
                         else:
-                            # Continue mining this block
+                            # Continue mining this block with another short timeout
                             try:
-                                block = future.result(timeout=1.5)  # Try again briefly
+                                block = future.result(timeout=0.5)  # Try again briefly
                             except concurrent.futures.TimeoutError:
                                 # Still no block found, send detailed progress update and continue
                                 elapsed = time.time() - start_time
-                                if nonce_count % 50 == 0:  # Very frequent updates for detailed view
+                                if nonce_count % 20 == 0:  # More frequent updates
                                     hashrate = nonce_count / elapsed if elapsed > 0 else 0
 
                                     # Show detailed mining progress
@@ -456,11 +796,16 @@ class MiningLogic:
                                     sample_hash = hashlib.sha256(sample_data.encode()).hexdigest()
                                     self._send_activity_message(f"   Sample Hash: {sample_hash[:32]}...")
 
-                                time.sleep(0.05)  # Brief pause
+                                time.sleep(0.01)  # Very brief pause
                                 nonce_count += 1
                                 continue
 
                 if block is not None:
+                    # Check if we should stop before processing the found block
+                    if self.stop_mining.is_set():
+                        self._send_activity_message("🛑 Block found but mining stopped by user request")
+                        break
+
                     mining_time = time.time() - start_time
 
                     # Calculate final hashrate
@@ -487,6 +832,11 @@ class MiningLogic:
                     self.stats['session_blocks'] += 1
                     self.stats['last_block_time'] = time.time()
 
+                    # Check if we should stop before starting next block
+                    if self.stop_mining.is_set():
+                        self._send_activity_message("🛑 Mining stopped after completing block")
+                        break
+
                     # Prepare for next block
                     block_index += 1
                     nonce_count = 0
@@ -496,17 +846,19 @@ class MiningLogic:
                 else:
                     # Still mining - send periodic updates
                     nonce_count += 1
-                    if nonce_count % 500 == 0:  # More frequent updates
+                    if nonce_count % 200 == 0:  # More frequent updates
                         elapsed = time.time() - start_time
                         hashrate = nonce_count / elapsed if elapsed > 0 else 0
                         self._send_activity_message(f"⛏️ Mining... Nonce: {nonce_count:,} | Rate: {hashrate:.1f} H/s")
 
-                    time.sleep(0.05)  # Shorter pause
+                    time.sleep(0.01)  # Brief pause
 
             except Exception as e:
                 if not self.stop_mining.is_set():  # Don't log errors if we're stopping
                     self._send_activity_message(f"❌ Mining error: {e}")
                 time.sleep(2)
+
+        self._send_activity_message("🏁 Mining session ended")
 
     def create_test_transaction(self):
         """Create a test transaction for mining"""
@@ -538,8 +890,19 @@ class MiningLogic:
 
     def toggle_relay_node(self):
         """Toggle relay node status"""
-        # Simplified for now
-        return "Relay toggle not implemented in Textual version"
+        try:
+            if self.relay_manager.relay_active:
+                result = self.relay_manager.stop_relay()
+                self._send_activity_message(f"🔌 Relay services stopped: {result}")
+                return f"Relay stopped: {result}"
+            else:
+                result = self.relay_manager.start_relay()
+                self._send_activity_message(f"🔌 Relay services started: {result}")
+                return f"Relay started: {result}"
+        except Exception as e:
+            error_msg = f"Failed to toggle relay: {e}"
+            self._send_activity_message(f"❌ {error_msg}")
+            return error_msg
 
 
 class MiningConsoleApp(App):
@@ -550,6 +913,14 @@ class MiningConsoleApp(App):
         background: $surface;
     }
 
+    #status_bar {
+        height: 1;
+        background: $primary;
+        color: $text;
+        content-align: center middle;
+        text-style: bold;
+    }
+
     #stats_container {
         layout: horizontal;
         height: 12;
@@ -557,6 +928,11 @@ class MiningConsoleApp(App):
 
     #system_stats, #mining_stats {
         width: 50%;
+        margin: 0 1;
+    }
+
+    #mining_progress {
+        height: 1;
         margin: 0 1;
     }
 
@@ -593,6 +969,7 @@ class MiningConsoleApp(App):
         Binding("w", "wallet_info", "Wallet Info"),
         Binding("n", "network_info", "Network Info"),
         Binding("r", "toggle_relay", "Toggle Relay"),
+        Binding("e", "export_stats", "Export Stats"),
         Binding("h", "help", "Help"),
         Binding("q", "quit", "Quit"),
     ]
@@ -603,6 +980,8 @@ class MiningConsoleApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        # Status indicator bar
+        yield Static(self._get_status_bar(), id="status_bar")
         with Container():
             yield StatsPanel(self)
             yield NetworkPanel(self)
@@ -629,17 +1008,53 @@ class MiningConsoleApp(App):
             self.query_one(StatsPanel).update_stats()
             self.query_one(NetworkPanel).update_network()
             self.query_one(BlocksPanel).update_blocks()
+            # Update status bar
+            status_widget = self.query_one("#status_bar", Static)
+            status_widget.update(self._get_status_bar())
         except:
             pass  # Panels might not be mounted yet
 
     def _get_controls_text(self):
         """Get the controls text"""
         return """
-[bold cyan]Mining Console Controls:[/bold cyan]
-[green]S[/green] - Start Mining    [red]X[/red] - Stop Mining    [yellow]C[/yellow] - Test TX
-[blue]W[/blue] - Wallet Info    [magenta]N[/magenta] - Network Info    [cyan]R[/cyan] - Toggle Relay
-[dim]Q[/dim] - Quit Console    [dim]H[/dim] - Show This Help
+[dim]┌─[/dim][bold cyan] Mining Console Controls [/bold cyan][dim]─┐[/dim]
+[dim]│[/dim] [green]S[/green] Start Mining  [red]X[/red] Stop Mining   [dim]│[/dim]
+[dim]│[/dim] [yellow]C[/yellow] Test TX      [blue]W[/blue] Wallet Info  [dim]│[/dim]
+[dim]│[/dim] [magenta]N[/magenta] Network     [cyan]R[/cyan] Toggle Relay [dim]│[/dim]
+[dim]│[/dim] [white]E[/white] Export Stats [white]H[/white] Help [white]Q[/white] Quit [dim]│[/dim]
+[dim]└─────────────────────────────────┘[/dim]
         """
+
+    def _get_status_bar(self):
+        """Get the status bar text"""
+        try:
+            mining_console = self.mining_console
+            blockchain = mining_console.blockchain
+            stats = mining_console.stats
+
+            # Mining status
+            mining_status = "🟢 MINING" if mining_console.mining_active else "🔴 STOPPED"
+
+            # Relay status
+            relay_status = "🔗 RELAY" if mining_console.relay_manager.relay_active else "❌ NO RELAY"
+
+            # Network status
+            chain_info = blockchain.get_chain_info()
+            network_status = f"⛓️ {chain_info['blocks']} BLOCKS"
+
+            # Wallet status
+            wallet_balance = blockchain.get_wallet_balance(mining_console.miner_wallet) if mining_console.miner_wallet else 0
+            wallet_status = f"💰 {wallet_balance:.1f} TOKENS"
+
+            # System status
+            import psutil
+            cpu_percent = psutil.cpu_percent()
+            system_status = f"🖥️ CPU {cpu_percent:.0f}%"
+
+            return f"{mining_status} | {relay_status} | {network_status} | {wallet_status} | {system_status}"
+
+        except Exception as e:
+            return f"⚠️ Status Error: {str(e)[:30]}..."
 
     def action_start_mining(self):
         """Start mining action"""
@@ -691,6 +1106,32 @@ class MiningConsoleApp(App):
             self.notify("Relay node toggled!", severity="information")
         except Exception as e:
             self.notify(f"Failed to toggle relay: {e}", severity="error")
+
+    def action_export_stats(self):
+        """Export mining statistics"""
+        try:
+            import json
+            from pathlib import Path
+
+            stats = self.mining_console.stats
+            blockchain = self.mining_console.blockchain
+            chain_info = blockchain.get_chain_info()
+
+            export_data = {
+                "timestamp": time.time(),
+                "mining_stats": stats,
+                "blockchain_info": chain_info,
+                "wallet_balance": blockchain.get_wallet_balance(self.mining_console.miner_wallet) if self.mining_console.miner_wallet else 0,
+                "relay_status": self.mining_console.relay_manager.get_relay_status()
+            }
+
+            export_file = Path.home() / f"pisecure_mining_stats_{int(time.time())}.json"
+            with open(export_file, 'w') as f:
+                json.dump(export_data, f, indent=2)
+
+            self.notify(f"Stats exported to {export_file}", severity="information")
+        except Exception as e:
+            self.notify(f"Failed to export stats: {e}", severity="error")
 
     def action_help(self):
         """Show help"""

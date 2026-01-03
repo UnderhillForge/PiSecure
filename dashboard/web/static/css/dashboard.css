@@ -290,3 +290,232 @@ nav a:hover, nav a.active {
     border-left: 4px solid var(--success-color);
     background-color: #f5fff5;
 }
+
+/* Monitoring Page Styles */
+.health-overview {
+    margin-bottom: 30px;
+}
+
+.health-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.health-card {
+    background: var(--card-background);
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    text-align: center;
+}
+
+.health-card h3 {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-indicator {
+    font-size: 1.2rem;
+    font-weight: bold;
+    padding: 8px 16px;
+    border-radius: 20px;
+    display: inline-block;
+}
+
+.status-healthy {
+    background-color: var(--success-color);
+    color: white;
+}
+
+.status-warning {
+    background-color: var(--warning-color);
+    color: white;
+}
+
+.status-critical {
+    background-color: var(--danger-color);
+    color: white;
+}
+
+.status-unknown {
+    background-color: var(--text-muted);
+    color: white;
+}
+
+.alert-count {
+    font-size: 2rem;
+    font-weight: bold;
+    color: var(--danger-color);
+}
+
+.health-checks {
+    margin-bottom: 30px;
+}
+
+.checks-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 15px;
+    margin-top: 20px;
+}
+
+.health-check {
+    background: var(--card-background);
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    border-left: 4px solid var(--text-muted);
+}
+
+.health-check.status-healthy {
+    border-left-color: var(--success-color);
+}
+
+.health-check.status-warning {
+    border-left-color: var(--warning-color);
+}
+
+.health-check.status-critical {
+    border-left-color: var(--danger-color);
+}
+
+.health-check h4 {
+    color: var(--primary-color);
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.check-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: var(--primary-color);
+    margin-bottom: 5px;
+}
+
+.check-message {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.metrics-charts,
+.blockchain-metrics {
+    margin-bottom: 30px;
+}
+
+.charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.chart-container {
+    background: var(--card-background);
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    height: 300px;
+}
+
+.chart-container canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.recent-alerts {
+    margin-bottom: 30px;
+}
+
+.alerts-container {
+    margin-top: 20px;
+}
+
+.no-alerts {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 40px;
+    background: var(--card-background);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+}
+
+.alert {
+    background: var(--card-background);
+    padding: 15px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    border-left: 4px solid var(--text-muted);
+}
+
+.alert-warning {
+    border-left-color: var(--warning-color);
+}
+
+.alert-critical {
+    border-left-color: var(--danger-color);
+}
+
+.alert-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.alert-level {
+    font-size: 0.8rem;
+    font-weight: bold;
+    padding: 4px 8px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.alert-warning .alert-level {
+    background-color: var(--warning-color);
+    color: white;
+}
+
+.alert-critical .alert-level {
+    background-color: var(--danger-color);
+    color: white;
+}
+
+.alert-time {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.alert-component {
+    font-weight: bold;
+    color: var(--primary-color);
+    margin-bottom: 5px;
+}
+
+.alert-message {
+    font-size: 0.9rem;
+    color: var(--text-color);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .charts-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .checks-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .health-cards {
+        grid-template-columns: 1fr;
+    }
+}

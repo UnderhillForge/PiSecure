@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PiSecure Wallets</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔐 PiSecure Wallets</h1>
+            <nav>
+                <a href="/">Dashboard</a>
+                <a href="/mining">Mining</a>
+                <a href="/network">Network</a>
+                <a href="/blockchain">Blockchain</a>
+                <a href="/wallets" class="active">Wallets</a>
+                <a href="/system">System</a>
+            </nav>
+            <div class="status-indicator" id="connection-status">
+                <span class="status-dot" id="status-dot"></span>
+                <span id="status-text">Connecting...</span>
+            </div>
+        </header>
+
+        <main>
+            <!-- Wallet Lookup -->
+            <section class="card">
+                <h2>Wallet Lookup</h2>
+                <div class="wallet-lookup">
+                    <input type="text" id="wallet-address" placeholder="Enter wallet address" style="width: 100%; padding: 10px; margin-bottom: 10px;">
+                    <button onclick="lookupWallet()" style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px;">Lookup Wallet</button>
+                </div>
+            </section>
+
+            <!-- Wallet Balance -->
+            <section class="card" id="balance-section" style="display: none;">
+                <h2>Wallet Balance</h2>
+                <div class="metric">
+                    <span class="label">Address</span>
+                    <span class="value" id="wallet-display-address">-</span>
+                </div>
+                <div class="metric">
+                    <span class="label">Balance</span>
+                    <span class="value" id="wallet-balance">0.00 PiTokens</span>
+                </div>
+            </section>
+
+            <!-- Transaction History -->
+            <section class="card" id="transactions-section" style="display: none;">
+                <h2>Transaction History</h2>
+                <div id="transactions-list">
+                    <p>Loading transactions...</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        const socket = io();
+        let currentWalletAddress = null;
+
+        // Socket.IO connection status
+        socket.on('connect', function() {
+            document.getElementById('status-dot').className = 'status-dot connected';
+            document.getElementById('status-text').textContent = 'Connected';
+        });
+
+        socket.on('disconnect', function() {
+            document.getElementById('status-dot').className = 'status-dot disconnected';
+            document.getElementById('status-text').textContent = 'Disconnected';
+        });
+
+        socket.on('status', function(data) {
+            console.log('Status:', data);
+        });
+
+        function lookupWallet() {
+            const address = document.getElementById('wallet-address').value.trim();
+            if (!address) {
+                alert('Please enter a wallet address');
+                return;
+            }
+
+            currentWalletAddress = address;
+            loadWalletData(address);
+        }
+
+        function loadWalletData(address) {
+            // Load balance
+            fetch(`/api/wallet/balance?wallet_id=${encodeURIComponent(address)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Error: ' + data.error);
+                        return;
+                    }
+
+                    document.getElementById('wallet-display-address').textContent = address;
+                    document.getElementById('wallet-balance').textContent = data.balance + ' PiTokens';
+                    document.getElementById('balance-section').style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error loading balance:', error);
+                    alert('Error loading wallet balance');
+                });
+
+            // Load transactions
+            fetch(`/api/wallet/transactions?wallet_id=${encodeURIComponent(address)}&limit=20`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Error: ' + data.error);
+                        return;
+                    }
+
+                    displayTransactions(data.transactions);
+                    document.getElementById('transactions-section').style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error loading transactions:', error);
+                    document.getElementById('transactions-list').innerHTML = '<p>Error loading transactions</p>';
+                });
+        }
+
+        function displayTransactions(transactions) {
+            const container = document.getElementById('transactions-list');
+
+            if (!transactions || transactions.length === 0) {
+                container.innerHTML = '<p>No transactions found</p>';
+                return;
+            }
+
+            let html = '<div class="transactions-table">';
+            html += '<div class="transaction-header">';
+            html += '<span>Type</span>';
+            html += '<span>Direction</span>';
+            html += '<span>Amount</span>';
+            html += '<span>Block</span>';
+            html += '<span>Time</span>';
+            html += '</div>';
+
+            transactions.forEach(tx => {
+                const directionClass = tx.direction === 'incoming' ? 'incoming' : 'outgoing';
+                const directionSymbol = tx.direction === 'incoming' ? '↓' : '↑';
+                const timeString = tx.timestamp ? new Date(tx.timestamp * 1000).toLocaleString() : 'Unknown';
+
+                html += '<div class="transaction-row">';
+                html += `<span>${tx.type}</span>`;
+                html += `<span class="${directionClass}">${directionSymbol} ${tx.direction}</span>`;
+                html += `<span>${tx.amount} PiTokens</span>`;
+                html += `<span>#${tx.block_index}</span>`;
+                html += `<span>${timeString}</span>`;
+                html += '</div>';
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        // Allow Enter key to trigger lookup
+        document.getElementById('wallet-address').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                lookupWallet();
+            }
+        });
+    </script>
+
+    <style>
+        .wallet-lookup {
+            margin-bottom: 20px;
+        }
+
+        .transactions-table {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .transaction-header {
+            background: #f8f9fa;
+            padding: 12px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr 2fr;
+            gap: 10px;
+            font-weight: bold;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .transaction-row {
+            padding: 12px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr 2fr;
+            gap: 10px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .transaction-row:hover {
+            background: #f8f9fa;
+        }
+
+        .incoming {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .outgoing {
+            color: #dc3545;
+            font-weight: bold;
+        }
+    </style>
+</body>
+</html>

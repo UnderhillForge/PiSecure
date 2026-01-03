@@ -13,6 +13,12 @@ import threading
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
+try:
+    from .storage import HybridBlockchainStorage
+    HYBRID_STORAGE_AVAILABLE = True
+except ImportError:
+    HYBRID_STORAGE_AVAILABLE = False
+
 
 class SignBlock:
     """Individual block in the PiSecure blockchain"""
@@ -106,7 +112,7 @@ class SignChain:
     """PiSecure Private Blockchain with Hardware Verification"""
 
     def __init__(self, chain_file: str = "/var/lib/pisecure/blockchain.json",
-                 difficulty: int = 4):
+                 difficulty: int = 4, use_hybrid_storage: bool = None):
         self.chain_file = Path(chain_file)
         self.pending_file = Path(chain_file).parent / "pending_transactions.json"
         self.names_file = Path(chain_file).parent / "name_registry.json"
@@ -115,6 +121,23 @@ class SignChain:
         self.pending_transactions: List[Dict] = []
         self.name_registry: Dict[str, Dict[str, Any]] = {}  # name -> {address, registered_at, tx_hash}
         self.lock = threading.Lock()
+
+        # Storage system - default to hybrid if available and not explicitly disabled
+        if use_hybrid_storage is None:
+            use_hybrid_storage = HYBRID_STORAGE_AVAILABLE  # Default to hybrid if available
+
+        self.use_hybrid_storage = use_hybrid_storage and HYBRID_STORAGE_AVAILABLE
+        if self.use_hybrid_storage:
+            self.hybrid_storage = HybridBlockchainStorage(str(self.chain_file.parent))
+            # Migrate from JSON if needed (only if JSON exists and no hybrid data)
+            self.hybrid_storage.migrate_from_json(str(self.chain_file))
+        else:
+            self.hybrid_storage = None
+
+        # Validation cache
+        self._last_validation_time = 0
+        self._validation_cache_timeout = 30  # Cache validation for 30 seconds
+        self._cached_chain_valid = None
 
         # Load existing chain or create genesis
         self.load_chain()
@@ -145,7 +168,16 @@ class SignChain:
         return genesis
 
     def load_chain(self):
-        """Load blockchain from file"""
+        """Load blockchain from file or hybrid storage"""
+        if self.use_hybrid_storage and self.hybrid_storage:
+            # Load from hybrid storage
+            self._load_chain_from_hybrid_storage()
+        else:
+            # Load from JSON file
+            self._load_chain_from_json()
+
+    def _load_chain_from_json(self):
+        """Load blockchain from JSON file (legacy method)"""
         if self.chain_file.exists():
             try:
                 with open(self.chain_file, 'r') as f:
@@ -163,7 +195,7 @@ class SignChain:
                     block.hash = block_data["hash"]
                     self.chain.append(block)
 
-                print(f"✅ Loaded blockchain with {len(self.chain)} blocks")
+                print(f"✅ Loaded blockchain with {len(self.chain)} blocks from JSON")
 
             except Exception as e:
                 print(f"❌ Failed to load blockchain: {e}")
@@ -174,8 +206,52 @@ class SignChain:
             self.chain = [self.create_genesis_block()]
             self.save_chain()
 
+    def _load_chain_from_hybrid_storage(self):
+        """Load blockchain from hybrid storage"""
+        try:
+            # Get all block hashes in order
+            latest_height = self.hybrid_storage.index_db.get_latest_block_height()
+
+            if latest_height < 0:
+                # No blocks in hybrid storage, create genesis
+                self.chain = [self.create_genesis_block()]
+                self.hybrid_storage.save_block(self.chain[0].to_dict())
+                print("✅ Created genesis block in hybrid storage")
+                return
+
+            # Load all blocks
+            self.chain = []
+            for height in range(latest_height + 1):
+                block_hash = self.hybrid_storage.index_db.get_block_hash(height)
+                if block_hash:
+                    block_data = self.hybrid_storage.load_block(block_hash)
+                    if block_data:
+                        block = SignBlock(
+                            index=block_data["index"],
+                            transactions=block_data["transactions"],
+                            timestamp=block_data["timestamp"],
+                            previous_hash=block_data["previous_hash"],
+                            nonce=block_data["nonce"]
+                        )
+                        block.hash = block_data["hash"]
+                        self.chain.append(block)
+
+            print(f"✅ Loaded blockchain with {len(self.chain)} blocks from hybrid storage")
+
+        except Exception as e:
+            print(f"❌ Failed to load from hybrid storage: {e}")
+            # Fallback to JSON loading
+            self.use_hybrid_storage = False
+            self._load_chain_from_json()
+
     def save_chain(self):
-        """Save blockchain to file"""
+        """Save blockchain to file or hybrid storage"""
+        if self.use_hybrid_storage and self.hybrid_storage:
+            # Hybrid storage handles block saving incrementally
+            # All blocks are already saved when added
+            return
+
+        # Fallback to JSON storage
         try:
             chain_data = [block.to_dict() for block in self.chain]
 
@@ -422,15 +498,37 @@ class SignChain:
 
     def get_wallet_balance(self, wallet_address: str) -> float:
         """Public method to get wallet balance"""
+        if self.use_hybrid_storage and self.hybrid_storage:
+            return self.hybrid_storage.get_wallet_balance(wallet_address)
         return self._get_wallet_balance(wallet_address)
 
     def get_wallet_transactions(self, wallet_address: str) -> List[Dict[str, Any]]:
         """Get all transactions involving a wallet"""
+        if self.use_hybrid_storage and self.hybrid_storage:
+            # Use hybrid storage for better performance
+            return self._get_wallet_transactions_hybrid(wallet_address)
+        else:
+            # Fallback to in-memory scanning
+            return self._get_wallet_transactions_memory(wallet_address)
+
+    def _get_wallet_transactions_hybrid(self, wallet_address: str) -> List[Dict[str, Any]]:
+        """Get wallet transactions using hybrid storage (database)"""
+        if not self.hybrid_storage:
+            return self._get_wallet_transactions_memory(wallet_address)
+
+        try:
+            return self.hybrid_storage.get_wallet_transactions(wallet_address)
+        except Exception as e:
+            print(f"Hybrid wallet lookup failed: {e}, falling back to memory")
+            return self._get_wallet_transactions_memory(wallet_address)
+
+    def _get_wallet_transactions_memory(self, wallet_address: str) -> List[Dict[str, Any]]:
+        """Get wallet transactions by scanning in-memory chain"""
         wallet_transactions = []
 
         for block in self.chain:
             for tx in block.transactions:
-                if tx.get('type') in ['token_transfer', 'batch_transfer']:
+                if tx.get('type') in ['token_transfer', 'batch_transfer', 'mining_reward']:
                     if (tx.get('sender_address') == wallet_address or
                         tx.get('recipient_address') == wallet_address):
                         wallet_transactions.append({
@@ -439,7 +537,9 @@ class SignChain:
                             'timestamp': tx.get('timestamp'),
                             'type': tx.get('type'),
                             'amount': tx.get('amount', 0),
-                            'direction': 'incoming' if tx.get('recipient_address') == wallet_address else 'outgoing'
+                            'direction': 'incoming' if tx.get('recipient_address') == wallet_address else 'outgoing',
+                            'sender': tx.get('sender_address'),
+                            'recipient': tx.get('recipient_address')
                         })
 
         return wallet_transactions
@@ -490,7 +590,15 @@ class SignChain:
             if new_block.mine_block(self.difficulty, verbose):
                 # Add to chain
                 self.chain.append(new_block)
-                self.save_chain()
+
+                # Save using appropriate storage method
+                if self.use_hybrid_storage and self.hybrid_storage:
+                    self.hybrid_storage.save_block(new_block.to_dict())
+                else:
+                    self.save_chain()
+
+                # Invalidate validation cache
+                self._cached_chain_valid = None
 
                 # Clear pending transactions
                 self.pending_transactions.clear()
@@ -513,7 +621,16 @@ class SignChain:
         return None
 
     def validate_chain(self) -> bool:
-        """Validate the entire blockchain"""
+        """Validate the entire blockchain with caching"""
+        current_time = time.time()
+
+        # Return cached result if still valid
+        if (self._cached_chain_valid is not None and
+            current_time - self._last_validation_time < self._validation_cache_timeout):
+            return self._cached_chain_valid
+
+        # Perform full validation
+        is_valid = True
         for i in range(1, len(self.chain)):
             current = self.chain[i]
             previous = self.chain[i-1]
@@ -521,19 +638,26 @@ class SignChain:
             # Check hash consistency
             if current.hash != current.calculate_hash():
                 print(f"❌ Block {current.index} has invalid hash")
-                return False
+                is_valid = False
+                break
 
             # Check chain linkage
             if current.previous_hash != previous.hash:
                 print(f"❌ Block {current.index} has invalid previous hash")
-                return False
+                is_valid = False
+                break
 
             # Check proof-of-work
             if not current.hash.startswith("0" * self.difficulty):
                 print(f"❌ Block {current.index} has invalid proof-of-work")
-                return False
+                is_valid = False
+                break
 
-        return True
+        # Cache the result
+        self._cached_chain_valid = is_valid
+        self._last_validation_time = current_time
+
+        return is_valid
 
     def get_chain_info(self) -> Dict[str, Any]:
         """Get blockchain information"""

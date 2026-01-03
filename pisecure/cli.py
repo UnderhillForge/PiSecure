@@ -24,19 +24,26 @@ except ImportError:
 
 console = Console()
 
+# Global configuration
+USE_HYBRID_STORAGE = None  # None = auto-detect, True/False = explicit
+
 
 @click.group()
+@click.option('--hybrid-storage/--no-hybrid-storage', default=None,
+              help='Use hybrid storage system (default: auto-detect)')
 @click.version_option(version="0.1.0")
-def cli():
+def cli(hybrid_storage):
     """PiSecure - Decentralized Security Framework for Raspberry Pi"""
-    pass
+    # Store the hybrid storage preference globally
+    global USE_HYBRID_STORAGE
+    USE_HYBRID_STORAGE = hybrid_storage
 
 
 @cli.command()
 def status():
     """Show blockchain and system status"""
     try:
-        blockchain = SignChain()
+        blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
 
         # Get blockchain info
         info = blockchain.get_chain_info()
@@ -68,13 +75,33 @@ def status():
 
 
 @cli.command()
+def migrate_storage():
+    """Migrate blockchain from JSON to hybrid storage"""
+    try:
+        console.print("🔄 Migrating to hybrid storage system...")
+        console.print("   This will convert your JSON blockchain to block files + SQLite database")
+        console.print()
+
+        # Enable hybrid storage for migration
+        blockchain = SignChain(use_hybrid_storage=True)
+
+        info = blockchain.get_chain_info()
+        console.print(f"✅ Migration complete! {info['blocks']} blocks migrated")
+        console.print("   Future runs will use: --hybrid-storage flag")
+        console.print("   Or set permanently in your startup scripts")
+
+    except Exception as e:
+        console.print(f"[red]❌ Migration failed: {e}[/red]")
+
+
+@cli.command()
 @click.option('--count', default=5, help='Number of test transactions to create')
 def create_tx(count):
     """Create test transactions for mining"""
     try:
         import secrets
 
-        blockchain = SignChain()
+        blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
 
         console.print(f"📦 Creating {count} test transactions...")
 
@@ -105,7 +132,7 @@ def create_tx(count):
 def mine(interactive, wallet):
     """Start blockchain mining"""
     try:
-        blockchain = SignChain()
+        blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
 
         # Determine miner wallet address
         miner_wallet = wallet

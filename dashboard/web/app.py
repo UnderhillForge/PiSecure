@@ -54,9 +54,16 @@ class PiSecureDashboard:
         self.network_stats = {}
         self.blockchain_stats = {}
 
+        # Stats cache to avoid recalculating on every API call
+        self._stats_cache = {}
+        self._cache_timeout = 2  # Cache stats for 2 seconds
+
         # Monitoring threads
         self.monitoring_thread = None
         self.monitoring_active = False
+
+        # Update counters for staggered updates
+        self._update_counter = 0
 
         # Setup routes
         self.setup_routes()
@@ -126,6 +133,18 @@ class PiSecureDashboard:
                 return jsonify({'balance': balance})
             return jsonify({'error': 'No wallet_id provided'})
 
+        @self.app.route('/api/wallet/transactions')
+        def api_wallet_transactions():
+            """API endpoint for wallet transaction history"""
+            wallet_id = request.args.get('wallet_id')
+            limit = int(request.args.get('limit', 20))
+            if wallet_id:
+                if self.blockchain:
+                    transactions = self.blockchain.get_wallet_transactions(wallet_id)
+                    return jsonify({'transactions': transactions[:limit]})
+                return jsonify({'transactions': []})
+            return jsonify({'error': 'No wallet_id provided'})
+
         @self.app.route('/api/blockchain/blocks')
         def api_blocks():
             """API endpoint for recent blocks"""
@@ -139,6 +158,57 @@ class PiSecureDashboard:
             limit = int(request.args.get('limit', 20))
             transactions = self.get_recent_transactions(limit)
             return jsonify(transactions)
+
+        # Monitoring and health check endpoints
+        @self.app.route('/api/health')
+        def api_health():
+            """API endpoint for system health status"""
+            from core.monitoring import health_checker, metrics_collector
+
+            # Collect current metrics
+            blockchain_height = self.blockchain_stats.get('height', 0) if self.blockchain_stats else 0
+            active_peers = len(self.network_stats.get('peers', [])) if self.network_stats else 0
+            pending_transactions = self.blockchain_stats.get('pending_transactions', 0) if self.blockchain_stats else 0
+
+            metrics_collector.collect_system_metrics(
+                blockchain_height=blockchain_height,
+                active_peers=active_peers,
+                pending_transactions=pending_transactions
+            )
+
+            health = health_checker.check_system_health()
+            return jsonify({
+                'overall': health.overall,
+                'checks': health.checks,
+                'timestamp': health.timestamp
+            })
+
+        @self.app.route('/api/metrics')
+        def api_metrics():
+            """API endpoint for system metrics"""
+            from core.monitoring import metrics_collector
+
+            hours = int(request.args.get('hours', 1))
+            averages = metrics_collector.get_average_metrics(hours=hours)
+
+            if averages:
+                return jsonify(averages)
+            else:
+                return jsonify({'error': 'No metrics available'})
+
+        @self.app.route('/api/alerts')
+        def api_alerts():
+            """API endpoint for recent alerts"""
+            from core.monitoring import alert_manager
+
+            hours = int(request.args.get('hours', 24))
+            alerts = alert_manager.get_recent_alerts(hours=hours)
+            return jsonify({'alerts': alerts})
+
+        @self.app.route('/monitoring')
+        def monitoring():
+            """System monitoring page"""
+            return render_template('monitoring.html')
 
     def setup_socketio_events(self):
         """Setup SocketIO event handlers"""
@@ -176,14 +246,10 @@ class PiSecureDashboard:
             # Initialize blockchain
             self.blockchain = SignChain()
 
-            # Initialize peer discovery
-            network_config = self.load_network_config()
-            self.peer_discovery = DecentralizedPeerDiscovery(network_config)
-
-            # Initialize wallet (default)
+            # Initialize wallet (default) - lazy load network discovery
             self.wallet = SignWallet()
 
-            print("✅ PiSecure components initialized")
+            print("✅ PiSecure components initialized (network discovery lazy-loaded)")
 
         except Exception as e:
             print(f"❌ Failed to initialize PiSecure: {e}")
@@ -219,21 +285,23 @@ class PiSecureDashboard:
             self.monitoring_thread.join(timeout=5)
 
     def _monitoring_loop(self):
-        """Background monitoring loop"""
+        """Background monitoring loop with staggered updates"""
         while self.monitoring_active:
             try:
-                # Update system stats
+                self._update_counter += 1
+
+                # Update system stats every cycle (5 seconds)
                 self.system_stats = self.collect_system_stats()
 
-                # Update blockchain stats if available
-                if self.blockchain:
+                # Update blockchain stats every 2 cycles (10 seconds)
+                if self._update_counter % 2 == 0:
                     self.blockchain_stats = self.collect_blockchain_stats()
 
-                # Update mining stats (placeholder)
+                # Update mining stats every cycle (5 seconds)
                 self.mining_stats = self.collect_mining_stats()
 
-                # Update network stats
-                if self.peer_discovery:
+                # Update network stats every 4 cycles (20 seconds) - less frequent as it's expensive
+                if self._update_counter % 4 == 0:
                     self.network_stats = self.collect_network_stats()
 
                 # Emit updates via WebSocket
@@ -332,17 +400,18 @@ class PiSecureDashboard:
 
     def collect_network_stats(self) -> Dict[str, Any]:
         """Collect network statistics"""
-        if not self.peer_discovery:
+        peer_discovery = self._get_peer_discovery()
+        if not peer_discovery:
             return {'status': 'not_initialized'}
 
         try:
-            peers = self.peer_discovery.get_active_peers()
-            connection_candidates = self.peer_discovery.get_connection_candidates()
+            peers = peer_discovery.get_active_peers()
+            connection_candidates = peer_discovery.get_connection_candidates()
 
             return {
                 'connected_peers': len(peers),
                 'connection_candidates': len(connection_candidates),
-                'total_known_peers': len(self.peer_discovery.known_peers),
+                'total_known_peers': len(peer_discovery.known_peers),
                 'peers': [{'address': f"{p.address}:{p.port}", 'capabilities': p.capabilities}
                          for p in peers[:10]],  # Show first 10 peers
                 'timestamp': datetime.now().isoformat()
@@ -352,20 +421,99 @@ class PiSecureDashboard:
             return {'error': str(e)}
 
     def get_system_stats(self) -> Dict[str, Any]:
-        """Get current system statistics"""
-        return self.system_stats or self.collect_system_stats()
+        """Get current system statistics with caching"""
+        cache_key = 'system'
+        current_time = time.time()
+
+        # Return cached result if still fresh
+        if (cache_key in self._stats_cache and
+            current_time - self._stats_cache[cache_key]['timestamp'] < self._cache_timeout):
+            return self._stats_cache[cache_key]['data']
+
+        # Collect fresh data
+        stats = self.collect_system_stats()
+
+        # Cache the result
+        self._stats_cache[cache_key] = {
+            'data': stats,
+            'timestamp': current_time
+        }
+
+        return stats
 
     def get_blockchain_stats(self) -> Dict[str, Any]:
-        """Get current blockchain statistics"""
-        return self.blockchain_stats or self.collect_blockchain_stats()
+        """Get current blockchain statistics with caching"""
+        cache_key = 'blockchain'
+        current_time = time.time()
+
+        # Return cached result if still fresh
+        if (cache_key in self._stats_cache and
+            current_time - self._stats_cache[cache_key]['timestamp'] < self._cache_timeout):
+            return self._stats_cache[cache_key]['data']
+
+        # Collect fresh data
+        stats = self.collect_blockchain_stats()
+
+        # Cache the result
+        self._stats_cache[cache_key] = {
+            'data': stats,
+            'timestamp': current_time
+        }
+
+        return stats
 
     def get_mining_stats(self) -> Dict[str, Any]:
-        """Get current mining statistics"""
-        return self.mining_stats or self.collect_mining_stats()
+        """Get current mining statistics with caching"""
+        cache_key = 'mining'
+        current_time = time.time()
+
+        # Return cached result if still fresh
+        if (cache_key in self._stats_cache and
+            current_time - self._stats_cache[cache_key]['timestamp'] < self._cache_timeout):
+            return self._stats_cache[cache_key]['data']
+
+        # Collect fresh data
+        stats = self.collect_mining_stats()
+
+        # Cache the result
+        self._stats_cache[cache_key] = {
+            'data': stats,
+            'timestamp': current_time
+        }
+
+        return stats
 
     def get_network_stats(self) -> Dict[str, Any]:
-        """Get current network statistics"""
-        return self.network_stats or self.collect_network_stats()
+        """Get current network statistics with caching"""
+        cache_key = 'network'
+        current_time = time.time()
+
+        # Return cached result if still fresh
+        if (cache_key in self._stats_cache and
+            current_time - self._stats_cache[cache_key]['timestamp'] < self._cache_timeout):
+            return self._stats_cache[cache_key]['data']
+
+        # Collect fresh data
+        stats = self.collect_network_stats()
+
+        # Cache the result
+        self._stats_cache[cache_key] = {
+            'data': stats,
+            'timestamp': current_time
+        }
+
+        return stats
+
+    def _get_peer_discovery(self):
+        """Lazy load peer discovery"""
+        if self.peer_discovery is None:
+            try:
+                network_config = self.load_network_config()
+                self.peer_discovery = DecentralizedPeerDiscovery(network_config)
+            except Exception as e:
+                print(f"⚠️ Failed to initialize peer discovery: {e}")
+                return None
+        return self.peer_discovery
 
     def get_wallet_balance(self, wallet_id: str) -> float:
         """Get wallet balance"""
