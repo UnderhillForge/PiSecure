@@ -144,8 +144,10 @@ if secure.verify_hardware():
 # Show blockchain status
 pisecure status
 
-# Start interactive mining
-pisecure mine
+# Start interactive mining console (Textual TUI)
+pisecure
+# Or run directly:
+python mining-console.py
 
 # Create test transactions
 pisecure create-tx
@@ -173,7 +175,7 @@ pisecure export-wallet backup.json
 - **Hardware**: Any modern hardware (Raspberry Pi required for mining only)
 - **OS**: Linux, macOS, Windows (Linux recommended for production)
 - **Python**: 3.7 or higher
-- **Dependencies**: cryptography, requests, pynacl
+- **Dependencies**: cryptography, requests, pynacl, textual (for mining console)
 
 ### Hardware Support
 

@@ -86,7 +86,8 @@ full = [
     "uvicorn>=0.23.0"
 ]
 
-# Use the launcher script as the entry point since it handles import issues
+[project.scripts]
+pisecure = "mining_console:main"
 
 [project.urls]
 Homepage = "https://github.com/UnderhillForge/PiSecure"

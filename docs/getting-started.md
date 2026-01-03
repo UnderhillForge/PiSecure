@@ -75,13 +75,15 @@ pisecure create-tx --count 5
 
 ### 3. Start Mining
 
-Start interactive mining:
+Start the interactive mining console (Textual TUI):
 
 ```bash
-pisecure mine
+pisecure
+# Or run directly:
+python mining-console.py
 ```
 
-You'll see real-time mining progress and block discoveries.
+You'll see a real-time dashboard with mining progress, system stats, and network information.
 
 ### 4. Check Status
 
