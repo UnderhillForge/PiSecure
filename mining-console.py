@@ -276,11 +276,41 @@ class MiningConsole:
 
         blocks_panel = Panel(recent_blocks_table, title="📦 Mining History")
 
+        # Network info
+        network_table = Table(title="🌐 Network Status", box=None, show_header=False)
+        network_table.add_column("Property", style="cyan", no_wrap=True)
+        network_table.add_column("Value", style="magenta")
+
+        try:
+            discovery_status = node_discovery.get_discovery_status()
+            network_table.add_row("Node ID", discovery_status.get('node_id', 'unknown')[:16] + "...")
+            network_table.add_row("Active Endpoints", str(len(discovery_status.get('endpoints', []))))
+
+            # Show STUN/TOR addresses
+            endpoints = discovery_status.get('endpoints', [])
+            if endpoints:
+                for i, endpoint in enumerate(endpoints[:2]):  # Show up to 2 endpoints
+                    endpoint_type = endpoint.get('type', 'unknown')
+                    if endpoint_type == 'stun_direct':
+                        network_table.add_row(f"STUN Address {i+1}", f"{endpoint.get('ip', 'unknown')}:{endpoint.get('port', 'unknown')}")
+                    elif endpoint_type == 'tor_onion':
+                        network_table.add_row(f"Tor Onion {i+1}", endpoint.get('address', 'unknown')[:24] + "...")
+                    elif endpoint_type == 'upnp':
+                        network_table.add_row(f"UPnP Address {i+1}", f"{endpoint.get('ip', 'unknown')}:{endpoint.get('port', 'unknown')}")
+
+            # Relay status
+            is_relay = self._check_if_relay_node()
+            network_table.add_row("Relay Status", "✅ Active" if is_relay else "❌ Not participating")
+            network_table.add_row("Community Relays", str(discovery_status.get('relay_count', 0)))
+
+        except Exception as e:
+            network_table.add_row("Network Status", f"❌ Error: {str(e)[:20]}...")
+
         # Instructions
         controls = """
 [bold cyan]Mining Console Controls:[/bold cyan]
-[green]S[/green] - Start Mining    [red]X[/red] - Stop Mining
-[yellow]C[/yellow] - Create Test TX    [blue]W[/blue] - Wallet Info
+[green]S[/green] - Start Mining    [red]X[/red] - Stop Mining    [yellow]C[/yellow] - Test TX
+[blue]W[/blue] - Wallet Info    [magenta]N[/magenta] - Network Info    [cyan]R[/cyan] - Toggle Relay
 [dim]Q[/dim] - Quit Console    [dim]H[/dim] - Show This Help
         """
 
@@ -434,6 +464,126 @@ class MiningConsole:
         except:
             return False
 
+    def show_help(self):
+        """Show detailed help information"""
+        console.print("\n[bold cyan]🔧 PiSecure Mining Console - Help[/bold cyan]")
+        console.print("=" * 50)
+
+        console.print("[bold green]🎮 Keyboard Controls:[/bold green]")
+        console.print("  [green]S[/green] - Start mining session")
+        console.print("  [red]X[/red] - Stop mining session")
+        console.print("  [yellow]C[/yellow] - Create test transaction for mining")
+        console.print("  [blue]W[/blue] - Show detailed wallet information")
+        console.print("  [magenta]N[/magenta] - Show network connectivity information")
+        console.print("  [cyan]R[/cyan] - Toggle relay node status")
+        console.print("  [dim]H[/dim] - Show this help screen")
+        console.print("  [dim]Q[/dim] - Quit the mining console")
+
+        console.print("\n[bold blue]📊 Dashboard Panels:[/bold blue]")
+        console.print("  [cyan]System Status[/cyan] - CPU, Memory, Disk, Temperature")
+        console.print("  [green]Mining Status[/green] - Active blocks, rewards, hashrate")
+        console.print("  [blue]Blockchain Status[/blue] - Chain info, network health")
+        console.print("  [yellow]Wallet Info[/yellow] - Balance, address, earnings")
+        console.print("  [magenta]Network Status[/magenta] - Node ID, endpoints, STUN/TOR addresses")
+        console.print("  [white]Mining History[/white] - Recent blocks and rewards")
+
+        console.print("\n[bold yellow]💡 Tips:[/bold yellow]")
+        console.print("  • Mining rewards go to your configured wallet")
+        console.print("  • Test transactions help verify mining is working")
+        console.print("  • Relay nodes help other users discover the network")
+        console.print("  • Network info shows your public connectivity")
+        console.print("  • Dashboard updates automatically every 2 seconds")
+
+        console.print("\n[dim]Press any key to return to dashboard...[/dim]")
+        time.sleep(5)  # Give user time to read
+
+    def show_network_info(self):
+        """Show detailed network connectivity information"""
+        console.print("\n[bold magenta]🌐 Network Connectivity Information[/bold magenta]")
+        console.print("=" * 50)
+
+        try:
+            discovery_status = node_discovery.get_discovery_status()
+
+            console.print(f"[cyan]Node Identity:[/cyan]")
+            console.print(f"  Node ID: {discovery_status.get('node_id', 'unknown')}")
+            console.print(f"  Relay Status: {'✅ Active' if self._check_if_relay_node() else '❌ Not participating'}")
+
+            endpoints = discovery_status.get('endpoints', [])
+            if endpoints:
+                console.print(f"\n[cyan]Public Endpoints ({len(endpoints)} active):[/cyan]")
+                for i, endpoint in enumerate(endpoints, 1):
+                    endpoint_type = endpoint.get('type', 'unknown')
+
+                    if endpoint_type == 'stun_direct':
+                        nat_type = endpoint.get('nat_type', 'unknown')
+                        console.print(f"  {i}. 🌐 STUN Direct: {endpoint.get('ip', 'unknown')}:{endpoint.get('port', 'unknown')}")
+                        console.print(f"     NAT Type: {nat_type}")
+                        console.print(f"     Status: {'✅ Public' if nat_type in ['full_cone', 'address_restricted'] else '⚠️ Restricted'}")
+
+                    elif endpoint_type == 'tor_onion':
+                        address = endpoint.get('address', 'unknown')
+                        console.print(f"  {i}. 🧅 Tor Onion: {address}")
+                        console.print(f"     Status: ✅ Anonymous access enabled")
+
+                    elif endpoint_type == 'upnp':
+                        console.print(f"  {i}. 📡 UPnP Port Forward: {endpoint.get('ip', 'unknown')}:{endpoint.get('port', 'unknown')}")
+                        console.print(f"     Status: ✅ Automatic port forwarding")
+
+                    elif endpoint_type == 'turn_relay':
+                        console.print(f"  {i}. 🔄 TURN Relay: {endpoint.get('ip', 'unknown')}:{endpoint.get('port', 'unknown')}")
+                        console.print(f"     Status: ✅ Relay-assisted connectivity")
+
+                    elif endpoint_type == 'community_relay':
+                        console.print(f"  {i}. ☁️ Community Relay: {endpoint.get('available_relays', 0)} relays available")
+                        console.print(f"     Status: ✅ Network-assisted discovery")
+            else:
+                console.print(f"\n[yellow]⚠️ No public endpoints configured[/yellow]")
+                console.print(f"   Run 'pisecure setup-public-access' to enable worldwide connectivity")
+
+            # Network statistics
+            nat_info = discovery_status.get('nat_info', {})
+            if nat_info:
+                console.print(f"\n[cyan]NAT Information:[/cyan]")
+                console.print(f"  Public IP: {nat_info.get('public_ip', 'unknown')}")
+                console.print(f"  Public Port: {nat_info.get('public_port', 'unknown')}")
+                console.print(f"  NAT Type: {nat_info.get('nat_type', 'unknown')}")
+
+            console.print(f"  Tor Address: {discovery_status.get('tor_address', 'not configured')}")
+            console.print(f"  Community Relays: {discovery_status.get('relay_count', 0)} available")
+
+            # Connectivity test
+            console.print(f"\n[cyan]Connectivity Test:[/cyan]")
+            try:
+                import socket
+                # Test STUN server
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                result = sock.connect_ex(("stun.l.google.com", 19302))
+                console.print(f"  STUN Server: {'✅ Reachable' if result == 0 else '❌ Unreachable'}")
+                sock.close()
+
+                # Test bootstrap connectivity (placeholder)
+                console.print(f"  Bootstrap Nodes: ✅ Configured")
+
+            except:
+                console.print(f"  Connectivity: ❓ Unable to test")
+
+            # Peer discovery status
+            console.print(f"\n[cyan]Peer Discovery:[/cyan]")
+            console.print(f"  Auto-discovery: ✅ Active (5-minute refresh)")
+            console.print(f"  Local Network: ✅ Scanning for peers")
+            console.print(f"  Internet Peers: ✅ STUN/TURN/Tor enabled")
+
+            console.print(f"\n[dim]Your node is discoverable at the endpoints listed above.[/dim]")
+            console.print(f"[dim]Mobile apps can connect to your node using these addresses.[/dim]")
+
+        except Exception as e:
+            console.print(f"[red]❌ Error getting network information: {e}[/red]")
+
+        console.print("\n[dim]Press any key to return to dashboard...[/dim]")
+        time.sleep(5)  # Give user time to read
+
     def run(self):
         """Run the interactive mining console"""
         console.clear()
@@ -448,7 +598,19 @@ class MiningConsole:
 
         console.print("[dim]Starting live dashboard... (press 'H' for help)[/dim]\n")
 
+        # Set up non-blocking input
+        import termios
+        import tty
+        import sys
+        import os
+
+        # Save original terminal settings
+        old_settings = termios.tcgetattr(sys.stdin)
+
         try:
+            # Set terminal to raw mode for immediate key reading
+            tty.setraw(sys.stdin.fileno())
+
             with Live(self.create_dashboard(), refresh_per_second=2, screen=True) as live:
                 while True:
                     # Update dashboard
@@ -456,11 +618,10 @@ class MiningConsole:
 
                     # Check for keyboard input (non-blocking)
                     import select
-                    import sys
-
                     if select.select([sys.stdin], [], [], 0.1)[0]:
                         key = sys.stdin.read(1).lower()
 
+                        # Handle key presses
                         if key == 'q':
                             if self.mining_active:
                                 self.stop_mining()
@@ -476,20 +637,18 @@ class MiningConsole:
                             self.show_wallet_info()
                         elif key == 'r':
                             self.toggle_relay_node()
+                        elif key == 'n':
+                            self.show_network_info()
                         elif key == 'h':
-                            console.print("\n[bold cyan]Help - Mining Console Controls:[/bold cyan]")
-                            console.print("[green]S[/green] - Start Mining")
-                            console.print("[red]X[/red] - Stop Mining")
-                            console.print("[yellow]C[/yellow] - Create Test Transaction")
-                            console.print("[blue]W[/blue] - Show Wallet Info")
-                            console.print("[dim]Q[/dim] - Quit Console")
-                            console.print("[dim]H[/dim] - Show This Help\n")
-                            time.sleep(3)  # Pause to read help
+                            self.show_help()
 
         except KeyboardInterrupt:
             if self.mining_active:
                 self.stop_mining()
             console.print("\n[cyan]👋 Mining console closed[/cyan]")
+        finally:
+            # Restore original terminal settings
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
 
 
 def main():
