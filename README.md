@@ -82,3 +82,219 @@ Enhanced web interface with wallet management and monitoring:
 - **Transaction Explorer**: Searchable transaction history with pagination
 - **System Monitoring**: Live charts and health status indicators
 - **Responsive Design**: Mobile-friendly interface optimized for various screen sizes
+
+---
+
+## 📦 Installation
+
+### System Requirements
+
+**Hardware:**
+- Raspberry Pi 4 or 5 (recommended) or Raspberry Pi Zero 2 W (minimum)
+- 8GB microSD card (16GB+ recommended for full node)
+- Internet connection for peer discovery and updates
+
+**Software:**
+- Raspberry Pi OS (64-bit recommended) or Ubuntu/Debian
+- Python 3.7 or higher
+- 2GB RAM minimum (4GB+ recommended)
+
+### Quick Install (Recommended)
+
+For a complete PiSecure node with all features:
+
+```bash
+# Download and run the installation script
+curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/install.sh | bash
+```
+
+This will install PiSecure with:
+- Full blockchain node
+- Web dashboard
+- Mining console
+- All optional dependencies
+- Systemd services for auto-startup
+
+### Manual Installation
+
+#### 1. Clone the Repository
+```bash
+git clone https://github.com/UnderhillForge/PiSecure.git
+cd PiSecure
+```
+
+#### 2. Install Python Dependencies
+```bash
+# Install with all optional dependencies
+pip install -e ".[full]"
+
+# Or install minimal version
+pip install -e "."
+```
+
+#### 3. Install System Dependencies (Optional)
+```bash
+# For enhanced hardware verification
+sudo apt-get update
+sudo apt-get install -y python3-dev build-essential
+
+# For UPnP port forwarding
+pip install miniupnpc
+
+# For advanced networking features
+pip install netifaces
+```
+
+### Development Setup
+
+For developers who want to contribute or modify PiSecure:
+
+```bash
+# Clone repository
+git clone https://github.com/UnderhillForge/PiSecure.git
+cd PiSecure
+
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Run tests
+make test
+
+# Run linting
+make lint
+
+# Build documentation
+make docs
+```
+
+### Docker Installation
+
+```bash
+# Build Docker image
+docker build -t pisecure .
+
+# Run PiSecure node
+docker run -p 3142:3142 -p 5000:5000 -v pisecure-data:/data pisecure
+```
+
+### Post-Installation Setup
+
+#### 1. Initialize Configuration
+```bash
+# Generate default configuration
+pisecure init
+
+# Edit configuration if needed
+sudo nano /etc/pisecure/config.json
+```
+
+#### 2. Start Services
+```bash
+# Start blockchain node
+sudo systemctl start pisecure-node
+
+# Start web dashboard
+sudo systemctl start pisecure-dashboard
+
+# Enable auto-startup
+sudo systemctl enable pisecure-node pisecure-dashboard
+```
+
+#### 3. Access Interfaces
+- **Web Dashboard**: http://localhost:5000
+- **Mining Console**: `python mining-console.py`
+- **CLI Tools**: `pisecure --help`
+
+### Configuration Options
+
+PiSecure supports extensive configuration via `/etc/pisecure/config.json`:
+
+```json
+{
+  "network": {
+    "port": 3142,
+    "relay_enabled": true,
+    "upnp_enabled": true
+  },
+  "mining": {
+    "enabled": true,
+    "wallet_address": "your_wallet_address"
+  },
+  "storage": {
+    "use_hybrid_storage": true,
+    "block_file_size": 128
+  },
+  "monitoring": {
+    "enabled": true,
+    "alert_thresholds": {
+      "cpu_percent": 80,
+      "memory_percent": 85
+    }
+  }
+}
+```
+
+### Troubleshooting
+
+#### Common Issues
+
+**Import Errors:**
+```bash
+# Reinstall dependencies
+pip install -e ".[full]" --force-reinstall
+```
+
+**Permission Errors:**
+```bash
+# Fix permissions for blockchain data
+sudo chown -R $USER:$USER /var/lib/pisecure
+```
+
+**Port Conflicts:**
+```bash
+# Check what's using ports
+sudo netstat -tulpn | grep :3142
+sudo netstat -tulpn | grep :5000
+```
+
+**Storage Issues:**
+```bash
+# Check disk space
+df -h
+
+# Clean old logs
+sudo find /var/log/pisecure -name "*.log" -mtime +7 -delete
+```
+
+### Updating PiSecure
+
+```bash
+# Update from repository
+cd PiSecure
+git pull
+pip install -e ".[full]"
+
+# Restart services
+sudo systemctl restart pisecure-node pisecure-dashboard
+```
+
+### Getting Help
+
+- **Documentation**: [README_detailed.md](README_detailed.md)
+- **API Reference**: [PiSecure Docs](https://pisecure.readthedocs.io/)
+- **Issues**: [GitHub Issues](https://github.com/UnderhillForge/PiSecure/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/UnderhillForge/PiSecure/discussions)
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+Built with ❤️ for the Raspberry Pi and open-source communities. Special thanks to the Bitcoin Core project for inspiration on the hybrid storage architecture.
