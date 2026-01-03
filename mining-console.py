@@ -786,8 +786,11 @@ class MiningApp(App):
                         time.sleep(2)
                 else:
                     # Periodically log waiting status
-                    self.logger.info("⏳ Waiting for transactions...")
-                    time.sleep(5)  # Wait longer when no TXs
+                    # Always mine - blockchain handles empty blocks
+                    self.logger.info("⛏️ Mining empty block (no pending transactions)")
+                    start_time = time.time()
+                    block = self.blockchain.mine_pending_transactions(self.miner_wallet, verbose=False)
+                    mining_duration = time.time() - start_time
 
             except Exception as e:
                 self.logger.error(f"Mining error: {e}")
