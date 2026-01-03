@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/instal
 # or http://[your-pi-ip]:5000
 ```
 
-[Quick Start](#quick-start) • [Documentation](#documentation) • [Installation](#installation) • [Developer Guide](#developer-guide) • [Roadmap](docs/roadmap.md)
+[Quick Start](#quick-start) • [Documentation](#documentation) • [Installation](#installation) • [Developer Guide](#developer-guide) • [Exchange Integration](exchanges.md) • [Roadmap](docs/roadmap.md)
 
 ## Features
 
@@ -699,18 +699,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-## 💱 Exchange Integration Guide: Adding 314ST Support
-
-This guide explains how cryptocurrency exchanges can integrate PiSecure's 314ST token for storage, trading, deposits, and withdrawals.
-
-### Prerequisites
-
-- **PiSecure Node**: Run a full PiSecure node or connect to public nodes
-- **Client SDK**: Use one of PiSecure's multi-language SDKs
-- **Security Infrastructure**: Cold storage, hot wallets, and security protocols
-- **Trading Engine**: Integration with your exchange's matching engine
-
----
+## � Latest Features (Detailed)
 
 ### 1. Node Setup & Connection
 
@@ -1385,28 +1374,6 @@ class ComplianceManager:
 ```
 
 ---
-
-### Getting Started Checklist
-
-- [ ] **Set up PiSecure node(s)** with proper configuration
-- [ ] **Implement hot/cold wallet separation** for security
-- [ ] **Integrate client SDK** in your preferred language
-- [ ] **Build deposit monitoring system** with address generation
-- [ ] **Implement withdrawal processing** with security checks
-- [ ] **Connect trading engine** to order book management
-- [ ] **Add monitoring and alerting** for system health
-- [ ] **Implement compliance checks** for KYC/AML
-- [ ] **Set up load balancing** for high availability
-- [ ] **Test thoroughly** with small amounts first
-
-### Support & Resources
-
-- **API Documentation**: [PiSecure API Reference](https://pisecure.readthedocs.io/)
-- **Client SDKs**: [Multi-language SDKs](clients/)
-- **Community Support**: [GitHub Discussions](https://github.com/UnderhillForge/PiSecure/discussions)
-- **Security Best Practices**: [Security Guide](docs/security-model.md)
-
-For enterprise integration support, contact the PiSecure development team.
 
 ---
 
