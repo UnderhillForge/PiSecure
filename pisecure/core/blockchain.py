@@ -112,7 +112,7 @@ class SignChain:
     """PiSecure Private Blockchain with Hardware Verification"""
 
     def __init__(self, chain_file: str = "/var/lib/pisecure/blockchain.json",
-                 difficulty: int = 4, use_hybrid_storage: bool = None):
+                 difficulty: int = 8, use_hybrid_storage: bool = None):
         self.chain_file = Path(chain_file)
         self.pending_file = Path(chain_file).parent / "pending_transactions.json"
         self.names_file = Path(chain_file).parent / "name_registry.json"
