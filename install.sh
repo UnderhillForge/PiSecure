@@ -120,11 +120,11 @@ install_pisecure() {
     source "$VENV_DIR/bin/activate"
     pip install --upgrade pip
 
-    # Install PiSecure dependencies
+    # Change to PiSecure directory and install dependencies
+    cd "$INSTALL_DIR"
     pip install -r requirements.txt
 
     # Install PiSecure (must be in the correct directory)
-    cd "$INSTALL_DIR"
     pip install -e .
 
     # Verify installation
