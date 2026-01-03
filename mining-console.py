@@ -323,6 +323,10 @@ class MiningApp(App):
             'temperature': 0.0
         }
 
+        # Network update counter (update every 20 seconds)
+        self.network_update_counter = 0
+        self.network_update_interval = 20
+
         # Setup logging
         self._setup_logging()
         self.logger = logging.getLogger('mining_console')
@@ -631,6 +635,10 @@ class MiningApp(App):
             self.logger.setLevel(logging.DEBUG)
             self.logger.addHandler(handler)
             self.logger.propagate = False
+
+            # Silence INFO logs from network traversal module
+            logging.getLogger('pisecure.core.nat_traversal').setLevel(logging.WARNING)
+            logging.getLogger('pisecure.core.net_traversal').setLevel(logging.WARNING)
 
             # Log startup information
             self.logger.info("PiSecure Mining Console started")
