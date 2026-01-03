@@ -1,47 +1,46 @@
 # PiSecure
 
-**Enterprise-Grade Security Framework for IoT & Embedded Systems**
+**Hardware-Verified Blockchain Security for Software Developers**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![Raspberry Pi](https://img.shields.io/badge/Raspberry%20Pi-4%2B%20%26%205-red.svg)](https://www.raspberrypi.org/)
 
-**PiSecure provides hardware-verified blockchain security exclusively for Raspberry Pi devices, combining cryptographic trust, decentralized identity, and secure over-the-air updates in a single framework.**
+**PiSecure gives software developers the power to build secure, decentralized applications with hardware-verified cryptography and blockchain consensus - without the complexity of implementing security protocols from scratch.**
 
-## What is PiSecure?
+## What Software Developers Can Build with PiSecure
 
-PiSecure is a comprehensive security framework designed specifically for IoT and embedded systems, with exclusive hardware verification features that work only on Raspberry Pi devices. Unlike generic security libraries, PiSecure leverages Raspberry Pi's unique hardware capabilities - including CPU serial verification, VideoCore GPU detection, and OTP register validation - to provide cryptographic proof that security operations are running on genuine Raspberry Pi hardware.
+PiSecure empowers software developers to create secure, decentralized applications that leverage hardware-verified cryptography and blockchain consensus without implementing complex security protocols from scratch. Whether you're building distributed systems, secure communication networks, or token-based economies, PiSecure provides production-ready components that handle the heavy lifting of cryptography, consensus, and trust management.
 
-The framework combines multiple security layers: device identity management with blockchain-stored certificates, proof-of-work mining exclusive to Pi hardware, decentralized peer discovery, and cryptographically secure OTA updates. This creates a complete security ecosystem where every device can be uniquely identified, trusted, and updated without centralized control points.
+The framework gives developers access to enterprise-grade security primitives: hardware-bound digital signatures, decentralized identity management, cryptographically secure updates, and proof-of-work consensus - all backed by Raspberry Pi's unique hardware verification. This means developers can focus on their application logic while knowing their systems are secured by mathematically proven cryptography and hardware-trusted execution.
 
-## What Does PiSecure Do?
+## What Makes PiSecure Powerful for Developers
 
-PiSecure enables developers to build secure, decentralized IoT applications with enterprise-grade security features that are impossible to achieve with traditional security approaches. It provides:
+PiSecure transforms complex security challenges into simple, reliable APIs that developers can integrate immediately. Instead of spending months implementing cryptographic protocols, certificate management, and consensus algorithms, developers get:
 
-- **Hardware-Verified Mining**: Proof-of-work consensus that only runs on genuine Raspberry Pi devices, preventing spoofing attacks
-- **Decentralized Identity**: Blockchain-stored device certificates and mutual TLS authentication between devices
-- **Secure Updates**: Cryptographically signed OTA updates distributed via IPFS with automatic rollback capabilities
-- **Token Economy**: Built-in micropayments and staking rewards for device participation
-- **Real-time Monitoring**: Live dashboards showing mining activity, network connectivity, and system health
-- **Cross-Platform Compatibility**: Security features work on any hardware, mining exclusive to Raspberry Pi
+- **One-Line Security**: Simple APIs for device authentication, secure messaging, and trust establishment
+- **Hardware-Verified Trust**: Cryptographic proof that security operations run on genuine hardware, eliminating spoofing attacks
+- **Decentralized Architecture**: No centralized servers or certificate authorities to maintain or secure
+- **Built-in Token Economy**: Ready-to-use micropayment and staking systems for monetizing applications
+- **Real-time Monitoring**: Live dashboards and programmatic APIs for system health and activity tracking
+- **Automatic Updates**: Secure over-the-air updates with cryptographic verification and automatic rollback
 
-Developers can deploy secure sensor networks, IoT device meshes, and embedded applications where devices automatically discover peers, verify each other's authenticity, mine tokens for participation, and receive secure updates - all without any centralized infrastructure.
+Developers can build everything from secure IoT networks and distributed sensor systems to token-gated applications and decentralized marketplaces - all with the confidence that their security is mathematically sound and hardware-verified.
 
-## Why Developers Need PiSecure & Why It's Different
+## Why PiSecure Changes Everything for Software Development
 
-Traditional IoT security solutions rely on centralized certificate authorities, cloud-based authentication servers, and proprietary update mechanisms that create single points of failure and trust. PiSecure eliminates these vulnerabilities by distributing trust across a decentralized network where every Raspberry Pi device becomes a verification node.
+Traditional security approaches force developers to choose between complex implementation (building crypto from scratch) or centralized trust (relying on cloud services and certificate authorities). PiSecure eliminates this false choice by providing **decentralized trust with developer-friendly APIs**.
 
-What makes PiSecure revolutionary is its **hardware-binding approach**: security features are cryptographically tied to Raspberry Pi's unique hardware fingerprints, making it impossible to spoof device identities or compromise the network through software attacks alone. This hardware verification enables true decentralized trust - devices can authenticate each other without any central authority, creating networks that are resilient to attacks and censorship.
+What sets PiSecure apart is its **hardware-binding innovation**: security features are cryptographically linked to Raspberry Pi's unique hardware fingerprints, creating an immutable trust anchor that software alone cannot compromise. This hardware-verification enables true peer-to-peer trust - devices authenticate each other directly, creating networks resilient to attacks, censorship, and single points of failure.
 
-For developers building IoT applications, PiSecure provides production-ready security that scales from single devices to global networks. The framework handles complex cryptographic operations, peer discovery, consensus mechanisms, and update distribution, allowing developers to focus on their application logic while knowing their deployments are secured by hardware-verified cryptography and decentralized consensus.
+For software developers, PiSecure represents a paradigm shift: instead of security being an afterthought or a complex integration, it becomes a foundational platform that enables new categories of applications. Developers can build systems that are not just secure, but provably secure - with mathematical guarantees backed by hardware verification.
 
-PiSecure represents the future of IoT security: **hardware-trusted, decentralized, and developer-friendly**.
+PiSecure gives developers the power to build the next generation of secure, decentralized applications with confidence and simplicity.
 
 ---
 
-**Installation:** `pip install pisecure`  
-**Documentation:** [PiSecure Docs](https://pisecure.readthedocs.io/)  
-**Mining Console:** `pisecure`  
-**Web Dashboard:** Access at `http://your-pi-ip:5000`
+**Quick Start:** `pip install pisecure && pisecure`  
+**Detailed Documentation:** [README_detailed.md](README_detailed.md)  
+**API Reference & Examples:** [PiSecure Docs](https://pisecure.readthedocs.io/)
 
-Built with ❤️ for the Raspberry Pi community
+Built with ❤️ for developers who demand both security and simplicity
