@@ -161,15 +161,26 @@ class PiSecureDashboard:
             try:
                 data = request.get_json()
                 name = data.get('name', '').strip()
+                auto_generate = data.get('auto_generate', False)
 
-                if not name:
+                if auto_generate:
+                    # Generate a readable, unique wallet name
+                    name = self._generate_wallet_name()
+                elif not name:
                     return jsonify({'error': 'Wallet name is required'})
 
                 # Check if wallet name already exists
                 wallet = SignWallet()
                 existing_wallets = wallet.list_wallets()
                 if any(w['name'] == name for w in existing_wallets):
-                    return jsonify({'error': 'Wallet name already exists'})
+                    if auto_generate:
+                        # If auto-generated name conflicts, try again with different suffix
+                        name = self._generate_wallet_name()
+                        # Check again
+                        if any(w['name'] == name for w in existing_wallets):
+                            return jsonify({'error': 'Could not generate unique wallet name'})
+                    else:
+                        return jsonify({'error': 'Wallet name already exists'})
 
                 # Generate unique wallet ID with timestamp for extra uniqueness
                 import secrets
@@ -185,7 +196,8 @@ class PiSecureDashboard:
                         'success': True,
                         'wallet_id': result['wallet_id'],
                         'address': result['address'],
-                        'name': name
+                        'name': name,
+                        'auto_generated': auto_generate
                     })
                 else:
                     return jsonify({'error': result.get('error', 'Failed to create wallet')})
@@ -798,6 +810,67 @@ class PiSecureDashboard:
 
         except Exception:
             return None
+
+    def _generate_wallet_name(self) -> str:
+        """Generate a readable, unique wallet name using system information"""
+        import platform
+        import socket
+        import secrets
+        import hashlib
+
+        try:
+            # Get system information
+            hostname = socket.gethostname().lower().replace('-', '').replace('_', '')[:8]  # Clean hostname, max 8 chars
+
+            # Get platform info
+            system = platform.system().lower()
+            if system == 'linux':
+                # Check if it's a Raspberry Pi
+                try:
+                    with open('/proc/cpuinfo', 'r') as f:
+                        cpuinfo = f.read()
+                        if 'Raspberry Pi' in cpuinfo:
+                            prefix = 'pi'
+                        else:
+                            prefix = 'linux'
+                except:
+                    prefix = 'linux'
+            elif system == 'darwin':
+                prefix = 'mac'
+            elif system == 'windows':
+                prefix = 'win'
+            else:
+                prefix = 'host'
+
+            # Generate unique suffix using multiple entropy sources
+            entropy_sources = [
+                str(socket.gethostbyname(socket.gethostname())),  # IP address
+                str(platform.node()),  # Full hostname
+                str(platform.machine()),  # Machine type
+                secrets.token_hex(4)  # Random bytes
+            ]
+
+            # Create a hash of entropy sources for uniqueness
+            entropy_string = '|'.join(entropy_sources)
+            entropy_hash = hashlib.sha256(entropy_string.encode()).hexdigest()[:6]  # 6 char suffix
+
+            # Create readable name: prefix-hostname-suffix
+            if hostname and len(hostname) >= 3:
+                name = f"{prefix}-{hostname}-{entropy_hash}"
+            else:
+                # Fallback if hostname is too short
+                name = f"{prefix}-{entropy_hash}"
+
+            # Ensure name is reasonable length and format
+            name = name.replace(' ', '').replace('_', '-').lower()
+            if len(name) > 32:  # Limit length
+                name = name[:32]
+
+            return name
+
+        except Exception as e:
+            # Fallback to simple random name
+            return f"wallet-{secrets.token_hex(4)}"
 
     def run(self, host: str = '0.0.0.0', port: int = 5000, debug: bool = False):
         """Run the dashboard application"""
