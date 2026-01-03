@@ -487,9 +487,10 @@ setup_wallet() {
 from pisecure.core.wallet import SignWallet
 wallet = SignWallet()
 wallets = wallet.list_wallets()
-# Look for existing node wallet
+# Look for existing node wallet by wallet_id (not display name)
 for w in wallets:
-    if w.get('name', '').startswith('node-'):
+    wallet_id = w.get('id', '')
+    if wallet_id.startswith('node-'):
         print('EXISTS:' + w.get('address', ''))
         exit(0)
 print('NONE')
