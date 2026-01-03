@@ -652,13 +652,19 @@ class MiningApp(App):
         self.stats['uptime'] = time.time() - self.stats['start_time']
         self.stats['pending_txs'] = len(self.blockchain.pending_transactions)
 
-        # Update the UI
+        # Update the UI with real-time data
         try:
-            self.query_one("#system").update(self._create_system_stats())
-            self.query_one("#mining").update(self._create_mining_stats())
-            self.query_one("#blockchain").update(self._create_blockchain_stats())
-            self.query_one("#wallet").update(self._create_wallet_stats())
-            self.query_one("#blocks").update(self._create_blocks_table())
+            # Update all dashboard panels with fresh data
+            self.query_one("#cpu-panel").update(self._create_cpu_panel())
+            self.query_one("#memory-panel").update(self._create_memory_panel())
+            self.query_one("#mining-status-panel").update(self._create_mining_status_panel())
+            self.query_one("#blockchain-panel").update(self._create_blockchain_panel())
+            self.query_one("#wallet-panel").update(self._create_wallet_panel())
+            self.query_one("#network-panel").update(self._create_network_panel())
+            self.query_one("#uptime-panel").update(self._create_uptime_panel())
+            self.query_one("#hashrate-graph").update(self._create_hashrate_graph())
+            self.query_one("#reward-graph").update(self._create_reward_graph())
+            self.query_one("#blocks-graph").update(self._create_blocks_graph())
         except NoMatches:
             pass  # UI not ready yet
 
