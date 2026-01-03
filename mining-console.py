@@ -1031,6 +1031,9 @@ class MiningLogic:
         self._send_activity_message(f"   Mining difficulty: {self.blockchain.difficulty}")
         self._send_activity_message(f"   Target prefix: {'0' * self.blockchain.difficulty}")
 
+        # Log mining start to console
+        print(f"[MINING START] Block #{block_index}, Difficulty {self.blockchain.difficulty}")
+
         while not self.stop_mining.is_set():
             try:
                 # Update stats
@@ -1044,6 +1047,7 @@ class MiningLogic:
                 # Check for stop request before starting mining
                 if self.stop_mining.is_set():
                     self._send_activity_message("🛑 Mining stopped by user request")
+                    print("[MINING STOP] Stopped by user request")
                     break
 
                 # Mine a block - let it run until completion or stopped
@@ -1051,23 +1055,33 @@ class MiningLogic:
                     # Check for stop request before starting mining
                     if self.stop_mining.is_set():
                         self._send_activity_message("🛑 Mining stopped by user request")
+                        print("[MINING STOP] Stopped before mining attempt")
                         break
 
+                    print(f"[MINING ATTEMPT] Attempting to mine block #{block_index}")
                     # Start mining without timeout - mining will complete when block is found
                     block = self.blockchain.mine_pending_transactions(self.miner_wallet, False)
 
                     if block is None:
                         # No pending transactions to mine
                         self._send_activity_message("⚠️ No pending transactions to mine, waiting...")
+                        print(f"[MINING WAIT] No pending transactions, waiting 2s")
                         time.sleep(2)  # Wait before trying again
                         continue
 
                 except Exception as e:
                     if self.stop_mining.is_set():
                         self._send_activity_message("🛑 Mining stopped by user request")
+                        print("[MINING STOP] Stopped during mining")
                         break
                     else:
-                        self._send_activity_message(f"❌ Mining error: {e}")
+                        error_msg = f"❌ Mining error: {e}"
+                        self._send_activity_message(error_msg)
+                        # Also print to console for visibility
+                        print(f"[MINING ERROR] {error_msg}")
+                        import traceback
+                        traceback.print_exc()  # Print full stack trace
+                        print("[MINING RECOVERY] Waiting 5s before retry")
                         time.sleep(5)  # Wait before retrying on error
                         continue
 
