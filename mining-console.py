@@ -1096,6 +1096,26 @@ class MiningLogic:
                     print("[MINING STOP] Stopped by user request")
                     break
 
+                # Prioritize transaction processing over empty block mining
+                pending_count = len(self.blockchain.pending_transactions)
+
+                if pending_count > 0:
+                    # High priority: Mine pending transactions immediately
+                    self._send_activity_message(f"🚀 Mining {pending_count} pending transactions...")
+                    print(f"[MINING PRIORITY] Mining {pending_count} pending transactions")
+                else:
+                    # Low priority: Empty block mining (maintain network security)
+                    # Only mine empty blocks every 10 minutes to reduce resource usage
+                    time_since_last_block = time.time() - self.stats.get('last_block_time', 0)
+                    if time_since_last_block < 600:  # 10 minutes
+                        self._send_activity_message("⏳ Waiting for transactions or next empty block window...")
+                        print(f"[MINING WAIT] Next empty block in {600 - int(time_since_last_block)}s")
+                        time.sleep(10)  # Check every 10 seconds
+                        continue
+
+                    self._send_activity_message("🔄 Mining empty block to maintain network security...")
+                    print(f"[MINING SECURITY] Mining empty block for network security")
+
                 # Mine a block - let it run until completion or stopped
                 try:
                     # Check for stop request before starting mining
@@ -1104,15 +1124,14 @@ class MiningLogic:
                         print("[MINING STOP] Stopped before mining attempt")
                         break
 
-                    print(f"[MINING ATTEMPT] Attempting to mine block #{block_index}")
                     # Start mining without timeout - mining will complete when block is found
                     block = self.blockchain.mine_pending_transactions(self.miner_wallet, False)
 
                     if block is None:
-                        # No pending transactions to mine
-                        self._send_activity_message("⚠️ No pending transactions to mine, waiting...")
-                        print(f"[MINING WAIT] No pending transactions, waiting 2s")
-                        time.sleep(2)  # Wait before trying again
+                        # Mining failed for some reason
+                        self._send_activity_message("❌ Block mining failed, retrying...")
+                        print(f"[MINING FAILED] Block mining failed, will retry")
+                        time.sleep(5)  # Brief wait before retry
                         continue
 
                 except Exception as e:
