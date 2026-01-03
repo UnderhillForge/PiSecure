@@ -880,10 +880,6 @@ class RelayManager:
         except Exception as e:
             return {'error': str(e)}
 
-    def _send_activity_message(self, message):
-        """Send activity message to UI"""
-        if self.app:
-            self.app.post_message(MiningActivityMessage(message))
 
 
 class MiningLogic:
@@ -1178,6 +1174,11 @@ class MiningLogic:
             error_msg = f"Failed to toggle relay: {e}"
             self._send_activity_message(f"❌ {error_msg}")
             return error_msg
+
+    def _send_activity_message(self, message):
+        """Send activity message to UI"""
+        if self.app:
+            self.app.post_message(MiningActivityMessage(message))
 
 
 class MiningConsoleApp(App):
