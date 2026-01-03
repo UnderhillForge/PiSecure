@@ -925,6 +925,10 @@ class MiningLogic:
             'session_blocks': 0
         }
 
+        # Shared stats file for dashboard integration
+        self.stats_file = Path("/var/lib/pisecure/mining_stats.json")
+        self._save_mining_stats()  # Initialize with current stats
+
     def _initialize_components(self):
         """Initialize components with error handling"""
         # Initialize blockchain
@@ -1075,8 +1079,13 @@ class MiningLogic:
 
         while not self.stop_mining.is_set():
             try:
-                # Update stats
-                self.stats['uptime'] = time.time() - self.stats['start_time']
+                # Update stats with safe calculations
+                start_time = self.stats.get('start_time')
+                if start_time is not None:
+                    self.stats['uptime'] = time.time() - start_time
+                else:
+                    self.stats['uptime'] = 0
+
                 self.stats['pending_txs'] = len(self.blockchain.pending_transactions)
 
                 # Update market factors for USD valuation (every 30 seconds)
@@ -1156,7 +1165,8 @@ class MiningLogic:
                         self._send_activity_message("🛑 Block found but mining stopped by user request")
                         break
 
-                    mining_time = time.time() - start_time
+                    # Calculate mining time safely
+                    mining_time = time.time() - (start_time if start_time is not None else time.time())
 
                     # Calculate final hashrate
                     if hasattr(block, 'nonce') and block.nonce > 0 and mining_time > 0:
@@ -1181,6 +1191,9 @@ class MiningLogic:
                     self.stats['blocks_mined'] += 1
                     self.stats['session_blocks'] += 1
                     self.stats['last_block_time'] = time.time()
+
+                    # Save updated stats to shared file for dashboard
+                    self._save_mining_stats()
 
                     # Check if we should stop before starting next block
                     if self.stop_mining.is_set():
@@ -1253,6 +1266,34 @@ class MiningLogic:
             error_msg = f"Failed to toggle relay: {e}"
             self._send_activity_message(f"❌ {error_msg}")
             return error_msg
+
+    def _save_mining_stats(self):
+        """Save current mining stats to shared file for dashboard integration"""
+        try:
+            # Create directory if it doesn't exist
+            self.stats_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Prepare stats for dashboard
+            dashboard_stats = {
+                'status': 'active' if self.mining_active else ('paused' if self.mining_paused else 'stopped'),
+                'hashrate': self.stats['hashrate'],
+                'blocks_found': self.stats['blocks_mined'],
+                'shares_submitted': self.stats.get('shares_submitted', 0),  # For compatibility
+                'shares_accepted': self.stats.get('shares_accepted', self.stats['blocks_mined']),  # Estimate
+                'temperature': 0.0,  # Not tracked yet
+                'uptime': self.stats['uptime'],
+                'timestamp': time.time(),
+                'session_blocks': self.stats['session_blocks'],
+                'total_rewards': self.stats['total_rewards'],
+                'session_rewards': self.stats['session_rewards'],
+                'pending_transactions': self.stats['pending_txs']
+            }
+
+            with open(self.stats_file, 'w') as f:
+                json.dump(dashboard_stats, f, indent=2)
+
+        except Exception as e:
+            print(f"⚠️ Failed to save mining stats: {e}")
 
     def _send_activity_message(self, message):
         """Send activity message to UI"""
