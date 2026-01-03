@@ -110,7 +110,7 @@ PiSecure is a comprehensive decentralized security framework for Raspberry Pi de
 - **Load balancing** across node networks
 
 ### Performance Optimization
-- **GPU acceleration** for mining operations (Pi 5)
+- **Hardware acceleration** with NEON SIMD and optimized CPU mining
 - **Database optimization** with indexing and caching
 - **Network compression** for bandwidth efficiency
 - **Memory optimization** for low-resource devices

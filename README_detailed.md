@@ -1998,7 +1998,7 @@ class MainActivity : AppCompatActivity() {
 - **Smart Contracts**: Basic smart contract functionality
 - **Advanced Token Economics**: Enhanced developer incentives and trust funds
 - **Mobile Apps**: Native iOS and Android applications
-- **Hardware Acceleration**: GPU mining support for compatible devices
+- **Hardware Acceleration**: Enhanced mining performance with NEON SIMD optimization
 - **Advanced Networking**: Improved P2P protocols and relay coordination
 
 ### Version 0.3.0 (Q2 2026)
