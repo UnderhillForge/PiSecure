@@ -150,33 +150,9 @@ class MiningApp(App):
         padding: 0 1;
     }
 
-    /* Middle column - processes style (mining log) */
+    /* Middle column - blockchain and net stats */
     #middle-column {
-        width: 40%;
-        height: 20;
-        background: #0d1117;
-    }
-
-    #processes-section {
-        height: 18;
-        max-height: 18;
-        background: #161b22;
-        border: solid #30363d;
-        overflow: hidden;
-    }
-
-    #mining-log {
-        height: 16;
-        max-height: 16;
-        background: #0d1117;
-        color: #c9d1d9;
-        border: none;
-        overflow-y: auto;
-    }
-
-    /* Right column - network and info */
-    #right-column {
-        width: 25%;
+        width: 30%;
         layout: vertical;
         background: #0d1117;
     }
@@ -189,10 +165,34 @@ class MiningApp(App):
     }
 
     #network-section {
-        height: auto;
+        height: 16;
         background: #161b22;
         border: solid #30363d;
         padding: 0 1;
+    }
+
+    /* Right column - mining terminal */
+    #right-column {
+        width: 35%;
+        layout: vertical;
+        background: #0d1117;
+    }
+
+    #processes-section {
+        height: 28;
+        max-height: 28;
+        background: #161b22;
+        border: solid #30363d;
+        overflow: hidden;
+    }
+
+    #mining-log {
+        height: 26;
+        max-height: 26;
+        background: #0d1117;
+        color: #c9d1d9;
+        border: none;
+        overflow-y: auto;
     }
 
     /* Progress bar styling */
@@ -360,15 +360,16 @@ class MiningApp(App):
                 yield Static(self._create_mining_stats_section(), id="mining-stats-section")
                 yield Static(self._create_wallet_section(), id="wallet-section")
 
-            # Middle column - Mining Log (processes-style)
+            # Middle column - Blockchain and Net Stats
             with Container(id="middle-column"):
-                with Container(id="processes-section"):
-                    yield Log(id="mining-log")
-
-            # Right column - Blockchain and Network
-            with Container(id="right-column"):
                 yield Static(self._create_blockchain_section(), id="blockchain-section")
                 yield Static(self._create_network_section(), id="network-section")
+
+            # Right column - Mining Terminal
+            with Container(id="right-column"):
+                with Container(id="processes-section"):
+                    yield Static("[bold green][Mining Term][/bold green]", id="mining-term-header")
+                    yield Log(id="mining-log")
 
         yield Footer()
 
@@ -542,7 +543,7 @@ class MiningApp(App):
             health_pct = int(health['participation'] * 100)
             health_bar = int((health_pct / 100) * bar_width)
 
-            return f"""[bold blue]blockchain[/bold blue]
+            return f"""[bold blue][Blockchain][/bold blue]
 
 [white]Height:[/white]    [bold cyan]{chain_info['blocks']}[/bold cyan]
 [white]Pending:[/white]   [yellow]{self.stats['pending_txs']}[/yellow] txs
@@ -568,7 +569,7 @@ class MiningApp(App):
             bytes_sent = net_io.bytes_sent / (1024**2)  # MB
             bytes_recv = net_io.bytes_recv / (1024**2)
 
-            return f"""[bold red]net[/bold red]
+            return f"""[bold red][Net Stats][/bold red]
 
 [white]Node:[/white]      [cyan]{node_id}...[/cyan]
 [white]Peers:[/white]     [green]{endpoints}[/green]
