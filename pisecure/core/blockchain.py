@@ -546,8 +546,8 @@ class SignChain:
 
     def mine_pending_transactions(self, miner_wallet_address: str = None, verbose: bool = False) -> Optional[SignBlock]:
         """Mine a new block with pending transactions and distribute mining rewards"""
-        if not self.pending_transactions:
-            return None
+        # Always mine blocks (like Bitcoin) - even without pending transactions
+        # Mining rewards provide the incentive to maintain the network
 
         with self.lock:
             # Create mining reward transaction if miner wallet is specified
@@ -606,6 +606,14 @@ class SignChain:
                 total_txs = len(new_block.transactions)
                 reward_info = f" (+{mining_reward} reward)" if miner_wallet_address else ""
                 print(f"✅ Mined new block: #{new_block.index} with {total_txs} transactions{reward_info}")
+
+                # Trigger network discovery after successful block mining
+                try:
+                    import threading
+                    threading.Thread(target=self._trigger_discovery_on_block, args=(new_block,), daemon=True).start()
+                except Exception as e:
+                    print(f"⚠️ Failed to trigger discovery after mining: {e}")
+
                 return new_block
             else:
                 print("❌ Failed to mine block")
@@ -1161,6 +1169,22 @@ class SignChain:
     def get_registered_names(self) -> List[str]:
         """Get list of all registered names"""
         return list(self.name_registry.keys())
+
+    def _trigger_discovery_on_block(self, block):
+        """Trigger network discovery after successful block mining"""
+        try:
+            from pisecure.core.nat_traversal import node_discovery
+            print(f"🔄 Triggering discovery after mining block #{block.index}...")
+
+            # Perform discovery refresh to announce new block
+            discovery_results = node_discovery.make_node_discoverable()
+            if discovery_results['success_count'] > 0:
+                print(f"✅ Mining-triggered discovery successful: {discovery_results['success_count']} methods")
+            else:
+                print("Mining-triggered discovery found no new endpoints")
+
+        except Exception as e:
+            print(f"⚠️ Mining-triggered discovery failed: {e}")
 
     def get_wallet_names(self, wallet_address: str) -> List[str]:
         """Get all names registered to a wallet address"""
