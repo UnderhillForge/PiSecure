@@ -1084,10 +1084,10 @@ class BlockchainAPI:
         """Background worker for periodic network discovery refresh with event-driven triggers"""
         import time
 
-        # Discovery intervals (in seconds)
-        INITIAL_INTERVAL = 300  # 5 minutes after startup
-        REGULAR_INTERVAL = 300  # 5 minutes regular refresh
-        EVENT_TRIGGER_INTERVAL = 60  # 1 minute for event-triggered checks
+        # Discovery intervals (in seconds) - Reduced to prevent screen flashing
+        INITIAL_INTERVAL = 1800  # 30 minutes after startup (was 5 min)
+        REGULAR_INTERVAL = 1800  # 30 minutes regular refresh (was 5 min)
+        EVENT_TRIGGER_INTERVAL = 300  # 5 minutes for event-triggered checks (was 1 min)
 
         time.sleep(INITIAL_INTERVAL)  # Wait before first refresh
 
@@ -1102,7 +1102,7 @@ class BlockchainAPI:
                     self._check_event_triggers()
                     last_event_check = current_time
 
-                logger.info("🔄 Refreshing network discovery...")
+                logger.debug("🔄 Refreshing network discovery...")
 
                 # Check if network has changed (basic check)
                 network_changed = self._check_network_changed()
@@ -1115,10 +1115,10 @@ class BlockchainAPI:
                     else:
                         logger.warning("⚠️ Discovery refresh found no endpoints")
                 else:
-                    # Just update relay list and check endpoints
+                    # Just update relay list and check endpoints (silently)
                     node_discovery.relay_network.update_relay_list()
                     current_status = node_discovery.get_discovery_status()
-                    logger.info(f"✅ Discovery status check: {len(current_status['endpoints'])} endpoints available")
+                    logger.debug(f"✅ Discovery status check: {len(current_status['endpoints'])} endpoints available")
 
             except Exception as e:
                 logger.error(f"❌ Discovery refresh failed: {e}")
