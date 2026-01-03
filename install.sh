@@ -342,6 +342,39 @@ SyslogIdentifier=pisecure-dashboard
 WantedBy=multi-user.target
 EOF
 
+    # Create discovery script
+    sudo tee "$INSTALL_DIR/discovery_script.py" > /dev/null <<EOF
+#!/usr/bin/env python3
+"""
+PiSecure Network Discovery Script
+Called by systemd timer service
+"""
+
+from pisecure.core.nat_traversal import node_discovery
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def main():
+    logger.info('🔄 Running scheduled network discovery...')
+    try:
+        results = node_discovery.make_node_discoverable()
+        if results['success_count'] > 0:
+            logger.info(f'✅ Discovery successful: {results["success_count"]} methods')
+            for endpoint in results.get('endpoints', []):
+                logger.info(f'   📡 {endpoint.get("type", "unknown")}: {endpoint.get("ip", "unknown")}')
+        else:
+            logger.warning('⚠️ No discovery methods succeeded')
+    except Exception as e:
+        logger.error(f'❌ Discovery failed: {e}')
+
+if __name__ == '__main__':
+    main()
+EOF
+
+    sudo chmod +x "$INSTALL_DIR/discovery_script.py"
+
     # PiSecure network discovery service
     sudo tee /etc/systemd/system/pisecure-discovery.service > /dev/null <<EOF
 [Unit]
@@ -353,17 +386,7 @@ Wants=pisecure.service
 Type=oneshot
 User=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$VENV_DIR/bin/python -c "
-from pisecure.core.nat_traversal import node_discovery
-import logging
-logging.basicConfig(level=logging.INFO)
-print('🔄 Running scheduled network discovery...')
-results = node_discovery.make_node_discoverable()
-if results['success_count'] > 0:
-    print(f'✅ Discovery successful: {results[\"success_count\"]} methods')
-else:
-    print('⚠️ No discovery methods succeeded')
-"
+ExecStart=$VENV_DIR/bin/python $INSTALL_DIR/discovery_script.py
 StandardOutput=journal
 StandardError=journal
 
