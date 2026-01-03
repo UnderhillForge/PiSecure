@@ -753,10 +753,244 @@ class SignChain:
         # P2P contribution bonus
         p2p_bonus = miner_stats.get('p2p_contributions', 0) * 0.1
 
-        total_reward = base_reward + tx_bonus + security_bonus + participation_bonus + uptime_bonus + p2p_bonus
+        # === EXCHANGE MINING REWARDS PROGRAM ===
+        # Exchanges get 2x mining rewards for running infrastructure nodes
+        exchange_bonus = 0
+        miner_wallet = miner_stats.get('wallet_address', '')
+        if self._is_exchange_node(miner_wallet):
+            exchange_bonus = base_reward  # Additional full base reward (2x total)
+            print(f"🏢 Exchange mining bonus: +{exchange_bonus} tokens for infrastructure contribution")
+
+        total_reward = base_reward + tx_bonus + security_bonus + participation_bonus + uptime_bonus + p2p_bonus + exchange_bonus
 
         # Cap reward to prevent inflation
-        return min(int(total_reward), 30)
+        return min(int(total_reward), 50)  # Increased cap for exchange rewards
+
+    def _is_exchange_node(self, wallet_address: str) -> bool:
+        """Check if a wallet belongs to a registered exchange node"""
+        if not wallet_address:
+            return False
+
+        # Check exchange registry (loaded from configuration or blockchain state)
+        exchange_registry = getattr(self, 'exchange_registry', set())
+
+        # Also check for exchange-specific transaction patterns in recent blocks
+        if self._has_exchange_transaction_pattern(wallet_address):
+            return True
+
+        return wallet_address in exchange_registry
+
+    def _has_exchange_transaction_pattern(self, wallet_address: str) -> bool:
+        """Check if wallet shows exchange-like transaction patterns"""
+        if len(self.chain) < 10:  # Need some history
+            return False
+
+        recent_blocks = self.chain[-10:]  # Last 10 blocks
+        exchange_indicators = 0
+
+        for block in recent_blocks:
+            for tx in block.transactions:
+                if tx.get('recipient') == wallet_address or tx.get('sender') == wallet_address:
+                    tx_type = tx.get('type', '')
+
+                    # Exchanges typically have high volume of these transaction types
+                    if tx_type in ['deposit', 'withdrawal', 'exchange_transfer']:
+                        exchange_indicators += 1
+
+                    # High frequency of small transfers (trading activity)
+                    if tx_type == 'token_transfer' and tx.get('amount', 0) < 100:
+                        exchange_indicators += 0.5
+
+        # If wallet shows significant exchange-like activity, consider it an exchange
+        return exchange_indicators >= 5
+
+    def register_exchange_node(self, exchange_id: str, wallet_address: str, metadata: Dict = None) -> bool:
+        """Register an exchange node for mining rewards program"""
+        if not hasattr(self, 'exchange_registry'):
+            self.exchange_registry = set()
+
+        if not metadata:
+            metadata = {}
+
+        # Validate exchange credentials (in production, this would involve verification)
+        if self._validate_exchange_registration(exchange_id, wallet_address, metadata):
+            self.exchange_registry.add(wallet_address)
+            print(f"🏢 Registered exchange node: {exchange_id} ({wallet_address})")
+
+            # Create registration transaction on blockchain
+            registration_tx = {
+                "type": "exchange_registration",
+                "exchange_id": exchange_id,
+                "wallet_address": wallet_address,
+                "metadata": metadata,
+                "timestamp": time.time(),
+                "signature": f"exchange-reg-{exchange_id}-{wallet_address}"
+            }
+
+            # Add to pending transactions
+            self.pending_transactions.append(registration_tx)
+            return True
+
+        return False
+
+    def _validate_exchange_registration(self, exchange_id: str, wallet_address: str, metadata: Dict) -> bool:
+        """Validate exchange registration request"""
+        # Basic validation - in production this would be more thorough
+        required_fields = ['contact_email', 'jurisdiction', 'compliance_certified']
+
+        for field in required_fields:
+            if field not in metadata:
+                print(f"❌ Missing required field: {field}")
+                return False
+
+        # Check if wallet address is valid format
+        if not wallet_address or len(wallet_address) < 20:
+            print("❌ Invalid wallet address format")
+            return False
+
+        # Check if exchange_id is unique
+        existing_exchanges = [tx.get('exchange_id') for block in self.chain
+                            for tx in block.transactions
+                            if tx.get('type') == 'exchange_registration']
+
+        if exchange_id in existing_exchanges:
+            print(f"❌ Exchange ID already registered: {exchange_id}")
+            return False
+
+        return True
+
+    # === CROSS-EXCHANGE SETTLEMENT SYSTEM ===
+    def create_cross_exchange_settlement(self, from_exchange: str, to_exchange: str,
+                                       amount: float, user_from: str, user_to: str,
+                                       settlement_id: str = None) -> Dict:
+        """Create an instant cross-exchange settlement transaction"""
+        if not settlement_id:
+            settlement_id = f"settlement_{int(time.time())}_{hashlib.sha256(str(time.time()).encode()).hexdigest()[:8]}"
+
+        # Generate cryptographic secret for hash-locked transaction
+        secret = hashlib.sha256(str(time.time() + amount).encode()).hexdigest()
+        secret_hash = hashlib.sha256(secret.encode()).hexdigest()
+
+        settlement_tx = {
+            "type": "cross_exchange_settlement",
+            "settlement_id": settlement_id,
+            "from_exchange": from_exchange,
+            "to_exchange": to_exchange,
+            "amount": amount,
+            "user_from": user_from,
+            "user_to": user_to,
+            "secret_hash": secret_hash,
+            "status": "pending_lock",
+            "timestamp": time.time(),
+            "lock_time": time.time() + 3600,  # 1 hour timeout
+            "signature": f"settlement-{settlement_id}"
+        }
+
+        # Add to pending transactions
+        self.pending_transactions.append(settlement_tx)
+
+        return {
+            "settlement_id": settlement_id,
+            "secret": secret,  # Only return to initiating party
+            "secret_hash": secret_hash,
+            "transaction": settlement_tx
+        }
+
+    def lock_settlement_funds(self, settlement_id: str, exchange_wallet: str,
+                            amount: float, secret_hash: str) -> bool:
+        """Lock funds for cross-exchange settlement"""
+        # Find the settlement transaction
+        settlement_tx = None
+        for tx in self.pending_transactions:
+            if (tx.get('type') == 'cross_exchange_settlement' and
+                tx.get('settlement_id') == settlement_id):
+                settlement_tx = tx
+                break
+
+        if not settlement_tx:
+            return False
+
+        # Create hash-locked transfer
+        lock_tx = {
+            "type": "hash_locked_transfer",
+            "settlement_id": settlement_id,
+            "sender": exchange_wallet,
+            "amount": amount,
+            "secret_hash": secret_hash,
+            "recipient": settlement_tx['to_exchange'],  # Will be claimable by recipient exchange
+            "lock_time": settlement_tx['lock_time'],
+            "status": "locked",
+            "timestamp": time.time(),
+            "signature": f"lock-{settlement_id}-{exchange_wallet}"
+        }
+
+        self.pending_transactions.append(lock_tx)
+        settlement_tx['status'] = 'funds_locked'
+
+        return True
+
+    def complete_settlement(self, settlement_id: str, secret: str) -> bool:
+        """Complete settlement by revealing the secret"""
+        secret_hash = hashlib.sha256(secret.encode()).hexdigest()
+
+        # Find and update locked transactions
+        settlement_completed = False
+        for tx in self.pending_transactions:
+            if (tx.get('type') == 'hash_locked_transfer' and
+                tx.get('settlement_id') == settlement_id and
+                tx.get('secret_hash') == secret_hash):
+
+                # Verify secret matches hash
+                if tx['secret_hash'] == secret_hash:
+                    # Create the actual transfer
+                    transfer_tx = {
+                        "type": "token_transfer",
+                        "sender": tx['sender'],
+                        "recipient": tx['recipient'],
+                        "amount": tx['amount'],
+                        "settlement_id": settlement_id,
+                        "timestamp": time.time(),
+                        "signature": f"settlement-complete-{settlement_id}"
+                    }
+
+                    self.pending_transactions.append(transfer_tx)
+                    tx['status'] = 'completed'
+                    settlement_completed = True
+
+        # Update settlement status
+        for tx in self.pending_transactions:
+            if (tx.get('type') == 'cross_exchange_settlement' and
+                tx.get('settlement_id') == settlement_id):
+                tx['status'] = 'completed'
+                tx['completion_time'] = time.time()
+
+        return settlement_completed
+
+    def refund_expired_settlement(self, settlement_id: str) -> bool:
+        """Refund expired settlement back to sender"""
+        current_time = time.time()
+
+        for tx in self.pending_transactions:
+            if (tx.get('type') == 'hash_locked_transfer' and
+                tx.get('settlement_id') == settlement_id and
+                tx.get('lock_time') < current_time and
+                tx.get('status') == 'locked'):
+
+                # Create refund transaction
+                refund_tx = {
+                    "type": "settlement_refund",
+                    "original_sender": tx['sender'],
+                    "amount": tx['amount'],
+                    "settlement_id": settlement_id,
+                    "timestamp": time.time(),
+                    "signature": f"refund-{settlement_id}"
+                }
+
+                self.pending_transactions.append(refund_tx)
+                tx['status'] = 'refunded'
+                return True
+
+        return False
 
     # === PiNS (Pi Name System) Methods ===
 

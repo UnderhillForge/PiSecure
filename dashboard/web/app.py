@@ -574,6 +574,17 @@ class PiSecureDashboard:
 
         return transactions
 
+    def _get_peer_discovery(self):
+        """Get or initialize peer discovery (lazy loading)"""
+        if self.peer_discovery is None:
+            try:
+                from core.network import DecentralizedPeerDiscovery
+                self.peer_discovery = DecentralizedPeerDiscovery()
+            except Exception as e:
+                print(f"Failed to initialize peer discovery: {e}")
+                return None
+        return self.peer_discovery
+
     def get_cpu_temperature(self) -> Optional[float]:
         """Get CPU temperature (Pi-specific)"""
         try:

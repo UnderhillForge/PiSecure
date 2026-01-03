@@ -121,7 +121,7 @@ install_pisecure() {
     pip install --upgrade pip
 
     # Install PiSecure dependencies
-    pip install flask flask-cors flask-limiter cryptography requests psutil rich click textual
+    pip install -r requirements.txt
 
     # Install PiSecure (must be in the correct directory)
     cd "$INSTALL_DIR"
