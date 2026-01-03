@@ -50,16 +50,20 @@ except ImportError:
 class TextualLogHandler(logging.Handler):
     """Custom logging handler that writes to Textual Log widget"""
 
-    def __init__(self, log_widget):
+    def __init__(self, log_widget, app):
         super().__init__()
         self.log_widget = log_widget
-        self.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        self.app = app
+        self.setFormatter(logging.Formatter('%(message)s'))
 
     def emit(self, record):
-        """Emit a log record to the Textual log widget"""
+        """Emit a log record to the Textual log widget (thread-safe)"""
         try:
             msg = self.format(record)
-            self.log_widget.write(f"[{record.levelname}] {msg}")
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            formatted = f"[dim]{timestamp}[/dim] {msg}"
+            # Use call_from_thread for thread-safe updates
+            self.app.call_from_thread(self.log_widget.write_line, formatted)
         except Exception:
             self.handleError(record)
 
@@ -276,15 +280,15 @@ class MiningApp(App):
     """
 
     BINDINGS = [
-        Binding("s", "start_mining", "Start"),
-        Binding("x", "stop_mining", "Stop"),
-        Binding("c", "create_test_tx", "Create TX"),
-        Binding("w", "show_wallet", "Wallet"),
-        Binding("n", "show_network", "Network"),
-        Binding("r", "toggle_relay", "Relay"),
-        Binding("i", "show_info", "Info"),
-        Binding("h", "show_help", "Help"),
-        Binding("q", "quit", "Quit"),
+        Binding("s", "start_mining", "Start", show=True),
+        Binding("x", "stop_mining", "Stop", show=True),
+        Binding("c", "create_test_tx", "CreateTX", show=True),
+        Binding("w", "show_wallet", "Wallet", show=True),
+        Binding("n", "show_network", "Network", show=True),
+        Binding("r", "toggle_relay", "Relay", show=True),
+        Binding("i", "show_info", "Info", show=True),
+        Binding("h", "show_help", "Help", show=True),
+        Binding("q", "quit", "Quit", show=True),
     ]
 
     def __init__(self):
@@ -621,7 +625,7 @@ class MiningApp(App):
         # Setup logging now that UI is ready
         try:
             log_widget = self.query_one("#mining-log", Log)
-            handler = TextualLogHandler(log_widget)
+            handler = TextualLogHandler(log_widget, self)
             handler.setLevel(logging.DEBUG)
 
             self.logger.setLevel(logging.DEBUG)
