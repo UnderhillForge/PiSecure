@@ -164,8 +164,95 @@ class SignBlock:
             # Return original data if mixing fails
             return data
 
+    def mine_block_parallel(self, difficulty: int = 4, num_threads: int = 3, verbose: bool = False) -> bool:
+        """Mine the block with proof-of-work using parallel threads"""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import threading
+
+        target = "0" * difficulty
+        start_time = time.time()
+        mining_stop = threading.Event()
+
+        if verbose:
+            print(f"\n🎯 Mining Block #{self.index} (Parallel - {num_threads} threads)")
+            print(f"   Target: {target} (Difficulty: {difficulty})")
+            print(f"   Transactions: {len(self.transactions)}")
+            print(f"   Previous Hash: {self.previous_hash[:24]}...")
+            print("\n" + "="*60)
+
+        def mine_range(start_nonce: int, end_nonce: int, thread_id: int):
+            """Mine within a specific nonce range"""
+            local_hashes = 0
+            local_block = SignBlock(
+                index=self.index,
+                transactions=self.transactions,
+                timestamp=self.timestamp,
+                previous_hash=self.previous_hash,
+                nonce=start_nonce
+            )
+
+            for nonce in range(start_nonce, end_nonce):
+                if mining_stop.is_set():  # Check for early termination
+                    return None
+
+                local_block.nonce = nonce
+                local_block.hash = local_block.calculate_hash()
+                local_hashes += 1
+
+                if local_block.hash.startswith(target):
+                    # Found a valid nonce! Update the original block
+                    self.nonce = nonce
+                    self.hash = local_block.hash
+
+                    if verbose:
+                        elapsed = time.time() - start_time
+                        hashrate = local_hashes / elapsed if elapsed > 0 else 0
+                        print(f"\r🎉 BLOCK FOUND by thread {thread_id}! 🎉")
+                        print(f"   Nonce: {nonce:,}")
+                        print(f"   Hash: {self.hash[:48]}...")
+                        print(f"   Thread: {thread_id}")
+                        print(f"   Attempts: {local_hashes:,}")
+                        print(f"   Time: {elapsed:.2f}s")
+                        print(f"   Hashrate: {hashrate:.0f} H/s")
+                        print("="*60)
+
+                    mining_stop.set()  # Signal other threads to stop
+                    return True
+
+            return False  # No valid nonce found in this range
+
+        # Divide nonce space across threads
+        max_nonce = 2**32  # 4.2 billion - reasonable upper limit
+        range_size = max_nonce // num_threads
+
+        # Ensure we don't exceed reasonable limits
+        if range_size > 100000000:  # 100 million per thread max
+            range_size = 100000000
+            max_nonce = range_size * num_threads
+
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = []
+            for i in range(num_threads):
+                start_nonce = i * range_size
+                end_nonce = (i + 1) * range_size if i < num_threads - 1 else max_nonce
+                future = executor.submit(mine_range, start_nonce, end_nonce, i)
+                futures.append(future)
+
+            # Wait for first successful result
+            for future in as_completed(futures):
+                result = future.result()
+                if result:  # Block was found
+                    return True
+
+            # No valid nonce found in any thread
+            if verbose:
+                elapsed = time.time() - start_time
+                print(f"\n❌ Parallel mining failed - no valid nonce found in {max_nonce:,} attempts")
+                print(f"   Time: {elapsed:.2f}s")
+            return False
+
     def mine_block(self, difficulty: int = 4, verbose: bool = False) -> bool:
-        """Mine the block with proof-of-work"""
+        """Mine the block with proof-of-work (single-threaded)"""
         target = "0" * difficulty
         start_time = time.time()
         hashes_tried = 0
