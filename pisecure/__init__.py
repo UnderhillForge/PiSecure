@@ -20,3 +20,15 @@ __all__ = [
     'HardwareVerifier',
     'SignTokenMiner'
 ]
+
+
+def main():
+    """Main entry point for PiSecure CLI"""
+    try:
+        # Try relative import first
+        from .cli import main as cli_main
+    except ImportError:
+        # Fall back to absolute import
+        from cli import main as cli_main
+
+    cli_main()

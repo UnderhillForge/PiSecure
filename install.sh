@@ -169,8 +169,8 @@ if pisecure_path not in sys.path:
     sys.path.insert(0, pisecure_path)
 
 try:
-    # Import and run the fixed CLI
-    from pisecure.cli_fixed import main
+    # Import and run the PiSecure CLI
+    from pisecure.cli import main
     main()
 except ImportError as e:
     print(f"❌ Import error: {e}")
