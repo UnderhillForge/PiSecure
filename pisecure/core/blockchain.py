@@ -386,13 +386,29 @@ class SignChain:
             print(f"❌ Failed to save blockchain: {e}")
 
     def load_pending_transactions(self):
-        """Load pending transactions from file"""
+        """Load pending transactions from file with validation"""
         if self.pending_file.exists():
             try:
                 with open(self.pending_file, 'r') as f:
                     pending_data = json.load(f)
-                    self.pending_transactions = pending_data
-                    print(f"✅ Loaded {len(self.pending_transactions)} pending transactions")
+
+                # Validate and filter transactions to prevent None/NoneType errors
+                valid_transactions = []
+                for tx in pending_data:
+                    if tx is not None and isinstance(tx, dict) and tx.get('type'):
+                        # Ensure required fields are present and valid
+                        if 'timestamp' not in tx:
+                            tx['timestamp'] = time.time()
+                        valid_transactions.append(tx)
+
+                self.pending_transactions = valid_transactions
+                print(f"✅ Loaded {len(self.pending_transactions)} valid pending transactions")
+
+                # If we filtered out some invalid transactions, save the cleaned list
+                if len(valid_transactions) != len(pending_data):
+                    print(f"⚠️ Filtered out {len(pending_data) - len(valid_transactions)} invalid transactions")
+                    self.save_pending_transactions()
+
             except Exception as e:
                 print(f"❌ Failed to load pending transactions: {e}")
                 self.pending_transactions = []
@@ -878,7 +894,7 @@ class SignChain:
         return new_difficulty
 
     def calculate_mining_reward(self, block: SignBlock = None, miner_stats: Dict = None) -> int:
-        """Calculate sustainable mining reward based on work performed"""
+        """Calculate sustainable mining reward based on work performed with safe arithmetic"""
         if miner_stats is None:
             miner_stats = {}
 
@@ -888,38 +904,79 @@ class SignChain:
         if block is not None:
             tx_bonus = len(block.transactions) * 0.5
         else:
-            # If no block provided, use pending transactions count
-            tx_bonus = len(self.pending_transactions) * 0.5
+            # If no block provided, use pending transactions count (safe check)
+            pending_count = len(self.pending_transactions) if self.pending_transactions else 0
+            tx_bonus = pending_count * 0.5
 
-        # Security work bonus
+        # Security work bonus (safe iteration)
         security_bonus = 0
         transactions_to_check = block.transactions if block is not None else self.pending_transactions
-        for tx in transactions_to_check:
-            tx_type = tx.get('type', '')
-            if tx_type in ['security_alert', 'threat_detected', 'system_compromise']:
-                security_bonus += 3  # High value security work
-            elif tx_type in ['device_auth', 'bundle_verify', 'token_validate']:
-                security_bonus += 1  # Standard security work
 
-        # Participation bonus based on network health
-        health = self._calculate_network_health()
-        participation_bonus = base_reward * (1 - health["participation"]) * 0.5
+        # Safe iteration over transactions
+        if transactions_to_check:
+            for tx in transactions_to_check:
+                if tx and isinstance(tx, dict):  # Ensure tx is valid dict
+                    tx_type = tx.get('type', '')
+                    if tx_type in ['security_alert', 'threat_detected', 'system_compromise']:
+                        security_bonus += 3  # High value security work
+                    elif tx_type in ['device_auth', 'bundle_verify', 'token_validate']:
+                        security_bonus += 1  # Standard security work
 
-        # Uptime/reliability bonus
-        uptime_bonus = miner_stats.get('uptime_percentage', 100) / 100 * 2
+        # Participation bonus based on network health (safe arithmetic)
+        try:
+            health = self._calculate_network_health()
+            if health and isinstance(health, dict):
+                participation = health.get("participation", 0.0)
+                if participation is not None and isinstance(participation, (int, float)):
+                    participation_bonus = base_reward * (1 - participation) * 0.5
+                else:
+                    participation_bonus = 0.0
+            else:
+                participation_bonus = 0.0
+        except Exception as e:
+            # If network health calculation fails, no participation bonus
+            participation_bonus = 0.0
 
-        # P2P contribution bonus
-        p2p_bonus = miner_stats.get('p2p_contributions', 0) * 0.1
+        # Uptime/reliability bonus (safe division)
+        try:
+            uptime_pct = miner_stats.get('uptime_percentage', 100)
+            if uptime_pct is not None and isinstance(uptime_pct, (int, float)):
+                uptime_bonus = uptime_pct / 100 * 2
+            else:
+                uptime_bonus = 2.0  # Default 100% uptime
+        except (TypeError, ZeroDivisionError):
+            uptime_bonus = 2.0
+
+        # P2P contribution bonus (safe arithmetic)
+        try:
+            p2p_contrib = miner_stats.get('p2p_contributions', 0)
+            if p2p_contrib is not None and isinstance(p2p_contrib, (int, float)):
+                p2p_bonus = p2p_contrib * 0.1
+            else:
+                p2p_bonus = 0.0
+        except (TypeError, ValueError):
+            p2p_bonus = 0.0
 
         # === EXCHANGE MINING REWARDS PROGRAM ===
         # Exchanges get 2x mining rewards for running infrastructure nodes
         exchange_bonus = 0
         miner_wallet = miner_stats.get('wallet_address', '')
-        if self._is_exchange_node(miner_wallet):
+        if miner_wallet and self._is_exchange_node(miner_wallet):
             exchange_bonus = base_reward  # Additional full base reward (2x total)
             print(f"🏢 Exchange mining bonus: +{exchange_bonus} tokens for infrastructure contribution")
 
-        total_reward = base_reward + tx_bonus + security_bonus + participation_bonus + uptime_bonus + p2p_bonus + exchange_bonus
+        # Safe total calculation - ensure all components are numeric
+        try:
+            total_reward = (base_reward + tx_bonus + security_bonus +
+                          participation_bonus + uptime_bonus + p2p_bonus + exchange_bonus)
+
+            # Ensure result is valid number
+            if not isinstance(total_reward, (int, float)) or total_reward < 0:
+                total_reward = base_reward  # Fallback to base reward
+
+        except (TypeError, ValueError):
+            # If any arithmetic fails, return base reward only
+            total_reward = base_reward
 
         # Cap reward to prevent inflation
         return min(int(total_reward), 50)  # Increased cap for exchange rewards
