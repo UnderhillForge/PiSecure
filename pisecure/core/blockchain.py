@@ -51,28 +51,24 @@ class SignBlock:
             return hashlib.sha256(block_string.encode()).hexdigest()
 
     def _calculate_pi_optimized_hash(self, block_string: str) -> str:
-        """Calculate Pi-optimized hash that benefits Raspberry Pi hardware"""
+        """Calculate simplified Pi-optimized hash with ASIC resistance"""
         try:
-            # Get Raspberry Pi hardware information
-            pi_info = self._get_pi_hardware_info()
+            # Simple Pi-specific salt for basic ASIC resistance
+            pi_salt = "raspberry-pi-optimized-blockchain"
 
-            # Combine block data with Pi-specific hardware entropy
-            enhanced_data = f"{block_string}|{pi_info['serial']}|{pi_info['temperature']}|{pi_info['uptime']}"
+            # Combine block with Pi salt
+            enhanced_data = f"{block_string}|{pi_salt}"
 
-            # Use multiple hashing rounds optimized for ARM
-            hash1 = hashlib.sha256(enhanced_data.encode()).digest()
-            hash2 = hashlib.sha3_256(hash1).digest()
-            hash3 = hashlib.blake2b(hash2, digest_size=32).digest()
+            # Use SHA3-256 for ASIC resistance (much harder than SHA256)
+            # SHA3 has different design principles than SHA256
+            hash_result = hashlib.sha3_256(enhanced_data.encode())
 
-            # Final ARM-optimized mixing (simulated NEON operations)
-            final_hash = self._arm_optimized_mix(hash3, pi_info)
-
-            return final_hash.hex()
+            return hash_result.hexdigest()
 
         except Exception as e:
-            # Fallback to SHA256 if Pi-specific features fail
-            print(f"⚠️ Pi-optimized hash failed ({e}), falling back to SHA256")
-            return hashlib.sha256(block_string.encode()).hexdigest()
+            # Ultimate fallback to SHA3 without salt if anything fails
+            print(f"⚠️ Pi-optimized hash failed ({e}), falling back to SHA3")
+            return hashlib.sha3_256(block_string.encode()).hexdigest()
 
     def _get_pi_hardware_info(self) -> Dict[str, str]:
         """Get Raspberry Pi hardware information for mining"""
