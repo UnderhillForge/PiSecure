@@ -242,6 +242,7 @@ class SignChain:
         self.pending_transactions: List[Dict] = []
         self.name_registry: Dict[str, Dict[str, Any]] = {}  # name -> {address, registered_at, tx_hash}
         self.lock = threading.Lock()
+        self.mining_algorithm = mining_algorithm
 
         # Storage system - default to hybrid if available and not explicitly disabled
         if use_hybrid_storage is None:
