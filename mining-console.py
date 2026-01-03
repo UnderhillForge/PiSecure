@@ -598,19 +598,7 @@ class MiningConsole:
 
         console.print("[dim]Starting live dashboard... (press 'H' for help)[/dim]\n")
 
-        # Set up non-blocking input
-        import termios
-        import tty
-        import sys
-        import os
-
-        # Save original terminal settings
-        old_settings = termios.tcgetattr(sys.stdin)
-
         try:
-            # Set terminal to raw mode for immediate key reading
-            tty.setraw(sys.stdin.fileno())
-
             with Live(self.create_dashboard(), refresh_per_second=2, screen=True) as live:
                 while True:
                     # Update dashboard
@@ -618,10 +606,11 @@ class MiningConsole:
 
                     # Check for keyboard input (non-blocking)
                     import select
+                    import sys
+
                     if select.select([sys.stdin], [], [], 0.1)[0]:
                         key = sys.stdin.read(1).lower()
 
-                        # Handle key presses
                         if key == 'q':
                             if self.mining_active:
                                 self.stop_mining()
@@ -637,18 +626,20 @@ class MiningConsole:
                             self.show_wallet_info()
                         elif key == 'r':
                             self.toggle_relay_node()
-                        elif key == 'n':
-                            self.show_network_info()
                         elif key == 'h':
-                            self.show_help()
+                            console.print("\n[bold cyan]Help - Mining Console Controls:[/bold cyan]")
+                            console.print("[green]S[/green] - Start Mining")
+                            console.print("[red]X[/red] - Stop Mining")
+                            console.print("[yellow]C[/yellow] - Create Test Transaction")
+                            console.print("[blue]W[/blue] - Show Wallet Info")
+                            console.print("[dim]Q[/dim] - Quit Console")
+                            console.print("[dim]H[/dim] - Show This Help\n")
+                            time.sleep(3)  # Pause to read help
 
         except KeyboardInterrupt:
             if self.mining_active:
                 self.stop_mining()
             console.print("\n[cyan]👋 Mining console closed[/cyan]")
-        finally:
-            # Restore original terminal settings
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
 
 
 def main():
