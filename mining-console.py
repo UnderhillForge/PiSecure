@@ -598,6 +598,9 @@ class MiningConsole:
 
         console.print("[dim]Starting live dashboard... (press 'H' for help)[/dim]\n")
 
+        # Temporary: Disable live display to debug keyboard input
+        self.debug_mode = True
+
         try:
             with Live(self.create_dashboard(), refresh_per_second=2, screen=True) as live:
                 while True:
@@ -611,21 +614,49 @@ class MiningConsole:
                     if select.select([sys.stdin], [], [], 0.1)[0]:
                         key = sys.stdin.read(1).lower()
 
+                        # Debug: Show what key was pressed
+                        if self.debug_mode:
+                            console.print(f"[yellow]DEBUG: Key pressed: '{key}' (ord: {ord(key)})[/yellow]")
+
+                        # Handle key presses
                         if key == 'q':
                             if self.mining_active:
                                 self.stop_mining()
                             console.print("[cyan]👋 Goodbye![/cyan]")
                             break
                         elif key == 's':
-                            self.start_mining()
+                            console.print("[yellow]DEBUG: Calling start_mining()[/yellow]")
+                            try:
+                                self.start_mining()
+                                console.print("[green]✅ Start mining called successfully[/green]")
+                            except Exception as e:
+                                console.print(f"[red]❌ Start mining failed: {e}[/red]")
                         elif key == 'x':
-                            self.stop_mining()
+                            console.print("[yellow]DEBUG: Calling stop_mining()[/yellow]")
+                            try:
+                                self.stop_mining()
+                                console.print("[red]✅ Stop mining called successfully[/red]")
+                            except Exception as e:
+                                console.print(f"[red]❌ Stop mining failed: {e}[/red]")
                         elif key == 'c':
-                            self.create_test_transaction()
+                            console.print("[yellow]DEBUG: Calling create_test_transaction()[/yellow]")
+                            try:
+                                self.create_test_transaction()
+                                console.print("[yellow]✅ Test transaction created[/yellow]")
+                            except Exception as e:
+                                console.print(f"[red]❌ Test transaction failed: {e}[/red]")
                         elif key == 'w':
-                            self.show_wallet_info()
+                            console.print("[yellow]DEBUG: Calling show_wallet_info()[/yellow]")
+                            try:
+                                self.show_wallet_info()
+                            except Exception as e:
+                                console.print(f"[red]❌ Wallet info failed: {e}[/red]")
                         elif key == 'r':
-                            self.toggle_relay_node()
+                            console.print("[yellow]DEBUG: Calling toggle_relay_node()[/yellow]")
+                            try:
+                                self.toggle_relay_node()
+                            except Exception as e:
+                                console.print(f"[red]❌ Toggle relay failed: {e}[/red]")
                         elif key == 'h':
                             console.print("\n[bold cyan]Help - Mining Console Controls:[/bold cyan]")
                             console.print("[green]S[/green] - Start Mining")
@@ -635,6 +666,8 @@ class MiningConsole:
                             console.print("[dim]Q[/dim] - Quit Console")
                             console.print("[dim]H[/dim] - Show This Help\n")
                             time.sleep(3)  # Pause to read help
+                        else:
+                            console.print(f"[dim]Unknown key: '{key}' - press 'H' for help[/dim]")
 
         except KeyboardInterrupt:
             if self.mining_active:
