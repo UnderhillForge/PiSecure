@@ -24,16 +24,17 @@ class SignBlock:
     """Individual block in the PiSecure blockchain"""
 
     def __init__(self, index: int, transactions: List[Dict], timestamp: float,
-                 previous_hash: str, nonce: int = 0):
+                 previous_hash: str, nonce: int = 0, algorithm: str = 'sha256'):
         self.index = index
         self.transactions = transactions
         self.timestamp = timestamp
         self.previous_hash = previous_hash
         self.nonce = nonce
+        self.algorithm = algorithm  # Mining algorithm: 'sha256' or 'sha3'
         self.hash = self.calculate_hash()
 
     def calculate_hash(self) -> str:
-        """Calculate SHA256 hash of the block"""
+        """Calculate hash of the block using specified algorithm"""
         block_string = json.dumps({
             "index": self.index,
             "transactions": self.transactions,
@@ -42,7 +43,10 @@ class SignBlock:
             "nonce": self.nonce
         }, sort_keys=True)
 
-        return hashlib.sha256(block_string.encode()).hexdigest()
+        if self.algorithm == 'sha3':
+            return hashlib.sha3_256(block_string.encode()).hexdigest()
+        else:  # Default to sha256
+            return hashlib.sha256(block_string.encode()).hexdigest()
 
     def mine_block(self, difficulty: int = 4, verbose: bool = False) -> bool:
         """Mine the block with proof-of-work"""
@@ -112,7 +116,8 @@ class SignChain:
     """PiSecure Private Blockchain with Hardware Verification"""
 
     def __init__(self, chain_file: str = "/var/lib/pisecure/blockchain.json",
-                 difficulty: int = 8, use_hybrid_storage: bool = None):
+                 difficulty: int = 8, use_hybrid_storage: bool = None,
+                 mining_algorithm: str = 'sha256'):
         self.chain_file = Path(chain_file)
         self.pending_file = Path(chain_file).parent / "pending_transactions.json"
         self.names_file = Path(chain_file).parent / "name_registry.json"
@@ -579,7 +584,8 @@ class SignChain:
                 index=last_block.index + 1,
                 transactions=block_transactions,
                 timestamp=time.time(),
-                previous_hash=last_block.hash
+                previous_hash=last_block.hash,
+                algorithm=self.mining_algorithm  # Use configured mining algorithm
             )
 
             # Update block index in reward transaction
