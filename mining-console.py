@@ -1188,14 +1188,6 @@ class MiningConsoleApp(App):
         background: $surface;
     }
 
-    #status_bar {
-        height: 1;
-        background: $primary;
-        color: $text;
-        content-align: center middle;
-        text-style: bold;
-    }
-
     #stats_container {
         layout: horizontal;
         height: 12;
@@ -1251,8 +1243,6 @@ class MiningConsoleApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        # Status indicator bar
-        yield Static(self._get_status_bar(), id="status_bar")
         with Container():
             yield StatsPanel(self)
             yield NetworkPanel(self)
@@ -1278,70 +1268,8 @@ class MiningConsoleApp(App):
             self.query_one(StatsPanel).update_stats()
             self.query_one(NetworkPanel).update_network()
             self.query_one(BlocksPanel).update_blocks()
-            # Update status bar
-            status_widget = self.query_one("#status_bar", Static)
-            status_widget.update(self._get_status_bar())
         except:
             pass  # Panels might not be mounted yet
-
-    def _get_status_bar(self):
-        """Get the status bar text"""
-        try:
-            mining_console = self.mining_console
-
-            # Mining status
-            mining_status = "🟢 MINING" if mining_console.mining_active else "🔴 STOPPED"
-
-            # Relay status
-            relay_status = "🔗 RELAY" if (mining_console.relay_manager and mining_console.relay_manager.relay_active) else "❌ NO RELAY"
-
-            # Network status
-            if mining_console.blockchain:
-                try:
-                    chain_info = mining_console.blockchain.get_chain_info()
-                    network_status = f"⛓️ {chain_info['blocks']} BLOCKS"
-                except:
-                    network_status = "⛓️ BLOCKCHAIN ERROR"
-            else:
-                network_status = "⛓️ NO BLOCKCHAIN"
-
-            # Wallet status
-            if mining_console.blockchain and mining_console.miner_wallet:
-                try:
-                    wallet_balance = mining_console.blockchain.get_wallet_balance(mining_console.miner_wallet)
-                    if mining_console.valuation_engine:
-                        valuation_data = mining_console.valuation_engine.get_mining_value_estimate(mining_console.stats)
-                        wallet_value_usd = wallet_balance * valuation_data['token_value_usd']
-                        wallet_status = f"💰 ${wallet_value_usd:.2f} USD"
-                    else:
-                        wallet_status = f"💰 {wallet_balance:.2f} TOKENS"
-                except:
-                    wallet_status = "💰 WALLET ERROR"
-            else:
-                wallet_status = "💰 NO WALLET"
-
-            # Token valuation status
-            if mining_console.valuation_engine:
-                try:
-                    valuation_data = mining_console.valuation_engine.get_mining_value_estimate(mining_console.stats)
-                    token_status = f"💎 ${valuation_data['token_value_usd']:.4f}"
-                except:
-                    token_status = "💎 VALUATION ERROR"
-            else:
-                token_status = "💎 NO VALUATION"
-
-            # System status
-            try:
-                import psutil
-                cpu_percent = psutil.cpu_percent()
-                system_status = f"🖥️ CPU {cpu_percent:.0f}%"
-            except:
-                system_status = "🖥️ SYSTEM OK"
-
-            return f"{mining_status} | {relay_status} | {network_status} | {wallet_status} | {token_status} | {system_status}"
-
-        except Exception as e:
-            return f"⚠️ Status Error: {str(e)[:30]}..."
 
     def action_start_mining(self):
         """Start mining action"""
