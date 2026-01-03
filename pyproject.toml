@@ -87,7 +87,7 @@ full = [
 ]
 
 [project.scripts]
-pisecure = "pisecure.mining_console:main"
+pisecure = "pisecure:main"
 
 [project.urls]
 Homepage = "https://github.com/UnderhillForge/PiSecure"

@@ -31,7 +31,7 @@ def main():
     elif command == "wallet":
         os.system("python -m pisecure.cli wallet")
     elif command == "mine":
-        os.system("python -m pisecure.cli mine")
+        os.system("python mining-console.py")
     elif command == "dashboard":
         os.system("python dashboard/web/minimal_dashboard.py")
     elif command == "create-wallet":
