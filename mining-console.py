@@ -78,76 +78,158 @@ class MiningApp(App):
     }
 
     Header {
-        background: $primary;
+        background: $primary-darken-2;
         color: $text;
+        text-style: bold;
+        border-bottom: solid $primary;
     }
 
     Footer {
-        background: $primary;
+        background: $primary-darken-2;
         color: $text;
+        border-top: solid $primary;
     }
 
-    #stats-section {
-        height: 35%;
-        margin-bottom: 1;
-    }
-
-    #stats {
+    /* Main dashboard layout - btop-inspired */
+    #dashboard {
         layout: grid;
-        grid-size: 2 2;
-        grid-gutter: 1;
+        grid-size: 4 3;
+        grid-gutter: 0;
         height: 100%;
     }
 
-    #main-content {
-        height: 65%;
-        layout: horizontal;
+    /* Top row - key metrics */
+    #cpu-panel {
+        border: solid $primary;
+        padding: 1;
+        background: $panel;
     }
 
+    #memory-panel {
+        border: solid $primary;
+        padding: 1;
+        background: $panel;
+    }
+
+    #mining-status-panel {
+        border: solid $primary;
+        padding: 1;
+        background: $panel;
+        column-span: 2;
+    }
+
+    /* Second row - blockchain and wallet */
+    #blockchain-panel {
+        border: solid $primary;
+        padding: 1;
+        background: $panel;
+    }
+
+    #wallet-panel {
+        border: solid $primary;
+        padding: 1;
+        background: $panel;
+    }
+
+    #network-panel {
+        border: solid $primary;
+        padding: 1;
+        background: $panel;
+    }
+
+    #uptime-panel {
+        border: solid $primary;
+        padding: 1;
+        background: $panel;
+    }
+
+    /* Third row - performance graphs */
+    #hashrate-graph {
+        border: solid $primary;
+        padding: 1;
+        background: $panel;
+        row-span: 2;
+    }
+
+    #reward-graph {
+        border: solid $primary;
+        padding: 1;
+        background: $panel;
+        row-span: 2;
+    }
+
+    #blocks-graph {
+        border: solid $primary;
+        padding: 1;
+        background: $panel;
+        column-span: 2;
+    }
+
+    /* Fourth row - mining log */
     #mining-log-panel {
-        width: 65%;
-        margin-right: 1;
+        border: solid $primary;
+        padding: 1;
+        background: $panel;
+        column-span: 4;
         height: 100%;
     }
 
     #mining-log {
         height: 100%;
-        border: solid $primary;
         background: $surface;
+        color: $text;
     }
 
-    #right-sidebar {
-        width: 35%;
-        layout: vertical;
-        height: 100%;
-    }
-
-    #blocks {
-        height: 60%;
+    /* Panel headers */
+    .panel-header {
+        text-style: bold;
+        color: $primary;
+        background: $primary-darken-3;
+        width: 100%;
+        text-align: center;
         margin-bottom: 1;
     }
 
-    #controls {
-        height: 40%;
+    /* Status indicators */
+    .status-active {
+        color: $success;
+        text-style: bold;
     }
 
-    .panel {
-        border: solid $primary;
-        padding: 1;
+    .status-inactive {
+        color: $error;
+        text-style: bold;
     }
 
-    Button {
-        margin: 0 1;
+    .metric-value {
+        color: $accent;
+        text-style: bold;
+        font-size: 120%;
     }
 
-    DataTable {
-        height: 100%;
+    .metric-label {
+        color: $text-muted;
+        text-style: dim;
     }
 
-    Log {
+    /* Progress bars */
+    .progress-bar {
+        width: 100%;
+        height: 1;
+        background: $surface-darken-2;
+    }
+
+    .progress-fill {
+        background: $primary;
+        height: 1;
+    }
+
+    /* Charts and graphs styling */
+    .chart {
+        width: 100%;
+        height: 3;
         background: $surface;
-        color: $text;
-        border: solid $primary;
+        border: solid $primary-darken-2;
     }
     """
 
@@ -206,59 +288,231 @@ class MiningApp(App):
             return None
 
     def compose(self) -> ComposeResult:
-        """Create the UI layout"""
+        """Create the btop-inspired dashboard layout"""
         yield Header()
-        yield Container(
-            Vertical(
-                Container(
-                    Horizontal(
-                        Static(self._create_system_stats(), classes="panel", id="system"),
-                        Static(self._create_mining_stats(), classes="panel", id="mining"),
-                        Static(self._create_blockchain_stats(), classes="panel", id="blockchain"),
-                        Static(self._create_wallet_stats(), classes="panel", id="wallet"),
-                        id="stats"
-                    ),
-                    id="stats-section"
-                ),
-                Container(
-                    Horizontal(
-                        Container(
-                            Log(id="mining-log"),
-                            id="mining-log-panel"
-                        ),
-                        Container(
-                            Vertical(
-                                Static(self._create_blocks_table(), classes="panel", id="blocks"),
-                                Static(self._create_controls(), classes="panel", id="controls"),
-                                id="right-sidebar"
-                            ),
-                            id="right-sidebar"
-                        ),
-                        id="main-content"
-                    ),
-                    id="main-content"
-                ),
-                id="main"
-            )
-        )
+
+        # Main dashboard grid (4 columns x 3 rows)
+        with Container(id="dashboard"):
+            # Top row - CPU, Memory, Mining Status (spans 2 columns)
+            yield Static(self._create_cpu_panel(), id="cpu-panel")
+            yield Static(self._create_memory_panel(), id="memory-panel")
+            yield Static(self._create_mining_status_panel(), id="mining-status-panel")
+
+            # Second row - Blockchain, Wallet, Network, Uptime
+            yield Static(self._create_blockchain_panel(), id="blockchain-panel")
+            yield Static(self._create_wallet_panel(), id="wallet-panel")
+            yield Static(self._create_network_panel(), id="network-panel")
+            yield Static(self._create_uptime_panel(), id="uptime-panel")
+
+            # Third row - Hashrate Graph, Reward Graph, Blocks Graph (spans 2 columns)
+            yield Static(self._create_hashrate_graph(), id="hashrate-graph")
+            yield Static(self._create_reward_graph(), id="reward-graph")
+            yield Static(self._create_blocks_graph(), id="blocks-graph")
+
+            # Fourth row - Mining Log (spans all 4 columns)
+            with Container(id="mining-log-panel"):
+                yield Log(id="mining-log")
+
         yield Footer()
 
-    def _create_system_stats(self):
-        """Create system statistics panel"""
+    # Btop-style panel methods
+    def _create_cpu_panel(self):
+        """Create CPU monitoring panel (btop style)"""
         cpu_percent = psutil.cpu_percent(interval=1)
+
+        content = f"""
+[bold blue]CPU[/bold blue]
+[bright_cyan]{cpu_percent:5.1f}%[/bright_cyan]
+
+[bright_green]├─[/bright_green] Usage: {cpu_percent:.1f}%
+[bright_green]├─[/bright_green] Cores: {psutil.cpu_count()}
+[bright_green]└─[/bright_green] Freq: {psutil.cpu_freq().current:.0f}MHz
+        """.strip()
+
+        return content
+
+    def _create_memory_panel(self):
+        """Create memory monitoring panel (btop style)"""
         memory = psutil.virtual_memory()
-        disk = psutil.disk_usage('/')
+        mem_percent = memory.percent
+        mem_used_gb = memory.used / 1024 / 1024 / 1024
+        mem_total_gb = memory.total / 1024 / 1024 / 1024
 
-        table = Table(title="🖥️ System Status")
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", style="magenta")
+        content = f"""
+[bold green]MEM[/bold green]
+[bright_green]{mem_percent:5.1f}%[/bright_green]
 
-        table.add_row("CPU Usage", f"{cpu_percent:.1f}%")
-        table.add_row("Memory", f"{memory.percent:.1f}% ({memory.used/1024/1024/1024:.1f}GB)")
-        table.add_row("Disk Usage", f"{disk.percent:.1f}% ({disk.used/1024/1024/1024:.1f}GB)")
-        table.add_row("Temperature", f"{self._get_temperature():.1f}°C")
+[bright_cyan]├─[/bright_cyan] Used: {mem_used_gb:.1f}GB
+[bright_cyan]├─[/bright_cyan] Total: {mem_total_gb:.1f}GB
+[bright_cyan]└─[/bright_cyan] Free: {memory.available/1024/1024/1024:.1f}GB
+        """.strip()
 
-        return Panel(table, title="System Status")
+        return content
+
+    def _create_mining_status_panel(self):
+        """Create mining status panel (spans 2 columns)"""
+        status_icon = "🟢" if self.mining_active else "🔴"
+        status_text = "Active" if self.mining_active else "Stopped"
+
+        content = f"""
+[bold yellow]MINING STATUS[/bold yellow]
+{status_icon} {status_text}
+
+[bright_magenta]├─[/bright_magenta] Blocks: {self.stats['session_blocks']}/{self.stats['blocks_mined']}
+[bright_magenta]├─[/bright_magenta] Rewards: {self.stats['session_rewards']:.2f} tokens
+[bright_magenta]├─[/bright_magenta] Hashrate: {self.stats['hashrate']:.1f} KH/s
+[bright_magenta]└─[/bright_magenta] Uptime: {self.stats['uptime']:.0f}s
+        """.strip()
+
+        return content
+
+    def _create_blockchain_panel(self):
+        """Create blockchain information panel"""
+        chain_info = self.blockchain.get_chain_info()
+
+        content = f"""
+[bold cyan]BLOCKCHAIN[/bold cyan]
+
+[bright_blue]├─[/bright_blue] Height: {chain_info['blocks']}
+[bright_blue]├─[/bright_blue] Pending: {self.stats['pending_txs']}
+[bright_blue]├─[/bright_blue] Difficulty: {chain_info['difficulty']}
+[bright_blue]└─[/bright_blue] Health: {chain_info['network_health']['participation']:.1%}
+        """.strip()
+
+        return content
+
+    def _create_wallet_panel(self):
+        """Create wallet information panel"""
+        if self.miner_wallet:
+            wallet_balance = self.blockchain.get_wallet_balance(self.miner_wallet)
+            content = f"""
+[bold magenta]WALLET[/bold magenta]
+
+[bright_magenta]├─[/bright_magenta] Balance: {wallet_balance:.2f}
+[bright_magenta]├─[/bright_magenta] Earnings: +{self.stats['session_rewards']:.2f}
+[bright_magenta]├─[/bright_magenta] Address: {self.miner_wallet[:12]}...
+[bright_magenta]└─[/bright_magenta] Status: ✓ Connected
+            """.strip()
+        else:
+            content = f"""
+[bold magenta]WALLET[/bold magenta]
+
+[bright_red]├─[/bright_red] Status: ⚠️ Not configured
+[bright_red]├─[/bright_red] Balance: N/A
+[bright_red]├─[/bright_red] Earnings: N/A
+[bright_red]└─[/bright_red] Address: N/A
+            """.strip()
+
+        return content
+
+    def _create_network_panel(self):
+        """Create network status panel"""
+        try:
+            discovery_status = node_discovery.get_discovery_status()
+            endpoints = len(discovery_status.get('endpoints', []))
+            relay_status = "✓" if self._check_if_relay_node() else "✗"
+
+            content = f"""
+[bold red]NETWORK[/bold red]
+
+[bright_red]├─[/bright_red] Peers: {endpoints}
+[bright_red]├─[/bright_red] Relay: {relay_status}
+[bright_red]├─[/bright_red] Node ID: {discovery_status.get('node_id', 'unknown')[:8]}...
+[bright_red]└─[/bright_red] Status: {'🟢' if endpoints > 0 else '🔴'} Connected
+            """.strip()
+        except:
+            content = f"""
+[bold red]NETWORK[/bold red]
+
+[bright_red]├─[/bright_red] Peers: Unknown
+[bright_red]├─[/bright_red] Relay: Unknown
+[bright_red]├─[/bright_red] Node ID: Unknown
+[bright_red]└─[/bright_red] Status: 🔴 Offline
+            """.strip()
+
+        return content
+
+    def _create_uptime_panel(self):
+        """Create uptime and temperature panel"""
+        temp = self._get_temperature()
+        uptime_seconds = time.time() - psutil.boot_time()
+        uptime_hours = uptime_seconds / 3600
+
+        content = f"""
+[bold white]SYSTEM[/bold white]
+
+[bright_white]├─[/bright_white] Uptime: {uptime_hours:.1f}h
+[bright_white]├─[/bright_white] Temperature: {temp:.1f}°C
+[bright_white]├─[/bright_white] Load: {os.getloadavg()[0]:.2f}
+[bright_white]└─[/bright_white] Processes: {len(psutil.pids())}
+        """.strip()
+
+        return content
+
+    def _create_hashrate_graph(self):
+        """Create hashrate graph panel"""
+        hashrate = self.stats['hashrate']
+        # Create a simple ASCII graph
+        graph_height = 3
+        max_hashrate = max(10, hashrate * 1.5)  # Auto-scale
+
+        content = f"""
+[bold blue]HASHRATE[/bold blue]
+[bright_blue]{hashrate:.1f} KH/s[/bright_blue]
+
+[bright_cyan]{self._create_mini_graph(hashrate, max_hashrate, graph_height)}[/bright_cyan]
+        """.strip()
+
+        return content
+
+    def _create_reward_graph(self):
+        """Create reward graph panel"""
+        rewards = self.stats['session_rewards']
+        # Simple reward tracking
+        content = f"""
+[bold green]REWARDS[/bold green]
+[bright_green]{rewards:.2f} tokens[/bright_green]
+
+[bright_green]{self._create_reward_bar(rewards)}[/bright_green]
+        """.strip()
+
+        return content
+
+    def _create_blocks_graph(self):
+        """Create blocks mined graph (spans 2 columns)"""
+        blocks = self.stats['session_blocks']
+        content = f"""
+[bold yellow]BLOCKS MINED[/bold yellow]
+[bright_yellow]{blocks} blocks[/bright_yellow]
+
+[bright_yellow]{self._create_blocks_display(blocks)}[/bright_yellow]
+        """.strip()
+
+        return content
+
+
+
+    def _create_mini_graph(self, value, max_value, height):
+        """Create a simple ASCII graph"""
+        if max_value == 0:
+            return "▁" * 10
+
+        normalized = min(1.0, value / max_value)
+        filled = int(normalized * 10)
+        return "█" * filled + "░" * (10 - filled)
+
+    def _create_reward_bar(self, rewards):
+        """Create a reward progress bar"""
+        max_reward = max(10, rewards * 1.5)
+        filled = int((rewards / max_reward) * 10)
+        return "█" * filled + "░" * (10 - filled) + f" {rewards:.1f}"
+
+    def _create_blocks_display(self, blocks):
+        """Create blocks display"""
+        block_icons = "▣" * min(blocks, 20)
+        remaining = max(0, 20 - blocks)
+        block_icons += "▢" * remaining
+        return block_icons + f" {blocks} mined"
 
     def _create_mining_stats(self):
         """Create mining statistics panel"""
