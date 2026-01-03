@@ -276,8 +276,12 @@ class StatsPanel(Static):
 
             # Add network information
             try:
-                discovery_status = node_discovery.get_discovery_status()
-                endpoints = discovery_status.get('endpoints', [])
+                # Check if node_discovery is available
+                try:
+                    discovery_status = node_discovery.get_discovery_status()
+                    endpoints = discovery_status.get('endpoints', [])
+                except:
+                    endpoints = []
 
                 # Public IP
                 public_ip = "Unknown"
@@ -338,13 +342,25 @@ class StatsPanel(Static):
             mining_table.add_row("Uptime", f"{stats['uptime']:.0f}s")
 
             # Add USD valuation information
-            valuation_data = self.console_app.mining_console.valuation_engine.get_mining_value_estimate(stats)
-            mining_table.add_row("Token Value", f"${valuation_data['token_value_usd']:.4f} USD")
-            mining_table.add_row("Session Value", f"${valuation_data['session_rewards_usd']:.4f} USD")
-            mining_table.add_row("Hourly Rate", f"${valuation_data['hourly_rate_usd']:.4f} USD/hr")
+            if self.console_app.mining_console.valuation_engine:
+                try:
+                    valuation_data = self.console_app.mining_console.valuation_engine.get_mining_value_estimate(stats)
+                    mining_table.add_row("Token Value", f"${valuation_data['token_value_usd']:.4f} USD")
+                    mining_table.add_row("Session Value", f"${valuation_data['session_rewards_usd']:.4f} USD")
+                    mining_table.add_row("Hourly Rate", f"${valuation_data['hourly_rate_usd']:.4f} USD/hr")
 
-            trend_icon = "📈" if valuation_data['trend_percent'] >= 0 else "📉"
-            mining_table.add_row("Value Trend", f"{trend_icon} {valuation_data['trend_percent']:+.2f}%")
+                    trend_icon = "📈" if valuation_data['trend_percent'] >= 0 else "📉"
+                    mining_table.add_row("Value Trend", f"{trend_icon} {valuation_data['trend_percent']:+.2f}%")
+                except Exception as e:
+                    mining_table.add_row("Token Value", "⚠️ Valuation Error")
+                    mining_table.add_row("Session Value", "⚠️ Valuation Error")
+                    mining_table.add_row("Hourly Rate", "⚠️ Valuation Error")
+                    mining_table.add_row("Value Trend", "⚠️ Valuation Error")
+            else:
+                mining_table.add_row("Token Value", "❌ No Valuation")
+                mining_table.add_row("Session Value", "❌ No Valuation")
+                mining_table.add_row("Hourly Rate", "❌ No Valuation")
+                mining_table.add_row("Value Trend", "❌ No Valuation")
 
             # Add mining efficiency metrics
             if stats['blocks_mined'] > 0 and stats['uptime'] > 0:
@@ -419,43 +435,63 @@ class NetworkPanel(Static):
             stats = self.console_app.mining_console.stats
 
             # Blockchain stats
-            chain_info = blockchain.get_chain_info()
-            blockchain_table = Table(title="⛓️ Blockchain Status", box=None, show_header=False)
-            blockchain_table.add_column("Metric", style="cyan", no_wrap=True)
-            blockchain_table.add_column("Value", style="blue")
+            if blockchain:
+                try:
+                    chain_info = blockchain.get_chain_info()
+                    blockchain_table = Table(title="⛓️ Blockchain Status", box=None, show_header=False)
+                    blockchain_table.add_column("Metric", style="cyan", no_wrap=True)
+                    blockchain_table.add_column("Value", style="blue")
 
-            blockchain_table.add_row("Blocks", str(chain_info['blocks']))
-            blockchain_table.add_row("Pending TX", str(stats['pending_txs']))
-            blockchain_table.add_row("Difficulty", str(chain_info['difficulty']))
+                    blockchain_table.add_row("Blocks", str(chain_info['blocks']))
+                    blockchain_table.add_row("Pending TX", str(stats['pending_txs']))
+                    blockchain_table.add_row("Difficulty", str(chain_info['difficulty']))
 
-            health = chain_info['network_health']
-            participation = health['participation']
-            participation_icon = "🟢" if participation > 0.5 else "🟡" if participation > 0.1 else "🔴"
-            blockchain_table.add_row("Participation", f"{participation_icon} {participation:.1%}")
-            blockchain_table.add_row("Avg Block Time", f"{health['avg_block_time']:.1f}s")
+                    health = chain_info['network_health']
+                    participation = health['participation']
+                    participation_icon = "🟢" if participation > 0.5 else "🟡" if participation > 0.1 else "🔴"
+                    blockchain_table.add_row("Participation", f"{participation_icon} {participation:.1%}")
+                    blockchain_table.add_row("Avg Block Time", f"{health['avg_block_time']:.1f}s")
 
-            # Network connectivity status
-            network_status = "🟢 HEALTHY"
-            if participation < 0.1:
-                network_status = "🔴 CRITICAL"
-            elif participation < 0.5:
-                network_status = "🟡 DEGRADED"
-            blockchain_table.add_row("Network Status", network_status)
+                    # Network connectivity status
+                    network_status = "🟢 HEALTHY"
+                    if participation < 0.1:
+                        network_status = "🔴 CRITICAL"
+                    elif participation < 0.5:
+                        network_status = "🟡 DEGRADED"
+                    blockchain_table.add_row("Network Status", network_status)
+                except Exception as e:
+                    blockchain_table = Table(title="⛓️ Blockchain Status", box=None, show_header=False)
+                    blockchain_table.add_column("Metric", style="cyan", no_wrap=True)
+                    blockchain_table.add_column("Value", style="red")
+                    blockchain_table.add_row("Status", f"❌ Error: {str(e)[:20]}...")
+            else:
+                blockchain_table = Table(title="⛓️ Blockchain Status", box=None, show_header=False)
+                blockchain_table.add_column("Metric", style="cyan", no_wrap=True)
+                blockchain_table.add_column("Value", style="red")
+                blockchain_table.add_row("Status", "❌ Not Available")
 
             # Wallet info
             wallet_table = Table(title="🏦 Mining Wallet", box=None, show_header=False)
             wallet_table.add_column("Property", style="cyan", no_wrap=True)
             wallet_table.add_column("Value", style="yellow")
 
-            if miner_wallet:
-                wallet_balance = blockchain.get_wallet_balance(miner_wallet)
-                valuation_data = self.console_app.mining_console.valuation_engine.get_mining_value_estimate(stats)
-                wallet_value_usd = wallet_balance * valuation_data['token_value_usd']
-
-                wallet_table.add_row("Address", miner_wallet[:32] + "...")
-                wallet_table.add_row("Balance", f"{wallet_balance:.2f} tokens")
-                wallet_table.add_row("USD Value", f"${wallet_value_usd:.2f} USD")
-                wallet_table.add_row("Session Earnings", f"+{stats['session_rewards']:.2f} tokens")
+            if miner_wallet and blockchain:
+                try:
+                    wallet_balance = blockchain.get_wallet_balance(miner_wallet)
+                    if self.console_app.mining_console.valuation_engine:
+                        valuation_data = self.console_app.mining_console.valuation_engine.get_mining_value_estimate(stats)
+                        wallet_value_usd = wallet_balance * valuation_data['token_value_usd']
+                        wallet_table.add_row("Address", miner_wallet[:32] + "...")
+                        wallet_table.add_row("Balance", f"{wallet_balance:.2f} tokens")
+                        wallet_table.add_row("USD Value", f"${wallet_value_usd:.2f} USD")
+                        wallet_table.add_row("Session Earnings", f"+{stats['session_rewards']:.2f} tokens")
+                    else:
+                        wallet_table.add_row("Address", miner_wallet[:32] + "...")
+                        wallet_table.add_row("Balance", f"{wallet_balance:.2f} tokens")
+                        wallet_table.add_row("USD Value", "❌ No Valuation")
+                        wallet_table.add_row("Session Earnings", f"+{stats['session_rewards']:.2f} tokens")
+                except Exception as e:
+                    wallet_table.add_row("Status", f"⚠️ Error: {str(e)[:20]}...")
             else:
                 wallet_table.add_row("Status", "⚠️ Not configured")
 
@@ -487,6 +523,11 @@ class BlocksPanel(Static):
         """Update the blocks display"""
         try:
             blockchain = self.console_app.mining_console.blockchain
+
+            if not blockchain:
+                blocks_widget = self.query_one("#blocks_display", Static)
+                blocks_widget.update(Panel("❌ Blockchain not available", border_style="red"))
+                return
 
             # Recent blocks
             recent_blocks_table = Table(title="📦 Recent Blocks", box=None)
@@ -850,11 +891,16 @@ class MiningLogic:
 
     def __init__(self, app=None):
         self.app = app
-        self.blockchain = SignChain()
-        self.hardware = HardwareVerifier()
-        self.relay_manager = RelayManager()
-        self.miner_wallet = self._load_miner_wallet()
-        self.valuation_engine = USDValuationEngine()  # Add USD valuation engine
+
+        # Initialize components with error handling
+        self.blockchain = None
+        self.hardware = None
+        self.relay_manager = None
+        self.miner_wallet = None
+        self.valuation_engine = None
+
+        # Initialize components safely
+        self._initialize_components()
 
         # Mining state
         self.mining_active = False
@@ -874,6 +920,43 @@ class MiningLogic:
             'session_blocks': 0
         }
 
+    def _initialize_components(self):
+        """Initialize components with error handling"""
+        # Initialize blockchain
+        try:
+            self.blockchain = SignChain()
+        except Exception as e:
+            print(f"⚠️ Failed to initialize blockchain: {e}")
+            self.blockchain = None
+
+        # Initialize hardware verifier
+        try:
+            self.hardware = HardwareVerifier()
+        except Exception as e:
+            print(f"⚠️ Failed to initialize hardware verifier: {e}")
+            self.hardware = None
+
+        # Initialize relay manager
+        try:
+            self.relay_manager = RelayManager()
+        except Exception as e:
+            print(f"⚠️ Failed to initialize relay manager: {e}")
+            self.relay_manager = None
+
+        # Load miner wallet
+        try:
+            self.miner_wallet = self._load_miner_wallet()
+        except Exception as e:
+            print(f"⚠️ Failed to load miner wallet: {e}")
+            self.miner_wallet = None
+
+        # Initialize valuation engine
+        try:
+            self.valuation_engine = USDValuationEngine()
+        except Exception as e:
+            print(f"⚠️ Failed to initialize valuation engine: {e}")
+            self.valuation_engine = None
+
     def _load_miner_wallet(self):
         """Load miner wallet address from config"""
         try:
@@ -889,10 +972,19 @@ class MiningLogic:
         if self.mining_active:
             return "Mining is already active"
 
-        # Hardware verification
-        result = self.hardware.verify_mining_eligibility()
-        if not result['eligible']:
-            return f"Hardware verification failed: {result.get('error', 'Unknown error')}"
+        # Hardware verification (if available)
+        if self.hardware:
+            try:
+                result = self.hardware.verify_mining_eligibility()
+                if not result['eligible']:
+                    return f"Hardware verification failed: {result.get('error', 'Unknown error')}"
+            except Exception as e:
+                print(f"⚠️ Hardware verification error: {e}")
+                # Continue anyway - don't block mining due to verification issues
+
+        # Check if blockchain is available
+        if not self.blockchain:
+            return "Blockchain not available - cannot start mining"
 
         self.mining_active = True
         self.stop_mining.clear()
@@ -1230,32 +1322,55 @@ class MiningConsoleApp(App):
         """Get the status bar text"""
         try:
             mining_console = self.mining_console
-            blockchain = mining_console.blockchain
-            stats = mining_console.stats
 
             # Mining status
             mining_status = "🟢 MINING" if mining_console.mining_active else "🔴 STOPPED"
 
             # Relay status
-            relay_status = "🔗 RELAY" if mining_console.relay_manager.relay_active else "❌ NO RELAY"
+            relay_status = "🔗 RELAY" if (mining_console.relay_manager and mining_console.relay_manager.relay_active) else "❌ NO RELAY"
 
             # Network status
-            chain_info = blockchain.get_chain_info()
-            network_status = f"⛓️ {chain_info['blocks']} BLOCKS"
+            if mining_console.blockchain:
+                try:
+                    chain_info = mining_console.blockchain.get_chain_info()
+                    network_status = f"⛓️ {chain_info['blocks']} BLOCKS"
+                except:
+                    network_status = "⛓️ BLOCKCHAIN ERROR"
+            else:
+                network_status = "⛓️ NO BLOCKCHAIN"
 
             # Wallet status
-            wallet_balance = blockchain.get_wallet_balance(mining_console.miner_wallet) if mining_console.miner_wallet else 0
-            valuation_data = mining_console.valuation_engine.get_mining_value_estimate(stats)
-            wallet_value_usd = wallet_balance * valuation_data['token_value_usd']
-            wallet_status = f"💰 ${wallet_value_usd:.2f} USD"
+            if mining_console.blockchain and mining_console.miner_wallet:
+                try:
+                    wallet_balance = mining_console.blockchain.get_wallet_balance(mining_console.miner_wallet)
+                    if mining_console.valuation_engine:
+                        valuation_data = mining_console.valuation_engine.get_mining_value_estimate(mining_console.stats)
+                        wallet_value_usd = wallet_balance * valuation_data['token_value_usd']
+                        wallet_status = f"💰 ${wallet_value_usd:.2f} USD"
+                    else:
+                        wallet_status = f"💰 {wallet_balance:.2f} TOKENS"
+                except:
+                    wallet_status = "💰 WALLET ERROR"
+            else:
+                wallet_status = "💰 NO WALLET"
 
             # Token valuation status
-            token_status = f"💎 ${valuation_data['token_value_usd']:.4f}"
+            if mining_console.valuation_engine:
+                try:
+                    valuation_data = mining_console.valuation_engine.get_mining_value_estimate(mining_console.stats)
+                    token_status = f"💎 ${valuation_data['token_value_usd']:.4f}"
+                except:
+                    token_status = "💎 VALUATION ERROR"
+            else:
+                token_status = "💎 NO VALUATION"
 
             # System status
-            import psutil
-            cpu_percent = psutil.cpu_percent()
-            system_status = f"🖥️ CPU {cpu_percent:.0f}%"
+            try:
+                import psutil
+                cpu_percent = psutil.cpu_percent()
+                system_status = f"🖥️ CPU {cpu_percent:.0f}%"
+            except:
+                system_status = "🖥️ SYSTEM OK"
 
             return f"{mining_status} | {relay_status} | {network_status} | {wallet_status} | {token_status} | {system_status}"
 
