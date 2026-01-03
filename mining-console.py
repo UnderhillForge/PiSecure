@@ -59,7 +59,7 @@ class MiningConsole:
         # Mining state
         self.mining_active = False
         self.mining_thread = None
-        self.stop_mining = threading.Event()
+        self.stop_event = threading.Event()
 
         # Stats tracking
         self.stats = {
@@ -114,7 +114,7 @@ class MiningConsole:
             console.print("[yellow]⚠️ No miner wallet configured - rewards will not be distributed[/yellow]")
 
         self.mining_active = True
-        self.stop_mining.clear()
+        self.stop_event.clear()
         self.stats['start_time'] = time.time()
         self.stats['session_blocks'] = 0
         self.stats['session_rewards'] = 0.0
@@ -133,7 +133,7 @@ class MiningConsole:
             return
 
         console.print("[yellow]⏹️ Stopping mining session...[/yellow]")
-        self.stop_mining.set()
+        self.stop_event.set()
         self.mining_active = False
 
         if self.mining_thread and self.mining_thread.is_alive():
@@ -145,7 +145,7 @@ class MiningConsole:
 
     def _mining_worker(self):
         """Background mining worker"""
-        while not self.stop_mining.is_set():
+        while not self.stop_event.is_set():
             try:
                 # Update stats
                 self.stats['uptime'] = time.time() - self.stats['start_time']
