@@ -68,7 +68,9 @@ class SignWallet:
                 'balance': 0,
                 'created_at': int(os.times()[4]),  # System time
                 'transactions': [],
-                'version': '1.0'
+                'version': '1.0',
+                'cold_storage': False,  # Not in cold storage by default
+                'cold_storage_date': None
             }
 
             # Save private key securely
@@ -539,7 +541,8 @@ class SignWallet:
                             'name': wallet_data.get('name'),
                             'address': wallet_data.get('address')[:16] + '...',
                             'balance': wallet_data.get('balance', 0),
-                            'created': wallet_data.get('created_at')
+                            'created': wallet_data.get('created_at'),
+                            'cold_storage': wallet_data.get('cold_storage', False)
                         })
                 except:
                     continue
@@ -547,6 +550,61 @@ class SignWallet:
             print(f"Failed to list wallets: {e}")
 
         return wallets
+
+    def set_cold_storage(self, wallet_id: str, cold: bool = True) -> Dict[str, Any]:
+        """Set or unset cold storage status for a wallet"""
+        try:
+            wallet_file = self.wallet_file.parent / f"{wallet_id}.json"
+
+            if not wallet_file.exists():
+                return {
+                    'success': False,
+                    'error': 'Wallet not found'
+                }
+
+            # Load wallet data
+            with open(wallet_file, 'r') as f:
+                wallet_data = json.load(f)
+
+            # Update cold storage status
+            wallet_data['cold_storage'] = cold
+            wallet_data['cold_storage_date'] = int(os.times()[4]) if cold else None
+
+            # Save updated data
+            with open(wallet_file, 'w') as f:
+                json.dump(wallet_data, f, indent=2)
+
+            # If setting to cold storage, also update current wallet data if this is the active wallet
+            if self.get_wallet_id() == wallet_id:
+                self.wallet_data.update(wallet_data)
+
+            return {
+                'success': True,
+                'wallet_id': wallet_id,
+                'cold_storage': cold
+            }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def is_cold_storage(self, wallet_id: str = None) -> bool:
+        """Check if wallet is in cold storage"""
+        if wallet_id is None:
+            wallet_id = self.get_wallet_id()
+
+        wallet_file = self.wallet_file.parent / f"{wallet_id}.json"
+        if wallet_file.exists():
+            try:
+                with open(wallet_file, 'r') as f:
+                    wallet_data = json.load(f)
+                return wallet_data.get('cold_storage', False)
+            except:
+                pass
+
+        return False
 
 
 class SignToken:

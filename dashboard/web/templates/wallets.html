@@ -26,6 +26,24 @@
         </header>
 
         <main>
+            <!-- Wallet Management -->
+            <section class="card">
+                <h2>Wallet Management</h2>
+                <div class="wallet-management">
+                    <div class="wallet-section">
+                        <h3>Create New Wallet</h3>
+                        <input type="text" id="new-wallet-name" placeholder="Enter wallet name" style="width: 100%; padding: 10px; margin-bottom: 10px;">
+                        <button onclick="createWallet()" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px;">Create Wallet</button>
+                    </div>
+
+                    <div class="wallet-section">
+                        <h3>Import Wallet</h3>
+                        <input type="file" id="import-file" accept=".dat" style="margin-bottom: 10px;">
+                        <button onclick="importWallet()" style="padding: 10px 20px; background: #17a2b8; color: white; border: none; border-radius: 4px;">Import Wallet</button>
+                    </div>
+                </div>
+            </section>
+
             <!-- Wallet Lookup -->
             <section class="card">
                 <h2>Wallet Lookup</h2>
@@ -86,6 +104,187 @@
 
             currentWalletAddress = address;
             loadWalletData(address);
+        }
+
+        function createWallet() {
+            const name = document.getElementById('new-wallet-name').value.trim();
+            if (!name) {
+                alert('Please enter a wallet name');
+                return;
+            }
+
+            fetch('/api/wallets/create', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ name: name })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+
+                alert(`Wallet created successfully!\n\nWallet ID: ${data.wallet_id}\nAddress: ${data.address}`);
+                document.getElementById('new-wallet-name').value = '';
+                loadWallets(); // Refresh wallet list
+            })
+            .catch(error => {
+                console.error('Error creating wallet:', error);
+                alert('Error creating wallet');
+            });
+        }
+
+        function loadWallets() {
+            fetch('/api/wallets/list')
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    document.getElementById('wallets-list').innerHTML = '<p>Error loading wallets</p>';
+                    return;
+                }
+
+                displayWallets(data.wallets);
+            })
+            .catch(error => {
+                console.error('Error loading wallets:', error);
+                document.getElementById('wallets-list').innerHTML = '<p>Error loading wallets</p>';
+            });
+        }
+
+        function displayWallets(wallets) {
+            const container = document.getElementById('wallets-list');
+
+            if (!wallets || wallets.length === 0) {
+                container.innerHTML = '<p>No wallets found. Create your first wallet above.</p>';
+                return;
+            }
+
+            let html = '<div class="wallets-table">';
+            html += '<div class="wallet-header">';
+            html += '<span>Name</span>';
+            html += '<span>ID</span>';
+            html += '<span>Address</span>';
+            html += '<span>Balance</span>';
+            html += '<span>Actions</span>';
+            html += '</div>';
+
+            wallets.forEach(wallet => {
+                const coldStorageClass = wallet.cold_storage ? 'cold-storage' : '';
+                const coldStorageText = wallet.cold_storage ? ' (Cold Storage)' : '';
+                const coldBtnText = wallet.cold_storage ? 'Restore' : 'Cold Storage';
+
+                html += '<div class="wallet-row ' + coldStorageClass + '">';
+                html += `<span>${wallet.name}${coldStorageText}</span>`;
+                html += `<span>${wallet.id}</span>`;
+                html += `<span>${wallet.address}</span>`;
+                html += `<span>${wallet.balance} PiTokens</span>`;
+                html += '<span class="wallet-actions">';
+                if (!wallet.cold_storage) {
+                    html += `<button onclick="backupWallet('${wallet.id}')" class="action-btn backup-btn">Backup</button>`;
+                }
+                html += `<button onclick="coldStorage('${wallet.id}', ${wallet.cold_storage})" class="action-btn cold-btn">${coldBtnText}</button>`;
+                html += `<button onclick="selectWallet('${wallet.address}')" class="action-btn select-btn">Select</button>`;
+                html += '</span>';
+                html += '</div>';
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function backupWallet(walletId) {
+            // Trigger download of wallet backup
+            window.location.href = `/api/wallets/export/${walletId}`;
+        }
+
+        function coldStorage(walletId, isCold = false) {
+            if (isCold) {
+                // Restore from cold storage
+                if (confirm('Restore wallet from cold storage? This will make the wallet available for transactions again.')) {
+                    fetch(`/api/wallets/cold-storage/${walletId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ action: 'restore' })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            alert('Error: ' + data.error);
+                        } else {
+                            alert('Wallet restored from cold storage.');
+                            loadWallets(); // Refresh wallet list
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error restoring from cold storage:', error);
+                        alert('Error restoring wallet from cold storage');
+                    });
+                }
+            } else {
+                // Export to cold storage
+                if (confirm('Move wallet to cold storage? This will export the wallet with private keys and mark it as non-tradeable until restored.')) {
+                    fetch(`/api/wallets/cold-storage/${walletId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ action: 'export' })
+                    })
+                    .then(response => {
+                        if (response.ok) {
+                            // File download will be triggered
+                            alert('Wallet moved to cold storage. Download the backup file and store it securely offline.');
+                            loadWallets(); // Refresh wallet list
+                        } else {
+                            return response.json().then(data => {
+                                throw new Error(data.error || 'Cold storage export failed');
+                            });
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error with cold storage:', error);
+                        alert('Error: ' + error.message);
+                    });
+                }
+            }
+        }
+
+        function importWallet() {
+            const fileInput = document.getElementById('import-file');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Please select a wallet backup file (.dat)');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/api/wallets/import', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+
+                alert(`Wallet imported successfully!\n\nWallet ID: ${data.wallet_id}\nAddress: ${data.address}`);
+                fileInput.value = ''; // Clear file input
+                loadWallets(); // Refresh wallet list
+            })
+            .catch(error => {
+                console.error('Error importing wallet:', error);
+                alert('Error importing wallet');
+            });
         }
 
         function loadWalletData(address) {
@@ -160,6 +359,11 @@
             container.innerHTML = html;
         }
 
+        // Load wallets on page load
+        window.onload = function() {
+            loadWallets();
+        };
+
         // Allow Enter key to trigger lookup
         document.getElementById('wallet-address').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
@@ -169,8 +373,100 @@
     </script>
 
     <style>
-        .wallet-lookup {
-            margin-bottom: 20px;
+        .wallet-management {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .wallet-section {
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+
+        .wallet-section h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .wallets-table {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .wallet-header {
+            background: #f8f9fa;
+            padding: 12px;
+            display: grid;
+            grid-template-columns: 2fr 1fr 2fr 1fr 2fr;
+            gap: 10px;
+            font-weight: bold;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .wallet-row {
+            padding: 12px;
+            display: grid;
+            grid-template-columns: 2fr 1fr 2fr 1fr 2fr;
+            gap: 10px;
+            border-bottom: 1px solid #eee;
+            align-items: center;
+        }
+
+        .wallet-row:hover {
+            background: #f8f9fa;
+        }
+
+        .wallet-actions {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+
+        .action-btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .backup-btn {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .backup-btn:hover {
+            background: #e0a800;
+        }
+
+        .cold-btn {
+            background: #dc3545;
+            color: white;
+        }
+
+        .cold-btn:hover {
+            background: #c82333;
+        }
+
+        .select-btn {
+            background: #007bff;
+            color: white;
+        }
+
+        .wallet-row.cold-storage {
+            background: #fff3cd;
+            opacity: 0.7;
+        }
+
+        .wallet-row.cold-storage:hover {
+            background: #ffeaa7;
         }
 
         .transactions-table {

@@ -145,6 +145,199 @@ class PiSecureDashboard:
                 return jsonify({'transactions': []})
             return jsonify({'error': 'No wallet_id provided'})
 
+        @self.app.route('/api/wallets/list')
+        def api_wallets_list():
+            """API endpoint for listing all wallets"""
+            try:
+                wallet = SignWallet()
+                wallets = wallet.list_wallets()
+                return jsonify({'wallets': wallets})
+            except Exception as e:
+                return jsonify({'error': str(e)})
+
+        @self.app.route('/api/wallets/create', methods=['POST'])
+        def api_wallet_create():
+            """API endpoint for creating a new wallet"""
+            try:
+                data = request.get_json()
+                name = data.get('name', '').strip()
+
+                if not name:
+                    return jsonify({'error': 'Wallet name is required'})
+
+                # Check if wallet name already exists
+                wallet = SignWallet()
+                existing_wallets = wallet.list_wallets()
+                if any(w['name'] == name for w in existing_wallets):
+                    return jsonify({'error': 'Wallet name already exists'})
+
+                # Generate unique wallet ID with timestamp for extra uniqueness
+                import secrets
+                import time
+                timestamp = str(int(time.time()))[-4:]  # Last 4 digits of timestamp
+                random_part = secrets.token_hex(6)  # 12 character hex string
+                wallet_id = f"{timestamp}{random_part}"  # 16 character unique ID
+
+                result = wallet.create_wallet(wallet_id, name)
+
+                if result['success']:
+                    return jsonify({
+                        'success': True,
+                        'wallet_id': result['wallet_id'],
+                        'address': result['address'],
+                        'name': name
+                    })
+                else:
+                    return jsonify({'error': result.get('error', 'Failed to create wallet')})
+
+            except Exception as e:
+                return jsonify({'error': str(e)})
+
+        @self.app.route('/api/wallets/export/<wallet_id>')
+        def api_wallet_export(wallet_id):
+            """API endpoint for exporting wallet backup"""
+            try:
+                from flask import send_file
+                import tempfile
+                import os
+
+                wallet = SignWallet()
+                # Create temporary file for export
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.dat', delete=False) as f:
+                    temp_path = f.name
+
+                # Export wallet without private key for security
+                result = wallet.export_wallet(temp_path, include_private_key=False)
+
+                if result['success']:
+                    # Send file for download
+                    response = send_file(
+                        temp_path,
+                        as_attachment=True,
+                        download_name=f"{wallet_id}.dat",
+                        mimetype='application/octet-stream'
+                    )
+                    # Clean up temp file after sending
+                    @response.call_on_close
+                    def cleanup():
+                        try:
+                            os.unlink(temp_path)
+                        except:
+                            pass
+                    return response
+                else:
+                    # Clean up temp file
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
+                    return jsonify({'error': result.get('error', 'Export failed')})
+
+            except Exception as e:
+                return jsonify({'error': str(e)})
+
+        @self.app.route('/api/wallets/import', methods=['POST'])
+        def api_wallet_import():
+            """API endpoint for importing wallet backup"""
+            try:
+                if 'file' not in request.files:
+                    return jsonify({'error': 'No file provided'})
+
+                file = request.files['file']
+                if file.filename == '':
+                    return jsonify({'error': 'No file selected'})
+
+                if not file.filename.endswith('.dat'):
+                    return jsonify({'error': 'File must be a .dat file'})
+
+                # Save uploaded file temporarily
+                import tempfile
+                import os
+                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                    file.save(temp_file.name)
+                    temp_path = temp_file.name
+
+                try:
+                    wallet = SignWallet()
+                    result = wallet.import_wallet(temp_path)
+
+                    if result['success']:
+                        # If this was a cold storage wallet, unset cold storage status
+                        wallet.set_cold_storage(result['wallet_id'], cold=False)
+                        return jsonify({
+                            'success': True,
+                            'wallet_id': result['wallet_id'],
+                            'address': result['address']
+                        })
+                    else:
+                        return jsonify({'error': result.get('error', 'Import failed')})
+
+                finally:
+                    # Clean up temp file
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
+
+            except Exception as e:
+                return jsonify({'error': str(e)})
+
+        @self.app.route('/api/wallets/cold-storage/<wallet_id>', methods=['POST'])
+        def api_wallet_cold_storage(wallet_id):
+            """API endpoint for cold storage operations"""
+            try:
+                data = request.get_json()
+                action = data.get('action')  # 'export' or 'restore'
+
+                if action not in ['export', 'restore']:
+                    return jsonify({'error': 'Invalid action. Must be "export" or "restore"'})
+
+                wallet = SignWallet()
+
+                if action == 'export':
+                    # First set wallet to cold storage
+                    cold_result = wallet.set_cold_storage(wallet_id, cold=True)
+                    if not cold_result['success']:
+                        return jsonify({'error': cold_result.get('error', 'Failed to set cold storage')})
+
+                    # Then export the wallet with private key
+                    import tempfile
+                    import os
+
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.dat', delete=False) as f:
+                        temp_path = f.name
+
+                    result = wallet.export_wallet(temp_path, include_private_key=True, password='cold_storage_backup')
+
+                    if result['success']:
+                        response = send_file(
+                            temp_path,
+                            as_attachment=True,
+                            download_name=f"{wallet_id}_cold_storage.dat",
+                            mimetype='application/octet-stream'
+                        )
+                        @response.call_on_close
+                        def cleanup():
+                            try:
+                                os.unlink(temp_path)
+                            except:
+                                pass
+                        return response
+                    else:
+                        try:
+                            os.unlink(temp_path)
+                        except:
+                            pass
+                        return jsonify({'error': result.get('error', 'Cold storage export failed')})
+
+                elif action == 'restore':
+                    # Restore from cold storage - this would be handled by regular import
+                    # but we need to unset cold storage status after successful import
+                    return jsonify({'error': 'Use regular import for cold storage restoration'})
+
+            except Exception as e:
+                return jsonify({'error': str(e)})
+
         @self.app.route('/api/blockchain/blocks')
         def api_blocks():
             """API endpoint for recent blocks"""
