@@ -891,7 +891,7 @@ def generate_signing_key(password):
             console.print("[green]✅ Signing keypair generated successfully![/green]")
             console.print(f"   Public Key: {result['public_key'][:50]}...")
             console.print(f"   Key Size: {result['key_size']} bits")
-            console console.print(f"   Algorithm: {result['algorithm']}")
+            console.print(f"   Algorithm: {result['algorithm']}")
             console.print("[yellow]⚠️ Secure the private key file - it contains your signing credentials[/yellow]")
         else:
             console.print(f"[red]❌ Key generation failed: {result.get('error')}[/red]")
@@ -1223,7 +1223,7 @@ def create_wallet(wallet_name, name):
                     console.print(f"[blue]🏷️ Custom Name Registration[/blue]")
                     console.print(f"   Name: {name}")
                     console.print(f"   Fee: 5 PiSecure tokens")
-                    console console.print(f"   Current balance: {bootstrap_balance} tokens")
+                    console.print(f"   Current balance: {bootstrap_balance} tokens")
                     console.print(f"   After registration: {bootstrap_balance - 5.0} tokens")
 
                     if not click.confirm("Continue with name registration?", default=True):
