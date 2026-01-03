@@ -98,7 +98,7 @@ class MiningApp(App):
 
     /* CPU/Hashrate graph section */
     #cpu-graph-section {
-        height: 12;
+        height: 10;
         background: #0d1117;
         border: solid #30363d;
         padding: 0 1;
@@ -479,7 +479,7 @@ class MiningApp(App):
         swap_bar = int((swap.percent / 100) * bar_width) if swap.total > 0 else 0
         disk_bar = int((disk.percent / 100) * bar_width)
 
-        return f"""[bold cyan]mem[/bold cyan]
+        return f"""[bold cyan][Mem][/bold cyan]
 
 [white]Memory:[/white]    [bold white]{mem_gb:.2f} GiB[/bold white]
 [white]Used:[/white]      [green]{'█' * mem_bar}[/green][dim]{'░' * (bar_width - mem_bar)}[/dim] [white]{mem.percent:.0f}%[/white]
@@ -500,7 +500,7 @@ class MiningApp(App):
         hashrate_normalized = min(100, self.stats['hashrate'] / 10)  # Scale to 0-100
         hashrate_bar = int((hashrate_normalized / 100) * bar_width)
 
-        return f"""[bold magenta]mining[/bold magenta]
+        return f"""[bold magenta][Mining][/bold magenta]
 
 [white]Status:[/white]  [{status_color}]{status_icon} {'ACTIVE' if self.mining_active else 'STOPPED'}[/{status_color}]
 [white]Hashrate:[/white] [bold white]{self.stats['hashrate']:.1f} KH/s[/bold white]
@@ -520,7 +520,7 @@ class MiningApp(App):
                 balance = 0.0
                 addr_short = "Error loading"
 
-            return f"""[bold yellow]wallet[/bold yellow]
+            return f"""[bold yellow][Wallet][/bold yellow]
 
 [white]Address:[/white] [cyan]{addr_short}[/cyan]
 [white]Balance:[/white] [bold green]{balance:.2f}[/bold green] tokens
