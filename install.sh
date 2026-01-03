@@ -342,6 +342,50 @@ SyslogIdentifier=pisecure-dashboard
 WantedBy=multi-user.target
 EOF
 
+    # PiSecure network discovery service
+    sudo tee /etc/systemd/system/pisecure-discovery.service > /dev/null <<EOF
+[Unit]
+Description=PiSecure Network Discovery Service
+After=network.target pisecure.service
+Wants=pisecure.service
+
+[Service]
+Type=oneshot
+User=$SERVICE_USER
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$VENV_DIR/bin/python -c "
+from pisecure.core.nat_traversal import node_discovery
+import logging
+logging.basicConfig(level=logging.INFO)
+print('🔄 Running scheduled network discovery...')
+results = node_discovery.make_node_discoverable()
+if results['success_count'] > 0:
+    print(f'✅ Discovery successful: {results[\"success_count\"]} methods')
+else:
+    print('⚠️ No discovery methods succeeded')
+"
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # PiSecure network discovery timer
+    sudo tee /etc/systemd/system/pisecure-discovery.timer > /dev/null <<EOF
+[Unit]
+Description=PiSecure Network Discovery Timer
+Requires=pisecure-discovery.service
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
     sudo systemctl daemon-reload
     log_success "Systemd services created"
 }
@@ -430,17 +474,42 @@ print(f'📄 Discovery results saved to: {discovery_file}')
 
 # Automated wallet setup
 setup_wallet() {
-    log_info "Creating default mining wallet..."
+    log_info "Setting up mining wallet..."
 
     # Generate unique wallet name based on system identifier
     PI_SERIAL=$(grep "Serial" /proc/cpuinfo | awk '{print $3}' | tr '[:upper:]' '[:lower:]')
     WALLET_NAME="node-${PI_SERIAL: -6}"
     WALLET_DISPLAY_NAME="PiSecure Node Wallet"
 
-    log_info "Creating wallet: $WALLET_NAME"
-
-    # Create wallet
+    # Check if wallet already exists (for updates vs clean installs)
     source "$VENV_DIR/bin/activate"
+    EXISTING_WALLET=$(python -c "
+from pisecure.core.wallet import SignWallet
+wallet = SignWallet()
+wallets = wallet.list_wallets()
+# Look for existing node wallet
+for w in wallets:
+    if w.get('name', '').startswith('node-'):
+        print('EXISTS:' + w.get('address', ''))
+        exit(0)
+print('NONE')
+" 2>/dev/null)
+
+    if [[ $EXISTING_WALLET == EXISTS:* ]]; then
+        WALLET_ADDRESS=$(echo "$EXISTING_WALLET" | cut -d: -f2)
+        log_success "Using existing node wallet: $WALLET_ADDRESS"
+
+        # Update config with existing wallet address
+        sudo jq --arg wallet "$WALLET_ADDRESS" '.mining.wallet_address = $wallet' "$CONFIG_DIR/config.json" > /tmp/config.json
+        sudo mv /tmp/config.json "$CONFIG_DIR/config.json"
+
+        log_info "Wallet setup complete (reused existing wallet)"
+        return
+    fi
+
+    # Create new wallet if none exists
+    log_info "Creating new wallet: $WALLET_NAME"
+
     WALLET_RESULT=$(python -c "
 from pisecure.core.wallet import SignWallet
 wallet = SignWallet()
@@ -474,10 +543,12 @@ start_services() {
     sudo systemctl enable pisecure.service
     sudo systemctl enable pisecure-mining.service
     sudo systemctl enable pisecure-dashboard.service
+    sudo systemctl enable pisecure-discovery.timer
 
     sudo systemctl start pisecure.service
     sudo systemctl start pisecure-mining.service
     sudo systemctl start pisecure-dashboard.service
+    sudo systemctl start pisecure-discovery.timer
 
     # Wait a moment for services to start
     sleep 3

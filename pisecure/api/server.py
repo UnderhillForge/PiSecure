@@ -22,6 +22,7 @@ Security features:
 import time
 import json
 import hashlib
+import threading
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_limiter import Limiter
@@ -34,7 +35,9 @@ import secrets
 # PiSecure imports
 from ..core.blockchain import SignChain
 from ..core.wallet import SignWallet
+from ..core.nat_traversal import node_discovery
 from ..network.discovery import PeerDiscovery
+from ..core.p2p_sync import P2PSyncManager
 from ..updates.auth import UpdateAuthority
 from .economics import (
     TokenEconomics, DeveloperTrust, TrustType, TrustVisibility,
@@ -94,6 +97,7 @@ class BlockchainAPI:
         self.blockchain = blockchain or SignChain()
         self.wallet = SignWallet()
         self.peer_discovery = PeerDiscovery()
+        self.p2p_sync = P2PSyncManager(self.blockchain, self.peer_discovery)
         self.update_authority = UpdateAuthority()
 
         # Setup routes
@@ -202,6 +206,14 @@ class BlockchainAPI:
 
                 # Add transaction to blockchain
                 tx_hash = self.blockchain.add_transaction(tx_data)
+
+                # Trigger network discovery after transaction submission
+                try:
+                    from pisecure.core.nat_traversal import node_discovery
+                    import threading
+                    threading.Thread(target=self._trigger_discovery_on_transaction, daemon=True).start()
+                except Exception as e:
+                    logger.warning(f"Failed to trigger discovery after transaction: {e}")
 
                 return jsonify({
                     'success': True,
@@ -1034,9 +1046,208 @@ class BlockchainAPI:
             }
             return jsonify(docs)
 
+    def _start_automatic_discovery(self):
+        """Start automatic network discovery on server startup"""
+        logger.info("🔍 Starting automatic network discovery...")
+
+        # Initial discovery on startup
+        try:
+            logger.info("Performing initial network discovery...")
+            discovery_results = node_discovery.make_node_discoverable()
+
+            if discovery_results['success_count'] > 0:
+                logger.info(f"✅ Initial discovery successful: {discovery_results['success_count']} methods")
+                for endpoint in discovery_results['endpoints']:
+                    endpoint_type = endpoint['type']
+                    if endpoint_type == 'stun_direct':
+                        logger.info(f"  🌐 STUN: {endpoint['ip']}:{endpoint['port']}")
+                    elif endpoint_type == 'tor_onion':
+                        logger.info(f"  🧅 Tor: {endpoint['address']}")
+                    elif endpoint_type == 'upnp':
+                        logger.info(f"  📡 UPnP: {endpoint['ip']}:{endpoint['port']}")
+            else:
+                logger.warning("⚠️ Initial discovery found no endpoints - will retry periodically")
+
+        except Exception as e:
+            logger.error(f"❌ Initial discovery failed: {e}")
+
+        # Start background thread for periodic discovery refresh
+        discovery_thread = threading.Thread(
+            target=self._discovery_worker,
+            daemon=True,
+            name="NetworkDiscovery"
+        )
+        discovery_thread.start()
+        logger.info("🔄 Started background discovery refresh thread")
+
+    def _discovery_worker(self):
+        """Background worker for periodic network discovery refresh with event-driven triggers"""
+        import time
+
+        # Discovery intervals (in seconds)
+        INITIAL_INTERVAL = 300  # 5 minutes after startup
+        REGULAR_INTERVAL = 300  # 5 minutes regular refresh
+        EVENT_TRIGGER_INTERVAL = 60  # 1 minute for event-triggered checks
+
+        time.sleep(INITIAL_INTERVAL)  # Wait before first refresh
+
+        last_event_check = time.time()
+
+        while True:
+            try:
+                current_time = time.time()
+
+                # Check for event-driven discovery triggers
+                if current_time - last_event_check >= EVENT_TRIGGER_INTERVAL:
+                    self._check_event_triggers()
+                    last_event_check = current_time
+
+                logger.info("🔄 Refreshing network discovery...")
+
+                # Check if network has changed (basic check)
+                network_changed = self._check_network_changed()
+
+                if network_changed:
+                    logger.info("📡 Network change detected, performing full discovery...")
+                    discovery_results = node_discovery.make_node_discoverable()
+                    if discovery_results['success_count'] > 0:
+                        logger.info(f"✅ Discovery refresh successful: {discovery_results['success_count']} methods")
+                    else:
+                        logger.warning("⚠️ Discovery refresh found no endpoints")
+                else:
+                    # Just update relay list and check endpoints
+                    node_discovery.relay_network.update_relay_list()
+                    current_status = node_discovery.get_discovery_status()
+                    logger.info(f"✅ Discovery status check: {len(current_status['endpoints'])} endpoints available")
+
+            except Exception as e:
+                logger.error(f"❌ Discovery refresh failed: {e}")
+
+            time.sleep(REGULAR_INTERVAL)
+
+    def _check_network_changed(self) -> bool:
+        """Check if network configuration has changed"""
+        try:
+            import socket
+            import subprocess
+
+            # Get current IP (simple check)
+            current_ip = None
+            try:
+                # Try to get external IP via STUN-like method
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.connect(("8.8.8.8", 80))
+                current_ip = sock.getsockname()[0]
+                sock.close()
+            except:
+                pass
+
+            # Check if IP changed from cached discovery
+            cached_status = node_discovery.get_discovery_status()
+            cached_endpoints = cached_status.get('endpoints', [])
+
+            for endpoint in cached_endpoints:
+                if endpoint.get('type') == 'stun_direct' and endpoint.get('ip') != current_ip:
+                    return True
+
+            # Check if network interfaces changed
+            result = subprocess.run(['ip', 'route'], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                current_routes = result.stdout.strip()
+                # In a full implementation, you'd cache and compare routes
+
+            return False  # Assume no change for now
+
+        except Exception as e:
+            logger.debug(f"Network change check failed: {e}")
+            return False
+
+    def _check_event_triggers(self):
+        """Check for event-driven discovery triggers"""
+        try:
+            # Trigger discovery on peer connection events
+            connected_peers = len(self.peer_discovery.get_connected_peers())
+            if connected_peers > 0 and hasattr(self, '_last_peer_count'):
+                if connected_peers != self._last_peer_count:
+                    logger.info(f"🔄 Peer count changed: {self._last_peer_count} → {connected_peers}, triggering discovery")
+                    self._trigger_discovery_on_peer_event()
+            self._last_peer_count = connected_peers
+
+            # Trigger discovery on blockchain events (new blocks, high transaction volume)
+            chain_info = self.blockchain.get_chain_info()
+            pending_txs = chain_info.get('pending_transactions', 0)
+
+            if pending_txs > 10:  # High transaction volume trigger
+                logger.info(f"🔄 High transaction volume ({pending_txs} pending), triggering discovery")
+                self._trigger_discovery_on_high_activity()
+
+            # Trigger discovery on system events (CPU/network changes)
+            import psutil
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            if cpu_percent < 10:  # Low CPU usage = good time for discovery
+                self._trigger_discovery_on_low_load()
+
+        except Exception as e:
+            logger.debug(f"Event trigger check failed: {e}")
+
+    def _trigger_discovery_on_transaction(self):
+        """Trigger network discovery after transaction submission"""
+        try:
+            from pisecure.core.nat_traversal import node_discovery
+            logger.info("🔄 Triggering discovery after transaction submission...")
+
+            # Perform a quick discovery refresh
+            discovery_results = node_discovery.make_node_discoverable()
+            if discovery_results['success_count'] > 0:
+                logger.info(f"✅ Transaction-triggered discovery successful: {discovery_results['success_count']} methods")
+            else:
+                logger.debug("Transaction-triggered discovery found no new endpoints")
+
+        except Exception as e:
+            logger.warning(f"Transaction-triggered discovery failed: {e}")
+
+    def _trigger_discovery_on_peer_event(self):
+        """Trigger discovery when peer connections change"""
+        try:
+            from pisecure.core.nat_traversal import node_discovery
+            logger.info("🔄 Triggering discovery due to peer connection changes...")
+
+            # Quick peer exchange and endpoint refresh
+            discovery_results = node_discovery.make_node_discoverable()
+            if discovery_results['success_count'] > 0:
+                logger.info(f"✅ Peer event discovery successful: {discovery_results['success_count']} methods")
+        except Exception as e:
+            logger.debug(f"Peer event discovery failed: {e}")
+
+    def _trigger_discovery_on_high_activity(self):
+        """Trigger discovery during high network activity"""
+        try:
+            from pisecure.core.nat_traversal import node_discovery
+            logger.info("🔄 Triggering discovery due to high network activity...")
+
+            # More aggressive discovery during high activity
+            discovery_results = node_discovery.make_node_discoverable()
+            if discovery_results['success_count'] > 0:
+                logger.info(f"✅ High activity discovery successful: {discovery_results['success_count']} methods")
+        except Exception as e:
+            logger.debug(f"High activity discovery failed: {e}")
+
+    def _trigger_discovery_on_low_load(self):
+        """Trigger discovery during low system load"""
+        try:
+            from pisecure.core.nat_traversal import node_discovery
+            logger.info("🔄 Triggering discovery during low system load...")
+
+            # Comprehensive discovery when system has spare capacity
+            discovery_results = node_discovery.make_node_discoverable()
+            if discovery_results['success_count'] > 0:
+                logger.info(f"✅ Low load discovery successful: {discovery_results['success_count']} methods")
+        except Exception as e:
+            logger.debug(f"Low load discovery failed: {e}")
+
     def run(self, debug: bool = False):
         """
-        Start the API server.
+        Start the API server with automatic network discovery and P2P sync.
 
         Args:
             debug: Enable debug mode
@@ -1044,12 +1255,24 @@ class BlockchainAPI:
         logger.info(f"🚀 Starting PiSecure API Server on {self.host}:{self.port}")
         logger.info(f"📚 API Documentation: http://{self.host}:{self.port}/api/{self.api_version}/docs")
 
-        self.app.run(
-            host=self.host,
-            port=self.port,
-            debug=debug,
-            threaded=True
-        )
+        # Start automatic network discovery
+        self._start_automatic_discovery()
+
+        # Start P2P blockchain synchronization
+        self.p2p_sync.start_sync()
+        logger.info("🔄 Started P2P blockchain synchronization")
+
+        try:
+            self.app.run(
+                host=self.host,
+                port=self.port,
+                debug=debug,
+                threaded=True
+            )
+        finally:
+            # Clean up on shutdown
+            logger.info("🛑 Shutting down P2P sync...")
+            self.p2p_sync.stop_sync()
 
 
 # Standalone server runner

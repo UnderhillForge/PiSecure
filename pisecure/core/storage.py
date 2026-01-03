@@ -171,13 +171,31 @@ class SQLiteIndex:
                 )
             ''')
 
-            # Create indexes for performance
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_blocks_height ON blocks(height)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_blocks_timestamp ON blocks(timestamp)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_transactions_block ON transactions(block_hash)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_transactions_sender ON transactions(sender_address)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_transactions_recipient ON transactions(recipient_address)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_utxo_address ON utxo(address)')
+            # Create indexes for performance (with error handling)
+            indexes = [
+                'CREATE INDEX IF NOT EXISTS idx_blocks_height ON blocks(height)',
+                'CREATE INDEX IF NOT EXISTS idx_blocks_timestamp ON blocks(timestamp)',
+                'CREATE INDEX IF NOT EXISTS idx_transactions_block ON transactions(block_hash)',
+                'CREATE INDEX IF NOT EXISTS idx_transactions_sender ON transactions(sender_address)',
+                'CREATE INDEX IF NOT EXISTS idx_transactions_recipient ON transactions(recipient_address)',
+                'CREATE INDEX IF NOT EXISTS idx_utxo_address ON utxo(address)',
+                'CREATE INDEX IF NOT EXISTS idx_utxo_tx_hash ON utxo(tx_hash)'
+            ]
+
+            for index_sql in indexes:
+                try:
+                    conn.execute(index_sql)
+                except sqlite3.Error as e:
+                    print(f"Warning: Failed to create index: {e}")
+                    # Try to drop and recreate if index is corrupted
+                    try:
+                        # Extract index name from SQL
+                        index_name = index_sql.split('idx_')[1].split(' ')[0]
+                        conn.execute(f'DROP INDEX IF EXISTS idx_{index_name}')
+                        conn.execute(index_sql)
+                        print(f"Recreated index: idx_{index_name}")
+                    except sqlite3.Error as recreate_e:
+                        print(f"Failed to recreate index idx_{index_name}: {recreate_e}")
 
     def add_block(self, block_data: Dict[str, Any], file_name: str, file_offset: int, size: int):
         """Add block to index"""
@@ -304,6 +322,34 @@ class SQLiteIndex:
                         VALUES (?, ?, ?, ?, ?, ?)
                     ''', (tx_hash, 0, amount, '', block_height, recipient))
 
+    def get_wallet_balance(self, address: str) -> float:
+        """Get wallet balance by summing UTXO for address"""
+        try:
+            with self.conn as conn:
+                result = conn.execute('''
+                    SELECT COALESCE(SUM(amount), 0) as balance
+                    FROM utxo
+                    WHERE address = ?
+                ''', (address,)).fetchone()
+
+                return float(result[0]) if result else 0.0
+        except sqlite3.Error as e:
+            print(f"SQLite error getting wallet balance for {address}: {e}")
+            # Try to reinitialize the database if there are index issues
+            try:
+                self._init_db()
+                # Retry the query
+                with self.conn as conn:
+                    result = conn.execute('''
+                        SELECT COALESCE(SUM(amount), 0) as balance
+                        FROM utxo
+                        WHERE address = ?
+                    ''', (address,)).fetchone()
+                    return float(result[0]) if result else 0.0
+            except sqlite3.Error as retry_e:
+                print(f"Failed to retry wallet balance query: {retry_e}")
+                return 0.0
+
 
 class MemoryCache:
     """In-memory cache for frequently accessed data"""
@@ -335,11 +381,32 @@ class MemoryCache:
 class HybridBlockchainStorage:
     """Main hybrid storage coordinator"""
 
-    def __init__(self, data_dir: str = "/var/lib/pisecure"):
-        self.data_dir = Path(data_dir)
+    def __init__(self, data_dir: str = None):
+        # Determine data directory with fallback for permission issues
+        if data_dir is None:
+            # Try system directory first, fall back to user directory
+            system_dir = Path("/var/lib/pisecure")
+            user_dir = Path.home() / ".pisecure"
+
+            # Try system directory, fall back to user directory if no permission
+            try:
+                system_dir.mkdir(parents=True, exist_ok=True)
+                # Test write permission by creating a test file
+                test_file = system_dir / ".write_test"
+                test_file.touch()
+                test_file.unlink()
+                self.data_dir = system_dir
+            except (OSError, PermissionError):
+                # Fall back to user directory
+                user_dir.mkdir(parents=True, exist_ok=True)
+                self.data_dir = user_dir
+                print(f"⚠️ Using user directory for storage: {self.data_dir}")
+        else:
+            self.data_dir = Path(data_dir)
+            self.data_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize storage components
-        self.block_storage = BlockFileStorage(data_dir)
+        self.block_storage = BlockFileStorage(str(self.data_dir))
         self.index_db = SQLiteIndex(str(self.data_dir / "index.db"))
         self.cache = MemoryCache(max_size=500)
 
@@ -442,6 +509,10 @@ class HybridBlockchainStorage:
     def get_wallet_balance(self, address: str) -> float:
         """Get wallet balance"""
         return self.index_db.get_wallet_balance(address)
+
+    def get_wallet_transactions(self, wallet_address: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get wallet transactions"""
+        return self.index_db.get_wallet_transactions(wallet_address, limit)
 
     def close(self):
         """Close all storage connections"""
