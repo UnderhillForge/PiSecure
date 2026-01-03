@@ -45,8 +45,108 @@ class SignBlock:
 
         if self.algorithm == 'sha3':
             return hashlib.sha3_256(block_string.encode()).hexdigest()
+        elif self.algorithm == 'pi-optimized':
+            return self._calculate_pi_optimized_hash(block_string)
         else:  # Default to sha256
             return hashlib.sha256(block_string.encode()).hexdigest()
+
+    def _calculate_pi_optimized_hash(self, block_string: str) -> str:
+        """Calculate Pi-optimized hash that benefits Raspberry Pi hardware"""
+        try:
+            # Get Raspberry Pi hardware information
+            pi_info = self._get_pi_hardware_info()
+
+            # Combine block data with Pi-specific hardware entropy
+            enhanced_data = f"{block_string}|{pi_info['serial']}|{pi_info['temperature']}|{pi_info['uptime']}"
+
+            # Use multiple hashing rounds optimized for ARM
+            hash1 = hashlib.sha256(enhanced_data.encode()).digest()
+            hash2 = hashlib.sha3_256(hash1).digest()
+            hash3 = hashlib.blake2b(hash2, digest_size=32).digest()
+
+            # Final ARM-optimized mixing (simulated NEON operations)
+            final_hash = self._arm_optimized_mix(hash3, pi_info)
+
+            return final_hash.hex()
+
+        except Exception as e:
+            # Fallback to SHA256 if Pi-specific features fail
+            print(f"⚠️ Pi-optimized hash failed ({e}), falling back to SHA256")
+            return hashlib.sha256(block_string.encode()).hexdigest()
+
+    def _get_pi_hardware_info(self) -> Dict[str, str]:
+        """Get Raspberry Pi hardware information for mining"""
+        try:
+            # CPU serial number (unique per Pi)
+            with open('/proc/cpuinfo', 'r') as f:
+                cpuinfo = f.read()
+                serial_match = None
+                for line in cpuinfo.split('\n'):
+                    if line.startswith('Serial'):
+                        serial_match = line.split(':')[1].strip()
+                        break
+                serial = serial_match or 'unknown'
+
+            # CPU temperature
+            temperature = 'unknown'
+            try:
+                with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+                    temp_milli = int(f.read().strip())
+                    temperature = str(temp_milli // 1000)  # Convert to Celsius
+            except:
+                pass
+
+            # System uptime (changes constantly)
+            with open('/proc/uptime', 'r') as f:
+                uptime_seconds = f.read().split()[0]
+                uptime = uptime_seconds.split('.')[0]  # Whole seconds only
+
+            return {
+                'serial': serial,
+                'temperature': temperature,
+                'uptime': uptime
+            }
+
+        except Exception as e:
+            # Return safe defaults if hardware reading fails
+            return {
+                'serial': 'fallback',
+                'temperature': '20',
+                'uptime': str(int(time.time()))
+            }
+
+    def _arm_optimized_mix(self, data: bytes, pi_info: Dict[str, str]) -> bytes:
+        """ARM-optimized mixing function (simulates NEON operations)"""
+        # Convert Pi hardware data to numerical values for mixing
+        try:
+            serial_num = int(pi_info['serial'][-8:], 16)  # Last 8 chars as hex
+            temp_num = int(pi_info['temperature']) if pi_info['temperature'].isdigit() else 20
+            uptime_num = int(pi_info['uptime']) % 1000000  # Last 6 digits
+
+            # ARM-style mixing (simulated - would use actual NEON in C extension)
+            mixed = bytearray(data)
+
+            # XOR with hardware entropy
+            for i in range(len(mixed)):
+                hw_byte = (serial_num >> (i % 32)) & 0xFF
+                hw_byte ^= (temp_num + uptime_num) & 0xFF
+                mixed[i] ^= hw_byte
+
+            # Additional mixing rounds
+            for round_num in range(3):  # 3 mixing rounds
+                for i in range(len(mixed) - 4):
+                    # Simulate ARM vector operations
+                    val = int.from_bytes(mixed[i:i+4], 'little')
+                    val = ((val << 13) | (val >> 19))  # Rotate
+                    val ^= serial_num  # XOR with hardware
+                    val = (val * 0x9E3779B9) & 0xFFFFFFFF  # Multiply
+                    mixed[i:i+4] = val.to_bytes(4, 'little')
+
+            return bytes(mixed)
+
+        except Exception:
+            # Return original data if mixing fails
+            return data
 
     def mine_block(self, difficulty: int = 4, verbose: bool = False) -> bool:
         """Mine the block with proof-of-work"""
