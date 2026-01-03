@@ -604,29 +604,79 @@ class MiningConsole:
                     # Update dashboard
                     live.update(self.create_dashboard())
 
-                    # Check for keyboard input (non-blocking)
-                    import select
-                    import sys
+                    # Check for keyboard input (non-blocking with multiple methods)
+                    key_pressed = None
 
-                    if select.select([sys.stdin], [], [], 0.1)[0]:
-                        key = sys.stdin.read(1).lower()
+                    try:
+                        # Method 1: select-based input (works in some terminals)
+                        import select
+                        import sys
+                        import tty
+                        import termios
 
-                        if key == 'q':
+                        # Save original terminal settings
+                        old_settings = termios.tcgetattr(sys.stdin)
+
+                        try:
+                            # Set terminal to raw mode for single character input
+                            tty.setraw(sys.stdin.fileno())
+
+                            # Check if input is available (non-blocking)
+                            if select.select([sys.stdin], [], [], 0.1)[0]:
+                                key = sys.stdin.read(1).lower()
+                                key_pressed = key
+                                # Debug: uncomment to see key detection
+                                # console.print(f"[dim]DEBUG: Key pressed: '{key}'[/dim]")
+                        finally:
+                            # Restore original terminal settings
+                            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+
+                    except (ImportError, OSError):
+                        # Method 2: Fallback for environments where raw mode doesn't work
+                        try:
+                            import keyboard
+                            # Check for key presses using keyboard library
+                            for key in ['s', 'x', 'c', 'w', 'r', 'h', 'q']:
+                                if keyboard.is_pressed(key):
+                                    key_pressed = key
+                                    break
+                        except ImportError:
+                            # Method 3: Simple input buffer check (last resort)
+                            try:
+                                import sys
+                                # Check if there's data in stdin buffer
+                                import os
+                                if hasattr(os, 'read') and os.read(sys.stdin.fileno(), 1):
+                                    # Reset file position
+                                    os.lseek(sys.stdin.fileno(), -1, os.SEEK_CUR)
+                                    key = sys.stdin.read(1).lower()
+                                    key_pressed = key
+                            except:
+                                pass
+
+                    # Process the detected key
+                    if key_pressed:
+                        if key_pressed == 'q':
                             if self.mining_active:
                                 self.stop_mining()
                             console.print("[cyan]👋 Goodbye![/cyan]")
                             break
-                        elif key == 's':
+                        elif key_pressed == 's':
+                            console.print("[dim]DEBUG: Starting mining...[/dim]")
                             self.start_mining()
-                        elif key == 'x':
+                        elif key_pressed == 'x':
+                            console.print("[dim]DEBUG: Stopping mining...[/dim]")
                             self.stop_mining()
-                        elif key == 'c':
+                        elif key_pressed == 'c':
+                            console.print("[dim]DEBUG: Creating test transaction...[/dim]")
                             self.create_test_transaction()
-                        elif key == 'w':
+                        elif key_pressed == 'w':
+                            console.print("[dim]DEBUG: Showing wallet info...[/dim]")
                             self.show_wallet_info()
-                        elif key == 'r':
+                        elif key_pressed == 'r':
+                            console.print("[dim]DEBUG: Toggling relay...[/dim]")
                             self.toggle_relay_node()
-                        elif key == 'h':
+                        elif key_pressed == 'h':
                             console.print("\n[bold cyan]Help - Mining Console Controls:[/bold cyan]")
                             console.print("[green]S[/green] - Start Mining")
                             console.print("[red]X[/red] - Stop Mining")
