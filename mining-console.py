@@ -22,6 +22,8 @@ import json
 import asyncio
 import threading
 import multiprocessing
+import logging
+import argparse
 from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
@@ -1006,6 +1008,9 @@ class MiningLogic:
         self._send_activity_message(f"   Target: Block #{len(self.blockchain.chain)}")
         self._send_activity_message(f"   Reward wallet: {self.miner_wallet[:24] if self.miner_wallet else 'None'}")
 
+        # Log mining start
+        logging.info(f"Mining session started - Target: Block #{len(self.blockchain.chain)}, Wallet: {self.miner_wallet[:16] if self.miner_wallet else 'None'}")
+
         # Start mining thread
         self.mining_thread = threading.Thread(target=self._mining_worker, daemon=True)
         self.mining_thread.start()
@@ -1156,6 +1161,10 @@ class MiningLogic:
                         import traceback
                         traceback.print_exc()  # Print full stack trace
                         print("[MINING RECOVERY] Waiting 5s before retry")
+
+                        # Log mining error
+                        logging.error(f"Mining error in block #{block_index}: {e}")
+
                         time.sleep(5)  # Wait before retrying on error
                         continue
 
@@ -1187,6 +1196,9 @@ class MiningLogic:
                     self._send_activity_message(f"   Time: {mining_time:.2f}s")
                     self._send_activity_message(f"   Hashrate: {self.stats['hashrate']:.1f} H/s")
                     self._send_activity_message(f"   Reward: {reward_amount:.2f} tokens")
+
+                    # Log block discovery
+                    logging.info(f"BLOCK FOUND - Block #{block.index}, Nonce: {block.nonce}, Time: {mining_time:.2f}s, Hashrate: {self.stats['hashrate']:.1f} H/s, Reward: {reward_amount:.2f} tokens")
 
                     self.stats['blocks_mined'] += 1
                     self.stats['session_blocks'] += 1
@@ -1220,6 +1232,9 @@ class MiningLogic:
                 if not self.stop_mining.is_set():  # Don't log errors if we're stopping
                     self._send_activity_message(f"❌ Mining error: {e}")
                 time.sleep(2)
+
+        # Log mining session end
+        logging.info(f"Mining session ended - Total blocks: {self.stats['blocks_mined']}, Session rewards: {self.stats['session_rewards']:.2f} tokens")
 
         self._send_activity_message("🏁 Mining session ended")
 
@@ -1522,7 +1537,40 @@ class MiningConsoleApp(App):
 
 
 def main():
-    """Main entry point"""
+    """Main entry point with logging support"""
+    parser = argparse.ArgumentParser(description='PiSecure Mining Console')
+    parser.add_argument('--log', type=str, help='Log file path for mining activity')
+    args = parser.parse_args()
+
+    # Configure logging if --log option is provided
+    if args.log:
+        try:
+            # Create log directory if it doesn't exist
+            log_path = Path(args.log)
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Configure logging
+            logging.basicConfig(
+                filename=str(log_path),
+                level=logging.INFO,
+                format='%(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+
+            # Add console handler as well
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.INFO)
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+            console_handler.setFormatter(formatter)
+            logging.getLogger().addHandler(console_handler)
+
+            print(f"📝 Logging enabled: {args.log}")
+
+        except Exception as e:
+            print(f"⚠️ Failed to configure logging: {e}")
+            print("Continuing without logging..."
+
+    # Start the mining console
     app = MiningConsoleApp()
     app.run()
 
