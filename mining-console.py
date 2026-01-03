@@ -204,7 +204,6 @@ class MiningApp(App):
     .metric-value {
         color: $accent;
         text-style: bold;
-        font-size: 120%;
     }
 
     .metric-label {
