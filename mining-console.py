@@ -4,7 +4,7 @@ PiSecure Mining Console
 =======================
 
 Interactive mining dashboard with real-time stats, controls, and monitoring.
-Provides a rich terminal interface for mining operations.
+Provides a Textual-based terminal user interface for mining operations.
 
 Features:
 - Real-time mining statistics
@@ -21,16 +21,23 @@ import time
 import json
 import threading
 import psutil
+import sys
+import os
 from pathlib import Path
-from rich.console import Console
-from rich.live import Live
-from rich.panel import Panel
+from textual.app import App, ComposeResult
+from textual.containers import Container, Horizontal, Vertical
+from textual.widgets import Header, Footer, Static, DataTable, Log, Button, Label
+import logging
+from datetime import datetime
+from textual.binding import Binding
+from textual import events
+from textual.timer import Timer
+from textual.css.query import NoMatches
 from rich.table import Table
+from rich.panel import Panel
 from rich.columns import Columns
 from rich.text import Text
 from rich.align import Align
-from rich.layout import Layout
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 
 try:
     # Try relative imports first (for package installation)
@@ -43,17 +50,117 @@ except ImportError:
     from core.hardware import HardwareVerifier
     from core.nat_traversal import node_discovery
 
-console = Console()
+
+class TextualLogHandler(logging.Handler):
+    """Custom logging handler that writes to Textual Log widget"""
+
+    def __init__(self, log_widget):
+        super().__init__()
+        self.log_widget = log_widget
+        self.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+    def emit(self, record):
+        """Emit a log record to the Textual log widget"""
+        try:
+            msg = self.format(record)
+            # Add the message to the log widget
+            self.log_widget.write(f"[{record.levelname}] {msg}")
+        except Exception:
+            self.handleError(record)
 
 
-class MiningConsole:
-    """Interactive mining console with rich terminal interface"""
+class MiningApp(App):
+    """Textual-based mining console application"""
+
+    CSS = """
+    Screen {
+        background: $surface;
+    }
+
+    Header {
+        background: $primary;
+        color: $text;
+    }
+
+    Footer {
+        background: $primary;
+        color: $text;
+    }
+
+    #top-section {
+        height: 60%;
+    }
+
+    #stats {
+        layout: grid;
+        grid-size: 2 2;
+        grid-gutter: 1;
+        height: 100%;
+    }
+
+    #bottom-section {
+        height: 40%;
+        layout: horizontal;
+    }
+
+    #left-panel {
+        width: 50%;
+        margin-right: 1;
+    }
+
+    #mining-log {
+        height: 100%;
+        border: solid $primary;
+    }
+
+    #right-panel {
+        width: 50%;
+        layout: vertical;
+    }
+
+    #blocks {
+        height: 60%;
+        margin-bottom: 1;
+    }
+
+    #controls {
+        height: 40%;
+    }
+
+    .panel {
+        border: solid $primary;
+        padding: 1;
+    }
+
+    Button {
+        margin: 0 1;
+    }
+
+    DataTable {
+        height: 100%;
+    }
+
+    Log {
+        background: $surface;
+        color: $text;
+    }
+    """
+
+    BINDINGS = [
+        Binding("s", "start_mining", "Start Mining"),
+        Binding("x", "stop_mining", "Stop Mining"),
+        Binding("c", "create_test_tx", "Create Test TX"),
+        Binding("w", "show_wallet", "Show Wallet"),
+        Binding("n", "show_network", "Show Network"),
+        Binding("r", "toggle_relay", "Toggle Relay"),
+        Binding("h", "show_help", "Show Help"),
+        Binding("q", "quit", "Quit"),
+    ]
 
     def __init__(self):
+        super().__init__()
         self.blockchain = SignChain()
         self.hardware = HardwareVerifier()
-
-        # Load miner wallet from config
         self.miner_wallet = self._load_miner_wallet()
 
         # Mining state
@@ -74,16 +181,14 @@ class MiningConsole:
             'session_blocks': 0
         }
 
-        # Progress tracking
-        self.progress = Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            TimeElapsedColumn(),
-        )
+        # Setup logging
+        self._setup_logging()
+        self.logger = logging.getLogger('mining_console')
 
-        self.mining_task = None
+    def _setup_logging(self):
+        """Setup logging to write to the Textual Log widget"""
+        # This will be called after UI is ready in on_mount
+        pass
 
     def _load_miner_wallet(self):
         """Load miner wallet address from config"""
@@ -95,159 +200,120 @@ class MiningConsole:
         except (FileNotFoundError, json.JSONDecodeError, KeyError):
             return None
 
-    def start_mining(self):
-        """Start the mining process"""
-        if self.mining_active:
-            console.print("[yellow]⚠️ Mining is already active[/yellow]")
-            return
+    def compose(self) -> ComposeResult:
+        """Create the UI layout"""
+        yield Header()
+        yield Container(
+            Vertical(
+                Container(
+                    Horizontal(
+                        Static(self._create_system_stats(), classes="panel", id="system"),
+                        Static(self._create_mining_stats(), classes="panel", id="mining"),
+                        Static(self._create_blockchain_stats(), classes="panel", id="blockchain"),
+                        Static(self._create_wallet_stats(), classes="panel", id="wallet"),
+                        id="stats"
+                    ),
+                    id="top-section"
+                ),
+                Container(
+                    Horizontal(
+                        Container(
+                            Log(id="mining-log"),
+                            id="left-panel"
+                        ),
+                        Container(
+                            Vertical(
+                                Static(self._create_blocks_table(), classes="panel", id="blocks"),
+                                Static(self._create_controls(), classes="panel", id="controls"),
+                                id="right-panel"
+                            ),
+                            id="right-panel"
+                        ),
+                        id="bottom-section"
+                    ),
+                    id="bottom-section"
+                ),
+                id="main"
+            )
+        )
+        yield Footer()
 
-        # Hardware verification
-        result = self.hardware.verify_mining_eligibility()
-        if not result['eligible']:
-            console.print(f"[red]❌ Hardware verification failed: {result.get('error', 'Unknown error')}[/red]")
-            return
-
-        console.print("[green]⛏️ Starting mining session...[/green]")
-        if self.miner_wallet:
-            console.print(f"[dim]Rewards will go to: {self.miner_wallet[:24]}...[/dim]")
-        else:
-            console.print("[yellow]⚠️ No miner wallet configured - rewards will not be distributed[/yellow]")
-
-        self.mining_active = True
-        self.stop_event.clear()
-        self.stats['start_time'] = time.time()
-        self.stats['session_blocks'] = 0
-        self.stats['session_rewards'] = 0.0
-
-        # Start mining thread
-        self.mining_thread = threading.Thread(target=self._mining_worker, daemon=True)
-        self.mining_thread.start()
-
-        # Start progress display
-        self.mining_task = self.progress.add_task("Mining blocks...", total=None)
-
-    def stop_mining(self):
-        """Stop the mining process"""
-        if not self.mining_active:
-            console.print("[yellow]⚠️ Mining is not active[/yellow]")
-            return
-
-        console.print("[yellow]⏹️ Stopping mining session...[/yellow]")
-        self.stop_event.set()
-        self.mining_active = False
-
-        if self.mining_thread and self.mining_thread.is_alive():
-            self.mining_thread.join(timeout=5)
-
-        session_time = time.time() - self.stats['start_time']
-        console.print(f"[green]✅ Mining stopped[/green]")
-        console.print(f"[dim]Session: {self.stats['session_blocks']} blocks, {self.stats['session_rewards']:.2f} tokens in {session_time:.0f}s[/dim]")
-
-    def _mining_worker(self):
-        """Background mining worker"""
-        while not self.stop_event.is_set():
-            try:
-                # Update stats
-                self.stats['uptime'] = time.time() - self.stats['start_time']
-                self.stats['pending_txs'] = len(self.blockchain.pending_transactions)
-
-                # Mine a block
-                block = self.blockchain.mine_pending_transactions(self.miner_wallet, verbose=False)
-
-                if block:
-                    self.stats['blocks_mined'] += 1
-                    self.stats['session_blocks'] += 1
-                    self.stats['last_block_time'] = time.time()
-
-                    # Calculate rough hashrate
-                    if hasattr(block, 'nonce') and block.nonce > 0:
-                        # Very rough approximation
-                        self.stats['hashrate'] = max(0.1, block.nonce / max(1, time.time() - self.stats.get('last_block_time', time.time())))
-
-                    # Check for mining rewards
-                    reward_txs = [tx for tx in block.transactions if tx.get('type') == 'mining_reward']
-                    if reward_txs:
-                        reward_amount = reward_txs[0].get('amount', 0)
-                        self.stats['total_rewards'] += reward_amount
-                        self.stats['session_rewards'] += reward_amount
-
-                    # Update progress
-                    if self.mining_task:
-                        self.progress.update(self.mining_task, advance=1,
-                                           description=f"Mined block #{block.index}")
-
-                    console.print(f"[green]✅ Block #{block.index} mined! Reward: {reward_amount if reward_txs else 0:.1f} tokens[/green]")
-                else:
-                    time.sleep(2)  # Wait before trying again
-
-            except Exception as e:
-                console.print(f"[red]Mining error: {e}[/red]")
-                time.sleep(5)
-
-    def create_dashboard(self):
-        """Create the dashboard display"""
-        # System stats
-        system_table = Table(title="🖥️ System Status", box=None, show_header=False)
-        system_table.add_column("Metric", style="cyan", no_wrap=True)
-        system_table.add_column("Value", style="magenta")
-
-        # CPU and Memory
+    def _create_system_stats(self):
+        """Create system statistics panel"""
         cpu_percent = psutil.cpu_percent(interval=1)
         memory = psutil.virtual_memory()
         disk = psutil.disk_usage('/')
 
-        system_table.add_row("CPU Usage", f"{cpu_percent:.1f}%")
-        system_table.add_row("Memory", f"{memory.percent:.1f}% ({memory.used/1024/1024/1024:.1f}GB)")
-        system_table.add_row("Disk Usage", f"{disk.percent:.1f}% ({disk.used/1024/1024/1024:.1f}GB)")
-        system_table.add_row("Temperature", f"{self._get_temperature():.1f}°C")
+        table = Table(title="🖥️ System Status")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="magenta")
 
-        # Mining stats
-        mining_table = Table(title="⛏️ Mining Status", box=None, show_header=False)
-        mining_table.add_column("Metric", style="cyan", no_wrap=True)
-        mining_table.add_column("Value", style="green" if self.mining_active else "red")
+        table.add_row("CPU Usage", f"{cpu_percent:.1f}%")
+        table.add_row("Memory", f"{memory.percent:.1f}% ({memory.used/1024/1024/1024:.1f}GB)")
+        table.add_row("Disk Usage", f"{disk.percent:.1f}% ({disk.used/1024/1024/1024:.1f}GB)")
+        table.add_row("Temperature", f"{self._get_temperature():.1f}°C")
 
+        return Panel(table, title="System Status")
+
+    def _create_mining_stats(self):
+        """Create mining statistics panel"""
         status_icon = "🟢" if self.mining_active else "🔴"
-        mining_table.add_row("Status", f"{status_icon} {'Active' if self.mining_active else 'Stopped'}")
-        mining_table.add_row("Total Blocks", str(self.stats['blocks_mined']))
-        mining_table.add_row("Session Blocks", str(self.stats['session_blocks']))
-        mining_table.add_row("Total Rewards", f"{self.stats['total_rewards']:.2f} tokens")
-        mining_table.add_row("Session Rewards", f"{self.stats['session_rewards']:.2f} tokens")
-        mining_table.add_row("Hashrate", f"{self.stats['hashrate']:.1f} KH/s")
-        mining_table.add_row("Uptime", f"{self.stats['uptime']:.0f}s")
 
-        # Blockchain stats
+        table = Table(title="⛏️ Mining Status")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green" if self.mining_active else "red")
+
+        table.add_row("Status", f"{status_icon} {'Active' if self.mining_active else 'Stopped'}")
+        table.add_row("Total Blocks", str(self.stats['blocks_mined']))
+        table.add_row("Session Blocks", str(self.stats['session_blocks']))
+        table.add_row("Total Rewards", f"{self.stats['total_rewards']:.2f} tokens")
+        table.add_row("Session Rewards", f"{self.stats['session_rewards']:.2f} tokens")
+        table.add_row("Hashrate", f"{self.stats['hashrate']:.1f} KH/s")
+        table.add_row("Uptime", f"{self.stats['uptime']:.0f}s")
+
+        return Panel(table, title="Mining Status")
+
+    def _create_blockchain_stats(self):
+        """Create blockchain statistics panel"""
         chain_info = self.blockchain.get_chain_info()
-        blockchain_table = Table(title="⛓️ Blockchain Status", box=None, show_header=False)
-        blockchain_table.add_column("Metric", style="cyan", no_wrap=True)
-        blockchain_table.add_column("Value", style="blue")
 
-        blockchain_table.add_row("Blocks", str(chain_info['blocks']))
-        blockchain_table.add_row("Pending TX", str(self.stats['pending_txs']))
-        blockchain_table.add_row("Difficulty", str(chain_info['difficulty']))
+        table = Table(title="⛓️ Blockchain Status")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="blue")
+
+        table.add_row("Blocks", str(chain_info['blocks']))
+        table.add_row("Pending TX", str(self.stats['pending_txs']))
+        table.add_row("Difficulty", str(chain_info['difficulty']))
 
         health = chain_info['network_health']
-        blockchain_table.add_row("Participation", f"{health['participation']:.1%}")
-        blockchain_table.add_row("Avg Block Time", f"{health['avg_block_time']:.1f}s")
+        table.add_row("Participation", f"{health['participation']:.1%}")
+        table.add_row("Avg Block Time", f"{health['avg_block_time']:.1f}s")
 
-        # Wallet info
-        wallet_table = Table(title="🏦 Mining Wallet", box=None, show_header=False)
-        wallet_table.add_column("Property", style="cyan", no_wrap=True)
-        wallet_table.add_column("Value", style="yellow")
+        return Panel(table, title="Blockchain Status")
+
+    def _create_wallet_stats(self):
+        """Create wallet statistics panel"""
+        table = Table(title="🏦 Mining Wallet")
+        table.add_column("Property", style="cyan")
+        table.add_column("Value", style="yellow")
 
         if self.miner_wallet:
             wallet_balance = self.blockchain.get_wallet_balance(self.miner_wallet)
-            wallet_table.add_row("Address", self.miner_wallet[:32] + "...")
-            wallet_table.add_row("Balance", f"{wallet_balance:.2f} tokens")
-            wallet_table.add_row("Session Earnings", f"+{self.stats['session_rewards']:.2f}")
+            table.add_row("Address", self.miner_wallet[:32] + "...")
+            table.add_row("Balance", f"{wallet_balance:.2f} tokens")
+            table.add_row("Session Earnings", f"+{self.stats['session_rewards']:.2f}")
         else:
-            wallet_table.add_row("Status", "⚠️ Not configured")
+            table.add_row("Status", "⚠️ Not configured")
 
-        # Recent blocks
-        recent_blocks_table = Table(title="📦 Recent Blocks", box=None)
-        recent_blocks_table.add_column("Block", style="cyan", justify="right")
-        recent_blocks_table.add_column("TX Count", style="magenta", justify="right")
-        recent_blocks_table.add_column("Reward", style="green", justify="right")
-        recent_blocks_table.add_column("Time", style="blue")
+        return Panel(table, title="Wallet Info")
+
+    def _create_blocks_table(self):
+        """Create recent blocks table"""
+        table = Table(title="📦 Recent Blocks")
+        table.add_column("Block", style="cyan", justify="right")
+        table.add_column("TX Count", style="magenta", justify="right")
+        table.add_column("Reward", style="green", justify="right")
+        table.add_column("Time", style="blue")
 
         recent_blocks = self.blockchain.chain[-8:] if len(self.blockchain.chain) > 8 else self.blockchain.chain
         for block in reversed(recent_blocks):
@@ -256,89 +322,24 @@ class MiningConsole:
             reward_amount = reward_txs[0].get('amount', 0) if reward_txs else 0
 
             block_time = time.ctime(block.timestamp)
-            recent_blocks_table.add_row(
+            table.add_row(
                 str(block.index),
                 str(tx_count),
                 f"{reward_amount:.1f}",
                 block_time
             )
 
-        # Layout
-        left_panel = Panel(
-            Columns([system_table, mining_table], equal=True, expand=True),
-            title="📊 Live Stats"
-        )
+        return Panel(table, title="Mining History")
 
-        right_panel = Panel(
-            Columns([blockchain_table, wallet_table], equal=True, expand=True),
-            title="⛓️ Network & Wallet"
-        )
-
-        blocks_panel = Panel(recent_blocks_table, title="📦 Mining History")
-
-        # Network info
-        network_table = Table(title="🌐 Network Status", box=None, show_header=False)
-        network_table.add_column("Property", style="cyan", no_wrap=True)
-        network_table.add_column("Value", style="magenta")
-
-        try:
-            discovery_status = node_discovery.get_discovery_status()
-            network_table.add_row("Node ID", discovery_status.get('node_id', 'unknown')[:16] + "...")
-            network_table.add_row("Active Endpoints", str(len(discovery_status.get('endpoints', []))))
-
-            # Show STUN/TOR addresses
-            endpoints = discovery_status.get('endpoints', [])
-            if endpoints:
-                for i, endpoint in enumerate(endpoints[:2]):  # Show up to 2 endpoints
-                    endpoint_type = endpoint.get('type', 'unknown')
-                    if endpoint_type == 'stun_direct':
-                        network_table.add_row(f"STUN Address {i+1}", f"{endpoint.get('ip', 'unknown')}:{endpoint.get('port', 'unknown')}")
-                    elif endpoint_type == 'tor_onion':
-                        network_table.add_row(f"Tor Onion {i+1}", endpoint.get('address', 'unknown')[:24] + "...")
-                    elif endpoint_type == 'upnp':
-                        network_table.add_row(f"UPnP Address {i+1}", f"{endpoint.get('ip', 'unknown')}:{endpoint.get('port', 'unknown')}")
-
-            # Relay status
-            is_relay = self._check_if_relay_node()
-            network_table.add_row("Relay Status", "✅ Active" if is_relay else "❌ Not participating")
-            network_table.add_row("Community Relays", str(discovery_status.get('relay_count', 0)))
-
-        except Exception as e:
-            network_table.add_row("Network Status", f"❌ Error: {str(e)[:20]}...")
-
-        # Instructions
+    def _create_controls(self):
+        """Create control buttons panel"""
         controls = """
 [bold cyan]Mining Console Controls:[/bold cyan]
 [green]S[/green] - Start Mining    [red]X[/red] - Stop Mining    [yellow]C[/yellow] - Test TX
 [blue]W[/blue] - Wallet Info    [magenta]N[/magenta] - Network Info    [cyan]R[/cyan] - Toggle Relay
-[dim]Q[/dim] - Quit Console    [dim]H[/dim] - Show This Help
+[dim]Q[/dim] - Quit Console    [dim]H[/dim] - Show Help
         """
-
-        instructions_panel = Panel(
-            Align.center(Text.from_markup(controls)),
-            title="🎮 Controls",
-            border_style="blue"
-        )
-
-        # Main layout
-        layout = Layout()
-        layout.split(
-            Layout(name="upper", size=12),
-            Layout(name="middle"),
-            Layout(name="lower", size=8)
-        )
-
-        layout["upper"].split_row(
-            Layout(name="left", ratio=1),
-            Layout(name="right", ratio=1)
-        )
-
-        layout["upper"]["left"].update(left_panel)
-        layout["upper"]["right"].update(right_panel)
-        layout["middle"].update(blocks_panel)
-        layout["lower"].update(instructions_panel)
-
-        return layout
+        return Panel(controls, title="Controls")
 
     def _get_temperature(self):
         """Get system temperature"""
@@ -352,106 +353,285 @@ class MiningConsole:
             pass
         return 0.0
 
-    def create_test_transaction(self):
-        """Create a test transaction for mining"""
+    def on_mount(self):
+        """Called when the app is mounted"""
+        self.title = "🔐 PiSecure Mining Console"
+        self.sub_title = "Real-time mining dashboard"
+
+        # Setup logging now that UI is ready
+        log_widget = self.query_one("#mining-log", Log)
+        handler = TextualLogHandler(log_widget)
+        handler.setLevel(logging.DEBUG)
+
+        # Configure logger
+        self.logger.setLevel(logging.DEBUG)
+        self.logger.addHandler(handler)
+        self.logger.propagate = False
+
+        # Log startup information
+        self.logger.info("PiSecure Mining Console started")
+        self.logger.info(f"Blockchain height: {len(self.blockchain.chain)}")
+        self.logger.info(f"Miner wallet: {self.miner_wallet or 'Not configured'}")
+
+        # Start update timer
+        self.update_timer = self.set_interval(2.0, self.update_stats)
+
+        # Check hardware verification
+        self._verify_hardware()
+
+    def _verify_hardware(self):
+        """Verify hardware requirements"""
+        result = self.hardware.verify_mining_eligibility()
+        if not result['eligible']:
+            self.notify(
+                f"❌ Hardware verification failed: {result.get('error', 'Unknown error')}",
+                severity="error",
+                timeout=10
+            )
+
+    def update_stats(self):
+        """Update statistics periodically"""
+        self.stats['uptime'] = time.time() - self.stats['start_time']
+        self.stats['pending_txs'] = len(self.blockchain.pending_transactions)
+
+        # Update the UI
+        try:
+            self.query_one("#system").update(self._create_system_stats())
+            self.query_one("#mining").update(self._create_mining_stats())
+            self.query_one("#blockchain").update(self._create_blockchain_stats())
+            self.query_one("#wallet").update(self._create_wallet_stats())
+            self.query_one("#blocks").update(self._create_blocks_table())
+        except NoMatches:
+            pass  # UI not ready yet
+
+    def action_start_mining(self):
+        """Start mining action"""
+        self.logger.info("User requested to start mining")
+
+        if self.mining_active:
+            self.logger.warning("Mining start requested but mining is already active")
+            self.notify("Mining is already active", severity="warning")
+            return
+
+        # Hardware verification
+        self.logger.info("Performing hardware verification before starting mining")
+        result = self.hardware.verify_mining_eligibility()
+        if not result['eligible']:
+            self.logger.error(f"Hardware verification failed: {result.get('error', 'Unknown error')}")
+            self.notify(f"Hardware verification failed: {result.get('error', 'Unknown error')}", severity="error")
+            return
+
+        self.logger.info("Hardware verification passed, starting mining session")
+        self.mining_active = True
+        self.stop_event.clear()
+        self.stats['start_time'] = time.time()
+        self.stats['session_blocks'] = 0
+        self.stats['session_rewards'] = 0.0
+
+        # Start mining thread
+        self.logger.info("Starting mining worker thread")
+        self.mining_thread = threading.Thread(target=self._mining_worker, daemon=True)
+        self.mining_thread.start()
+
+        self.notify("⛏️ Mining session started", severity="information")
+
+    def action_stop_mining(self):
+        """Stop mining action"""
+        self.logger.info("User requested to stop mining")
+
+        if not self.mining_active:
+            self.logger.warning("Mining stop requested but mining is not active")
+            self.notify("Mining is not active", severity="warning")
+            return
+
+        self.logger.info("Stopping mining session")
+        self.mining_active = False
+        self.stop_event.set()
+
+        if self.mining_thread and self.mining_thread.is_alive():
+            self.logger.debug("Waiting for mining thread to stop")
+            self.mining_thread.join(timeout=5)
+            if self.mining_thread.is_alive():
+                self.logger.warning("Mining thread did not stop within timeout")
+
+        session_time = time.time() - self.stats['start_time']
+        session_blocks = self.stats['session_blocks']
+        session_rewards = self.stats['session_rewards']
+
+        self.logger.info(f"Mining session stopped - Duration: {session_time:.1f}s, Blocks: {session_blocks}, Rewards: {session_rewards:.2f} tokens")
+        self.notify(f"✅ Mining stopped - Session: {session_blocks} blocks, {session_rewards:.2f} tokens", severity="information")
+
+    def _mining_worker(self):
+        """Background mining worker"""
+        self.logger.info("Mining worker thread started")
+        self.logger.info(f"Miner wallet: {self.miner_wallet or 'None'}")
+        self.logger.info(f"Current blockchain height: {len(self.blockchain.chain)}")
+        self.logger.info(f"Pending transactions: {len(self.blockchain.pending_transactions)}")
+
+        while not self.stop_event.is_set():
+            try:
+                self.logger.debug("Checking for pending transactions to mine")
+                pending_count = len(self.blockchain.pending_transactions)
+
+                if pending_count > 0:
+                    self.logger.info(f"Found {pending_count} pending transactions, starting mining process")
+
+                    # Log details of pending transactions
+                    for i, tx in enumerate(self.blockchain.pending_transactions[:3]):  # Log first 3
+                        self.logger.debug(f"Pending TX {i+1}: type={tx.get('type', 'unknown')}, timestamp={tx.get('timestamp', 'unknown')}")
+
+                    # Mine a block
+                    self.logger.info("Calling blockchain.mine_pending_transactions()")
+                    start_time = time.time()
+                    block = self.blockchain.mine_pending_transactions(self.miner_wallet, verbose=False)
+                    mining_duration = time.time() - start_time
+
+                    if block:
+                        self.logger.info(f"Block mined successfully in {mining_duration:.2f}s")
+                        self.logger.info(f"Block details: index={block.index}, nonce={block.nonce}, hash={block.hash[:16]}...")
+
+                        self.stats['blocks_mined'] += 1
+                        self.stats['session_blocks'] += 1
+                        self.stats['last_block_time'] = time.time()
+
+                        # Calculate rough hashrate
+                        if hasattr(block, 'nonce') and block.nonce > 0:
+                            time_taken = time.time() - self.stats.get('last_block_time', time.time())
+                            self.stats['hashrate'] = max(0.1, block.nonce / max(1, time_taken))
+                            self.logger.info(f"Calculated hashrate: {self.stats['hashrate']:.1f} H/s")
+
+                        # Check for mining rewards
+                        reward_txs = [tx for tx in block.transactions if tx.get('type') == 'mining_reward']
+                        if reward_txs:
+                            reward_amount = reward_txs[0].get('amount', 0)
+                            self.stats['total_rewards'] += reward_amount
+                            self.stats['session_rewards'] += reward_amount
+                            self.logger.info(f"Mining reward: {reward_amount:.2f} tokens to {self.miner_wallet}")
+                        else:
+                            self.logger.warning("No mining reward found in block")
+
+                        # Log transaction details
+                        tx_count = len([tx for tx in block.transactions if tx.get('type') != 'mining_reward'])
+                        self.logger.info(f"Block contains {tx_count} user transactions + mining reward")
+
+                        self.notify(f"✅ Block #{block.index} mined! Reward: {reward_amount:.2f} tokens", severity="success")
+                    else:
+                        self.logger.warning("Mining attempt returned None (no block found)")
+                        self.logger.debug(f"Mining duration: {mining_duration:.2f}s")
+                        time.sleep(2)  # Wait before trying again
+                else:
+                    self.logger.debug("No pending transactions, checking again in 2 seconds")
+                    time.sleep(2)
+
+            except Exception as e:
+                self.logger.error(f"Mining worker exception: {e}", exc_info=True)
+                self.notify(f"Mining error: {e}", severity="error")
+                time.sleep(5)
+
+        self.logger.info("Mining worker thread stopped")
+
+    def action_create_test_tx(self):
+        """Create test transaction"""
+        self.logger.info("User requested to create test transaction")
+
         try:
             import secrets
+
+            test_id = secrets.token_hex(8)
+            self.logger.debug(f"Generated test transaction ID: {test_id}")
 
             tx = {
                 "type": "test_transaction",
                 "data": {
-                    "message": f"Test transaction from mining console",
+                    "message": "Test transaction from mining console",
                     "timestamp": time.time(),
-                    "test_id": secrets.token_hex(8)
+                    "test_id": test_id
                 },
                 "signature": f"mining_console_sig_{secrets.token_hex(4)}",
                 "timestamp": time.time()
             }
 
+            self.logger.debug("Adding test transaction to blockchain")
             tx_hash = self.blockchain.add_transaction(tx)
-            console.print(f"[green]✅ Test transaction created: {tx_hash[:16]}...[/green]")
-            console.print(f"[dim]Transaction will be mined in the next block[/dim]")
+            self.logger.info(f"Test transaction created successfully: {tx_hash}")
+
+            self.notify(f"✅ Test transaction created: {tx_hash[:16]}...", severity="information")
 
         except Exception as e:
-            console.print(f"[red]❌ Failed to create test transaction: {e}[/red]")
+            self.logger.error(f"Failed to create test transaction: {e}", exc_info=True)
+            self.notify(f"❌ Failed to create test transaction: {e}", severity="error")
 
-    def show_wallet_info(self):
-        """Show detailed wallet information"""
+    def action_show_wallet(self):
+        """Show wallet information"""
         if not self.miner_wallet:
-            console.print("[yellow]⚠️ No miner wallet configured[/yellow]")
+            self.notify("⚠️ No miner wallet configured", severity="warning")
             return
 
         try:
             balance = self.blockchain.get_wallet_balance(self.miner_wallet)
             transactions = self.blockchain.get_wallet_transactions(self.miner_wallet)
 
-            console.print(f"\n[bold green]🏦 Wallet Information[/bold green]")
-            console.print(f"Address: {self.miner_wallet}")
-            console.print(f"Balance: {balance:.2f} tokens")
-            console.print(f"Total Transactions: {len(transactions)}")
+            wallet_info = f"""
+🏦 Wallet Information
+Address: {self.miner_wallet}
+Balance: {balance:.2f} tokens
+Total Transactions: {len(transactions)}
+            """.strip()
 
-            if transactions:
-                console.print(f"\n[dim]Recent Transactions:[/dim]")
-                for tx in transactions[-5:]:  # Show last 5
-                    direction = "→" if tx['direction'] == 'incoming' else "←"
-                    console.print(f"  {direction} {tx['amount']:.2f} tokens (Block #{tx['block_index']})")
+            self.notify(wallet_info, severity="information", timeout=10)
 
         except Exception as e:
-            console.print(f"[red]❌ Error getting wallet info: {e}[/red]")
+            self.notify(f"❌ Error getting wallet info: {e}", severity="error")
 
-    def toggle_relay_node(self):
+    def action_show_network(self):
+        """Show network information"""
+        try:
+            discovery_status = node_discovery.get_discovery_status()
+
+            network_info = f"""
+🌐 Network Status
+Node ID: {discovery_status.get('node_id', 'unknown')[:16]}...
+Active Endpoints: {len(discovery_status.get('endpoints', []))}
+Relay Status: {'✅ Active' if self._check_if_relay_node() else '❌ Not participating'}
+            """.strip()
+
+            self.notify(network_info, severity="information", timeout=10)
+
+        except Exception as e:
+            self.notify(f"❌ Error getting network info: {e}", severity="error")
+
+    def action_toggle_relay(self):
         """Toggle relay node status"""
         is_relay = self._check_if_relay_node()
 
         if is_relay:
             # Stop being a relay
-            console.print("[blue]🛑 Stopping relay node service...[/blue]")
             try:
-                # Run stop-relay-node command
                 import subprocess
                 result = subprocess.run([
                     'python', '-m', 'pisecure.cli', 'stop-relay-node'
                 ], capture_output=True, text=True, cwd='/home/pi/PiSecure')
 
                 if result.returncode == 0:
-                    console.print("[green]✅ Relay node stopped successfully![/green]")
-                    console.print("[dim]Thank you for your service to the PiSecure community![/dim]")
+                    self.notify("✅ Relay node stopped successfully", severity="information")
                 else:
-                    console.print(f"[red]❌ Failed to stop relay node: {result.stderr}[/red]")
+                    self.notify(f"❌ Failed to stop relay node: {result.stderr}", severity="error")
             except Exception as e:
-                console.print(f"[red]❌ Error stopping relay node: {e}[/red]")
+                self.notify(f"❌ Error stopping relay node: {e}", severity="error")
         else:
             # Become a relay
-            console.print("[blue]🌐 Becoming a community relay node...[/blue]")
-            console.print("[yellow]⚠️ This will help other users discover the network[/yellow]")
-            console.print("[dim]You will receive mining rewards for relay services[/dim]")
-
-            # Ask for confirmation in interactive mode
             try:
-                import select
-                import sys
-                console.print("[cyan]Press 'Y' to confirm, any other key to cancel:[/cyan] ")
+                import subprocess
+                result = subprocess.run([
+                    'python', '-m', 'pisecure.cli', 'become-relay-node'
+                ], capture_output=True, text=True, cwd='/home/pi/PiSecure')
 
-                if select.select([sys.stdin], [], [], 10)[0]:  # 10 second timeout
-                    response = sys.stdin.read(1).lower().strip()
-                    if response == 'y':
-                        # Run become-relay-node command
-                        import subprocess
-                        result = subprocess.run([
-                            'python', '-m', 'pisecure.cli', 'become-relay-node'
-                        ], capture_output=True, text=True, cwd='/home/pi/PiSecure')
-
-                        if result.returncode == 0:
-                            console.print("[green]✅ Successfully became a relay node![/green]")
-                            console.print("[dim]🎉 Thank you for supporting the PiSecure network![/dim]")
-                        else:
-                            console.print(f"[red]❌ Failed to become relay node: {result.stderr}[/red]")
-                    else:
-                        console.print("[dim]Relay node setup cancelled[/dim]")
+                if result.returncode == 0:
+                    self.notify("✅ Successfully became a relay node", severity="information")
                 else:
-                    console.print("[dim]Timeout - relay node setup cancelled[/dim]")
+                    self.notify(f"❌ Failed to become relay node: {result.stderr}", severity="error")
             except Exception as e:
-                console.print(f"[red]❌ Error setting up relay node: {e}[/red]")
+                self.notify(f"❌ Error setting up relay node: {e}", severity="error")
 
     def _check_if_relay_node(self):
         """Check if this node is configured as a relay node"""
@@ -464,247 +644,49 @@ class MiningConsole:
         except:
             return False
 
-    def show_help(self):
-        """Show detailed help information"""
-        console.print("\n[bold cyan]🔧 PiSecure Mining Console - Help[/bold cyan]")
-        console.print("=" * 50)
+    def action_show_help(self):
+        """Show help information"""
+        help_text = """
+🔧 PiSecure Mining Console - Help
 
-        console.print("[bold green]🎮 Keyboard Controls:[/bold green]")
-        console.print("  [green]S[/green] - Start mining session")
-        console.print("  [red]X[/red] - Stop mining session")
-        console.print("  [yellow]C[/yellow] - Create test transaction for mining")
-        console.print("  [blue]W[/blue] - Show detailed wallet information")
-        console.print("  [magenta]N[/magenta] - Show network connectivity information")
-        console.print("  [cyan]R[/cyan] - Toggle relay node status")
-        console.print("  [dim]H[/dim] - Show this help screen")
-        console.print("  [dim]Q[/dim] - Quit the mining console")
+🎮 Keyboard Controls:
+  S - Start mining session
+  X - Stop mining session
+  C - Create test transaction for mining
+  W - Show detailed wallet information
+  N - Show network connectivity information
+  R - Toggle relay node status
+  H - Show this help screen
+  Q - Quit the mining console
 
-        console.print("\n[bold blue]📊 Dashboard Panels:[/bold blue]")
-        console.print("  [cyan]System Status[/cyan] - CPU, Memory, Disk, Temperature")
-        console.print("  [green]Mining Status[/green] - Active blocks, rewards, hashrate")
-        console.print("  [blue]Blockchain Status[/blue] - Chain info, network health")
-        console.print("  [yellow]Wallet Info[/yellow] - Balance, address, earnings")
-        console.print("  [magenta]Network Status[/magenta] - Node ID, endpoints, STUN/TOR addresses")
-        console.print("  [white]Mining History[/white] - Recent blocks and rewards")
+📊 Dashboard Panels:
+  System Status - CPU, Memory, Disk, Temperature
+  Mining Status - Active blocks, rewards, hashrate
+  Blockchain Status - Chain info, network health
+  Wallet Info - Balance, address, earnings
+  Network Status - Node ID, endpoints, STUN/TOR addresses
+  Mining History - Recent blocks and rewards
 
-        console.print("\n[bold yellow]💡 Tips:[/bold yellow]")
-        console.print("  • Mining rewards go to your configured wallet")
-        console.print("  • Test transactions help verify mining is working")
-        console.print("  • Relay nodes help other users discover the network")
-        console.print("  • Network info shows your public connectivity")
-        console.print("  • Dashboard updates automatically every 2 seconds")
+💡 Tips:
+  • Mining rewards go to your configured wallet
+  • Test transactions help verify mining is working
+  • Relay nodes help other users discover the network
+        """.strip()
 
-        console.print("\n[dim]Press any key to return to dashboard...[/dim]")
-        time.sleep(5)  # Give user time to read
+        self.notify(help_text, severity="information", timeout=15)
 
-    def show_network_info(self):
-        """Show detailed network connectivity information"""
-        console.print("\n[bold magenta]🌐 Network Connectivity Information[/bold magenta]")
-        console.print("=" * 50)
-
-        try:
-            discovery_status = node_discovery.get_discovery_status()
-
-            console.print(f"[cyan]Node Identity:[/cyan]")
-            console.print(f"  Node ID: {discovery_status.get('node_id', 'unknown')}")
-            console.print(f"  Relay Status: {'✅ Active' if self._check_if_relay_node() else '❌ Not participating'}")
-
-            endpoints = discovery_status.get('endpoints', [])
-            if endpoints:
-                console.print(f"\n[cyan]Public Endpoints ({len(endpoints)} active):[/cyan]")
-                for i, endpoint in enumerate(endpoints, 1):
-                    endpoint_type = endpoint.get('type', 'unknown')
-
-                    if endpoint_type == 'stun_direct':
-                        nat_type = endpoint.get('nat_type', 'unknown')
-                        console.print(f"  {i}. 🌐 STUN Direct: {endpoint.get('ip', 'unknown')}:{endpoint.get('port', 'unknown')}")
-                        console.print(f"     NAT Type: {nat_type}")
-                        console.print(f"     Status: {'✅ Public' if nat_type in ['full_cone', 'address_restricted'] else '⚠️ Restricted'}")
-
-                    elif endpoint_type == 'tor_onion':
-                        address = endpoint.get('address', 'unknown')
-                        console.print(f"  {i}. 🧅 Tor Onion: {address}")
-                        console.print(f"     Status: ✅ Anonymous access enabled")
-
-                    elif endpoint_type == 'upnp':
-                        console.print(f"  {i}. 📡 UPnP Port Forward: {endpoint.get('ip', 'unknown')}:{endpoint.get('port', 'unknown')}")
-                        console.print(f"     Status: ✅ Automatic port forwarding")
-
-                    elif endpoint_type == 'turn_relay':
-                        console.print(f"  {i}. 🔄 TURN Relay: {endpoint.get('ip', 'unknown')}:{endpoint.get('port', 'unknown')}")
-                        console.print(f"     Status: ✅ Relay-assisted connectivity")
-
-                    elif endpoint_type == 'community_relay':
-                        console.print(f"  {i}. ☁️ Community Relay: {endpoint.get('available_relays', 0)} relays available")
-                        console.print(f"     Status: ✅ Network-assisted discovery")
-            else:
-                console.print(f"\n[yellow]⚠️ No public endpoints configured[/yellow]")
-                console.print(f"   Run 'pisecure setup-public-access' to enable worldwide connectivity")
-
-            # Network statistics
-            nat_info = discovery_status.get('nat_info', {})
-            if nat_info:
-                console.print(f"\n[cyan]NAT Information:[/cyan]")
-                console.print(f"  Public IP: {nat_info.get('public_ip', 'unknown')}")
-                console.print(f"  Public Port: {nat_info.get('public_port', 'unknown')}")
-                console.print(f"  NAT Type: {nat_info.get('nat_type', 'unknown')}")
-
-            console.print(f"  Tor Address: {discovery_status.get('tor_address', 'not configured')}")
-            console.print(f"  Community Relays: {discovery_status.get('relay_count', 0)} available")
-
-            # Connectivity test
-            console.print(f"\n[cyan]Connectivity Test:[/cyan]")
-            try:
-                import socket
-                # Test STUN server
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(5)
-                result = sock.connect_ex(("stun.l.google.com", 19302))
-                console.print(f"  STUN Server: {'✅ Reachable' if result == 0 else '❌ Unreachable'}")
-                sock.close()
-
-                # Test bootstrap connectivity (placeholder)
-                console.print(f"  Bootstrap Nodes: ✅ Configured")
-
-            except:
-                console.print(f"  Connectivity: ❓ Unable to test")
-
-            # Peer discovery status
-            console.print(f"\n[cyan]Peer Discovery:[/cyan]")
-            console.print(f"  Auto-discovery: ✅ Active (5-minute refresh)")
-            console.print(f"  Local Network: ✅ Scanning for peers")
-            console.print(f"  Internet Peers: ✅ STUN/TURN/Tor enabled")
-
-            console.print(f"\n[dim]Your node is discoverable at the endpoints listed above.[/dim]")
-            console.print(f"[dim]Mobile apps can connect to your node using these addresses.[/dim]")
-
-        except Exception as e:
-            console.print(f"[red]❌ Error getting network information: {e}[/red]")
-
-        console.print("\n[dim]Press any key to return to dashboard...[/dim]")
-        time.sleep(5)  # Give user time to read
-
-    def run(self):
-        """Run the interactive mining console"""
-        console.clear()
-        console.print("[bold cyan]🔐 PiSecure Mining Console[/bold cyan]")
-        console.print("[dim]Real-time mining dashboard with controls[/dim]\n")
-
-        # Show initial status
-        if self.miner_wallet:
-            console.print(f"[green]✅ Miner wallet configured: {self.miner_wallet[:24]}...[/green]")
-        else:
-            console.print("[yellow]⚠️ No miner wallet configured - set mining.wallet_address in /etc/pisecure/config.json[/yellow]")
-
-        console.print("[dim]Starting live dashboard... (press 'H' for help)[/dim]\n")
-
-        try:
-            with Live(self.create_dashboard(), refresh_per_second=2, screen=True) as live:
-                while True:
-                    # Update dashboard
-                    live.update(self.create_dashboard())
-
-                    # Check for keyboard input (non-blocking with multiple methods)
-                    key_pressed = None
-
-                    try:
-                        # Method 1: select-based input (works in some terminals)
-                        import select
-                        import sys
-                        import tty
-                        import termios
-
-                        # Save original terminal settings
-                        old_settings = termios.tcgetattr(sys.stdin)
-
-                        try:
-                            # Set terminal to raw mode for single character input
-                            tty.setraw(sys.stdin.fileno())
-
-                            # Check if input is available (non-blocking)
-                            if select.select([sys.stdin], [], [], 0.1)[0]:
-                                key = sys.stdin.read(1).lower()
-                                key_pressed = key
-                                # Debug: uncomment to see key detection
-                                # console.print(f"[dim]DEBUG: Key pressed: '{key}'[/dim]")
-                        finally:
-                            # Restore original terminal settings
-                            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-
-                    except (ImportError, OSError):
-                        # Method 2: Fallback for environments where raw mode doesn't work
-                        try:
-                            import keyboard
-                            # Check for key presses using keyboard library
-                            for key in ['s', 'x', 'c', 'w', 'r', 'h', 'q']:
-                                if keyboard.is_pressed(key):
-                                    key_pressed = key
-                                    break
-                        except ImportError:
-                            # Method 3: Simple input buffer check (last resort)
-                            try:
-                                import sys
-                                # Check if there's data in stdin buffer
-                                import os
-                                if hasattr(os, 'read') and os.read(sys.stdin.fileno(), 1):
-                                    # Reset file position
-                                    os.lseek(sys.stdin.fileno(), -1, os.SEEK_CUR)
-                                    key = sys.stdin.read(1).lower()
-                                    key_pressed = key
-                            except:
-                                pass
-
-                    # Process the detected key
-                    if key_pressed:
-                        if key_pressed == 'q':
-                            if self.mining_active:
-                                self.stop_mining()
-                            console.print("[cyan]👋 Goodbye![/cyan]")
-                            break
-                        elif key_pressed == 's':
-                            console.print("[dim]DEBUG: Starting mining...[/dim]")
-                            self.start_mining()
-                        elif key_pressed == 'x':
-                            console.print("[dim]DEBUG: Stopping mining...[/dim]")
-                            self.stop_mining()
-                        elif key_pressed == 'c':
-                            console.print("[dim]DEBUG: Creating test transaction...[/dim]")
-                            self.create_test_transaction()
-                        elif key_pressed == 'w':
-                            console.print("[dim]DEBUG: Showing wallet info...[/dim]")
-                            self.show_wallet_info()
-                        elif key_pressed == 'r':
-                            console.print("[dim]DEBUG: Toggling relay...[/dim]")
-                            self.toggle_relay_node()
-                        elif key_pressed == 'h':
-                            console.print("\n[bold cyan]Help - Mining Console Controls:[/bold cyan]")
-                            console.print("[green]S[/green] - Start Mining")
-                            console.print("[red]X[/red] - Stop Mining")
-                            console.print("[yellow]C[/yellow] - Create Test Transaction")
-                            console.print("[blue]W[/blue] - Show Wallet Info")
-                            console.print("[dim]Q[/dim] - Quit Console")
-                            console.print("[dim]H[/dim] - Show This Help\n")
-                            time.sleep(3)  # Pause to read help
-
-        except KeyboardInterrupt:
-            if self.mining_active:
-                self.stop_mining()
-            console.print("\n[cyan]👋 Mining console closed[/cyan]")
+    def action_quit(self):
+        """Quit the application"""
+        if self.mining_active:
+            self.action_stop_mining()
+        self.exit()
 
 
 def main():
     """Main entry point"""
-    try:
-        console = MiningConsole()
-        console.run()
-    except KeyboardInterrupt:
-        console.print("\n[cyan]👋 Mining console closed[/cyan]")
-    except Exception as e:
-        console.print(f"[red]❌ Mining console error: {e}[/red]")
-        return 1
-
-    return 0
+    app = MiningApp()
+    app.run()
 
 
 if __name__ == '__main__':
-    exit(main())
+    main()
