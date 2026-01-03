@@ -732,7 +732,7 @@ class SignChain:
 
         return new_difficulty
 
-    def calculate_mining_reward(self, block: SignBlock, miner_stats: Dict = None) -> int:
+    def calculate_mining_reward(self, block: SignBlock = None, miner_stats: Dict = None) -> int:
         """Calculate sustainable mining reward based on work performed"""
         if miner_stats is None:
             miner_stats = {}
@@ -740,11 +740,16 @@ class SignChain:
         base_reward = 10  # Stable base reward
 
         # Transaction volume bonus (0.5 tokens per tx)
-        tx_bonus = len(block.transactions) * 0.5
+        if block is not None:
+            tx_bonus = len(block.transactions) * 0.5
+        else:
+            # If no block provided, use pending transactions count
+            tx_bonus = len(self.pending_transactions) * 0.5
 
         # Security work bonus
         security_bonus = 0
-        for tx in block.transactions:
+        transactions_to_check = block.transactions if block is not None else self.pending_transactions
+        for tx in transactions_to_check:
             tx_type = tx.get('type', '')
             if tx_type in ['security_alert', 'threat_detected', 'system_compromise']:
                 security_bonus += 3  # High value security work
