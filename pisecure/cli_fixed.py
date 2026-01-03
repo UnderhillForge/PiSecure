@@ -1463,7 +1463,7 @@ def list_names():
 
 @cli.command()
 def setup_public_access():
-    """Setup automatic public access using NAT traversal, Tor, and relays"""
+    """Manually trigger public access setup (normally automatic on startup)"""
     try:
         try:
             # Try relative import first
@@ -1659,7 +1659,7 @@ def network_health():
         # Node discovery status
         discovery_status = node_discovery.get_discovery_status()
         console.print()
-        console.print(f"[cyan]Node Discovery:[/cyan]")
+        console.print(f"[cyan]Node Discovery:[/cyan] [green]🔄 Automatic[/green]")
         console.print(f"   Node ID: {discovery_status['node_id']}")
         console.print(f"   Active Endpoints: {len(discovery_status['endpoints'])}")
         console.print(f"   Community Relays: {discovery_status['relay_count']}")
@@ -1688,7 +1688,7 @@ def network_health():
         console.print()
         console.print("[cyan]Recommendations:[/cyan]")
         if len(discovery_status['endpoints']) == 0:
-            console.print("   • Run 'pisecure setup-public-access' to enable worldwide access")
+            console.print("   • Network discovery is automatic - endpoints will appear when available")
         if not is_relay and len(discovery_status['endpoints']) > 0:
             console.print("   • Consider becoming a relay node: 'pisecure become-relay-node'")
         if chain_info['pending_transactions'] > 10:
