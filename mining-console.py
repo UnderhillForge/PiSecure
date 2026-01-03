@@ -1568,7 +1568,7 @@ def main():
 
         except Exception as e:
             print(f"⚠️ Failed to configure logging: {e}")
-            print("Continuing without logging..."
+            print("Continuing without logging...")
 
     # Start the mining console
     app = MiningConsoleApp()
