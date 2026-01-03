@@ -87,8 +87,9 @@ class MiningApp(App):
         color: $text;
     }
 
-    #top-section {
-        height: 60%;
+    #stats-section {
+        height: 35%;
+        margin-bottom: 1;
     }
 
     #stats {
@@ -98,24 +99,27 @@ class MiningApp(App):
         height: 100%;
     }
 
-    #bottom-section {
-        height: 40%;
+    #main-content {
+        height: 65%;
         layout: horizontal;
     }
 
-    #left-panel {
-        width: 50%;
+    #mining-log-panel {
+        width: 65%;
         margin-right: 1;
+        height: 100%;
     }
 
     #mining-log {
         height: 100%;
         border: solid $primary;
+        background: $surface;
     }
 
-    #right-panel {
-        width: 50%;
+    #right-sidebar {
+        width: 35%;
         layout: vertical;
+        height: 100%;
     }
 
     #blocks {
@@ -143,6 +147,7 @@ class MiningApp(App):
     Log {
         background: $surface;
         color: $text;
+        border: solid $primary;
     }
     """
 
@@ -213,25 +218,25 @@ class MiningApp(App):
                         Static(self._create_wallet_stats(), classes="panel", id="wallet"),
                         id="stats"
                     ),
-                    id="top-section"
+                    id="stats-section"
                 ),
                 Container(
                     Horizontal(
                         Container(
                             Log(id="mining-log"),
-                            id="left-panel"
+                            id="mining-log-panel"
                         ),
                         Container(
                             Vertical(
                                 Static(self._create_blocks_table(), classes="panel", id="blocks"),
                                 Static(self._create_controls(), classes="panel", id="controls"),
-                                id="right-panel"
+                                id="right-sidebar"
                             ),
-                            id="right-panel"
+                            id="right-sidebar"
                         ),
-                        id="bottom-section"
+                        id="main-content"
                     ),
-                    id="bottom-section"
+                    id="main-content"
                 ),
                 id="main"
             )
