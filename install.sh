@@ -1,22 +1,22 @@
 #!/bin/bash
-"""
-PiSecure Installer - Complete Setup for Raspberry Pi Blockchain Node
-====================================================================
-
-This script installs PiSecure as a complete blockchain node with:
-- Wallet creation and management
-- Background mining service
-- REST API server
-- Web dashboard
-- Automatic startup and peer discovery
-- Scalable hybrid storage (block files + SQLite database)
-
-NOTE: This script uses virtual environments to avoid system Python conflicts.
-Genesis keys are OPTIONAL - the system works without them for normal operations.
-Hybrid storage is enabled by default for optimal performance.
-
-Usage: curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/install.sh | bash
-"""
+#
+# PiSecure Installer - Complete Setup for Raspberry Pi Blockchain Node
+# ====================================================================
+#
+# This script installs PiSecure as a complete blockchain node with:
+# - Wallet creation and management
+# - Background mining service
+# - REST API server
+# - Web dashboard
+# - Automatic startup and peer discovery
+# - Scalable hybrid storage (block files + SQLite database)
+#
+# NOTE: This script uses virtual environments to avoid system Python conflicts.
+# Genesis keys are OPTIONAL - the system works without them for normal operations.
+# Hybrid storage is enabled by default for optimal performance.
+#
+# Usage: curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/install.sh | bash
+#
 
 set -e
 
