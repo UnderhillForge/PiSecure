@@ -116,17 +116,33 @@ class SignBlock:
             }
 
     def _arm_optimized_mix(self, data: bytes, pi_info: Dict[str, str]) -> bytes:
-        """ARM-optimized mixing function (simulates NEON operations)"""
-        # Convert Pi hardware data to numerical values for mixing
+        """ARM-optimized mixing function (simulates NEON operations) with safe None handling"""
         try:
-            serial_num = int(pi_info['serial'][-8:], 16)  # Last 8 chars as hex
-            temp_num = int(pi_info['temperature']) if pi_info['temperature'].isdigit() else 20
-            uptime_num = int(pi_info['uptime']) % 1000000  # Last 6 digits
+            # Safe conversion of hardware info with comprehensive None checking
+            serial_str = pi_info.get('serial') or 'fallback'
+            temp_str = pi_info.get('temperature') or '20'
+            uptime_str = pi_info.get('uptime') or '0'
+
+            # Convert to integers safely
+            try:
+                serial_num = int(serial_str[-8:], 16) if len(serial_str) >= 8 else 0x12345678
+            except (ValueError, TypeError):
+                serial_num = 0x12345678  # Safe fallback
+
+            try:
+                temp_num = int(temp_str) if temp_str and temp_str.isdigit() else 20
+            except (ValueError, TypeError, AttributeError):
+                temp_num = 20  # Safe fallback
+
+            try:
+                uptime_num = int(uptime_str) % 1000000 if uptime_str and uptime_str.isdigit() else 0
+            except (ValueError, TypeError, AttributeError):
+                uptime_num = 0  # Safe fallback
 
             # ARM-style mixing (simulated - would use actual NEON in C extension)
             mixed = bytearray(data)
 
-            # XOR with hardware entropy
+            # XOR with hardware entropy (all values are now guaranteed to be integers)
             for i in range(len(mixed)):
                 hw_byte = (serial_num >> (i % 32)) & 0xFF
                 hw_byte ^= (temp_num + uptime_num) & 0xFF
@@ -138,13 +154,15 @@ class SignBlock:
                     # Simulate ARM vector operations
                     val = int.from_bytes(mixed[i:i+4], 'little')
                     val = ((val << 13) | (val >> 19))  # Rotate
-                    val ^= serial_num  # XOR with hardware
+                    val ^= serial_num  # XOR with hardware (serial_num is now safe)
                     val = (val * 0x9E3779B9) & 0xFFFFFFFF  # Multiply
                     mixed[i:i+4] = val.to_bytes(4, 'little')
 
             return bytes(mixed)
 
-        except Exception:
+        except Exception as e:
+            # Log the error for debugging but don't crash
+            print(f"⚠️ ARM mixing failed safely: {e}")
             # Return original data if mixing fails
             return data
 
