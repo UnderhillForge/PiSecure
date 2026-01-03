@@ -31,6 +31,43 @@ curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/instal
 - **Mutual TLS**: Secure device-to-device and device-to-server communication
 - **Revocable Certificates**: Blockchain-stored certificates and keys
 
+## Why Mine in PiSecure?
+
+Mining in PiSecure serves multiple critical purposes that benefit both individual participants and the network as a whole:
+
+### 🔒 **Network Security**
+Mining provides the computational power that secures the blockchain through proof-of-work consensus. Each mined block strengthens the network's resistance to attacks and ensures transaction immutability.
+
+### 💰 **Token Rewards**
+Miners receive newly minted PSC tokens as block rewards, providing an incentive to contribute computational resources to network security. This creates a sustainable token economy.
+
+### ⚡ **Transaction Processing**
+Mining validates pending transactions and bundles them into blocks, enabling fast and reliable transaction processing across the distributed network.
+
+### 🤝 **Network Participation**
+By mining, participants contribute to the decentralized nature of PiSecure, ensuring no single entity can control the network or censor transactions.
+
+### 🔧 **Hardware Verification**
+Mining requires genuine Raspberry Pi hardware verification, creating a unique hardware-bound trust anchor that software alone cannot compromise.
+
+### 📊 **Earning Potential**
+- **Block Rewards**: Earn newly minted PSC tokens for each block mined
+- **Transaction Fees**: Collect fees from processed transactions
+- **Staking Opportunities**: Use earned tokens for additional rewards through staking
+- **Network Incentives**: Participate in developer grants and community rewards
+
+### 🌐 **Community Benefits**
+Mining helps build a robust, decentralized network that:
+- Processes transactions reliably
+- Maintains network uptime and availability
+- Provides censorship resistance
+- Enables secure IoT device communication
+- Supports the growth of the PiSecure ecosystem
+
+**Ready to start mining?** Mining is optional but highly encouraged for network health. Use `pisecure mine` to begin contributing to the PiSecure network!
+
+---
+
 ### OTA Updates
 - **Cryptographic Verification**: RSA/ECDSA signature verification of update packages
 - **Decentralized Distribution**: IPFS-based update distribution with on-chain hashes

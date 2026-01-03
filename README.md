@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/instal
 
 ## 🚀 Key Features
 
-- **Hardware-Verified Mining**: Proof-of-work consensus exclusive to Raspberry Pi hardware
+- **Hardware-Verified Mining**: Earn tokens while securing the network through Raspberry Pi-exclusive proof-of-work
 - **Enterprise Security**: Input validation, rate limiting, comprehensive monitoring
 - **Multi-Language SDKs**: Python, JavaScript/TypeScript, Go, Rust, C/C++, Android
 - **Hybrid Storage**: Bitcoin Core-inspired architecture with 90%+ performance gains
