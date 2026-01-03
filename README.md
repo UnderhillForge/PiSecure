@@ -10,7 +10,7 @@
 
 ## What Software Developers Can Build with PiSecure
 
-PiSecure empowers software developers to create secure, decentralized applications that leverage hardware-verified cryptography and blockchain consensus without implementing complex security protocols from scratch. Whether you're building distributed systems, secure communication networks, or token-based economies, PiSecure provides production-ready components that handle the heavy lifting of cryptography, consensus, and trust management.
+PiSecure empowers software developers to create secure, decentralized applications that leverage hardware-verified cryptography and blockchain consensus without implementing complex security protocols from scratch. Whether you're building distributed systems, secure communication networks, or token-based economies, PiSecure provides production-ready components that handle the heavy lifting of cryptography, consensus, and trust management. It doesn't just stop at software either, IoT and embedded systems can benefit from PiSecure as well from the smallest tinkering projects to large enterprise systems! PiSecure gives you the tools to let your imagination work for you!
 
 The framework gives developers access to enterprise-grade security primitives: hardware-bound digital signatures, decentralized identity management, cryptographically secure updates, and proof-of-work consensus - all backed by Raspberry Pi's unique hardware verification. This means developers can focus on their application logic while knowing their systems are secured by mathematically proven cryptography and hardware-trusted execution.
 
