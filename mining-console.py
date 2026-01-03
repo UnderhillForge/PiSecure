@@ -1537,38 +1537,54 @@ class MiningConsoleApp(App):
 
 
 def main():
-    """Main entry point with logging support"""
+    """Main entry point with automatic detailed logging"""
     parser = argparse.ArgumentParser(description='PiSecure Mining Console')
-    parser.add_argument('--log', type=str, help='Log file path for mining activity')
+    parser.add_argument('--log', type=str, help='Additional log file path (miner.log always created)')
     args = parser.parse_args()
 
-    # Configure logging if --log option is provided
-    if args.log:
-        try:
-            # Create log directory if it doesn't exist
-            log_path = Path(args.log)
-            log_path.parent.mkdir(parents=True, exist_ok=True)
+    # Always create miner.log in the same directory as mining-console.py
+    try:
+        script_dir = Path(__file__).parent
+        default_log_file = script_dir / "miner.log"
 
-            # Configure logging
-            logging.basicConfig(
-                filename=str(log_path),
-                level=logging.INFO,
-                format='%(asctime)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
-            )
+        # Configure logging to miner.log
+        logging.basicConfig(
+            filename=str(default_log_file),
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
 
-            # Add console handler as well
-            console_handler = logging.StreamHandler()
-            console_handler.setLevel(logging.INFO)
-            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-            console_handler.setFormatter(formatter)
-            logging.getLogger().addHandler(console_handler)
+        # Add console handler as well
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        console_handler.setFormatter(formatter)
+        logging.getLogger().addHandler(console_handler)
 
-            print(f"📝 Logging enabled: {args.log}")
+        print(f"📝 Logging enabled: miner.log")
 
-        except Exception as e:
-            print(f"⚠️ Failed to configure logging: {e}")
-            print("Continuing without logging...")
+        # Configure additional logging if --log option is provided
+        if args.log:
+            try:
+                # Create log directory if it doesn't exist
+                log_path = Path(args.log)
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+
+                # Add additional file handler
+                additional_handler = logging.FileHandler(str(log_path))
+                additional_handler.setLevel(logging.INFO)
+                additional_handler.setFormatter(formatter)
+                logging.getLogger().addHandler(additional_handler)
+
+                print(f"📝 Additional logging enabled: {args.log}")
+
+            except Exception as e:
+                print(f"⚠️ Failed to configure additional logging: {e}")
+
+    except Exception as e:
+        print(f"⚠️ Failed to configure logging: {e}")
+        print("Continuing without logging...")
 
     # Start the mining console
     app = MiningConsoleApp()
