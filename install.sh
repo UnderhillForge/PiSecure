@@ -142,13 +142,26 @@ install_cli() {
     sudo tee /usr/local/bin/pisecure > /dev/null <<EOF
 #!/usr/bin/env python3
 """
-PiSecure CLI Wrapper - Fixed Import Issues
+PiSecure CLI Wrapper - Virtual Environment Activation
 
-This wrapper sets the correct Python path and runs the PiSecure CLI.
+This wrapper activates the virtual environment and runs the PiSecure CLI.
 """
 
 import sys
 import os
+
+# Virtual environment activation
+venv_path = "/home/pi/PiSecure/pisecure_env"
+activate_this = os.path.join(venv_path, "bin", "activate_this.py")
+
+if os.path.exists(activate_this):
+    with open(activate_this) as f:
+        exec(f.read(), {"__file__": activate_this})
+else:
+    # Fallback: try to activate manually
+    if os.path.exists(venv_path):
+        sys.path.insert(0, os.path.join(venv_path, "lib", "python3.9", "site-packages"))
+        sys.path.insert(0, venv_path)
 
 # Add PiSecure to Python path
 pisecure_path = "/home/pi/PiSecure"
@@ -161,7 +174,8 @@ try:
     main()
 except ImportError as e:
     print(f"❌ Import error: {e}")
-    print("Make sure you're in the pisecure_env virtual environment")
+    print(f"Virtual environment: {venv_path}")
+    print("Try: source /home/pi/PiSecure/pisecure_env/bin/activate && pisecure --help")
     sys.exit(1)
 except Exception as e:
     print(f"❌ CLI error: {e}")
