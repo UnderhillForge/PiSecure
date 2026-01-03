@@ -590,16 +590,44 @@ class PiSecureDashboard:
             return {'error': str(e)}
 
     def collect_mining_stats(self) -> Dict[str, Any]:
-        """Collect mining statistics"""
-        # Placeholder - would integrate with actual mining process
+        """Collect mining statistics from shared file"""
+        try:
+            # Try to read from shared mining stats file
+            stats_file = Path("/var/lib/pisecure/mining_stats.json")
+            if stats_file.exists():
+                with open(stats_file, 'r') as f:
+                    stats = json.load(f)
+
+                # Format uptime as human readable
+                uptime_seconds = stats.get('uptime', 0)
+                uptime_str = str(timedelta(seconds=int(uptime_seconds)))
+
+                return {
+                    'status': stats.get('status', 'unknown'),
+                    'hashrate': stats.get('hashrate', 0),
+                    'shares_submitted': stats.get('shares_submitted', 0),
+                    'shares_accepted': stats.get('shares_accepted', 0),
+                    'blocks_found': stats.get('blocks_found', 0),
+                    'temperature': stats.get('temperature', 0),
+                    'uptime': uptime_str,
+                    'session_blocks': stats.get('session_blocks', 0),
+                    'total_rewards': stats.get('total_rewards', 0),
+                    'session_rewards': stats.get('session_rewards', 0),
+                    'pending_transactions': stats.get('pending_transactions', 0),
+                    'timestamp': datetime.now().isoformat()
+                }
+        except Exception as e:
+            print(f"Failed to read mining stats: {e}")
+
+        # Fallback to placeholder if file doesn't exist or can't be read
         return {
-            'status': 'active',  # active, paused, stopped
-            'hashrate': 2.3,  # MH/s
-            'shares_submitted': 145,
-            'shares_accepted': 142,
-            'blocks_found': 5,
-            'temperature': 45.2,
-            'uptime': '2h 15m',
+            'status': 'unknown',
+            'hashrate': 0,
+            'shares_submitted': 0,
+            'shares_accepted': 0,
+            'blocks_found': 0,
+            'temperature': 0,
+            'uptime': '0s',
             'timestamp': datetime.now().isoformat()
         }
 
