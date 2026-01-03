@@ -132,10 +132,21 @@ dmypy.json
 /var/lib/pisecure/
 /etc/pisecure/
 /tmp/pisecure*
+
+# CRITICAL: Never commit cryptographic keys or certificates
 *.key
+*.pem
 *.crt
+*private*
+*secret*
+genesis_auth_*
+auth_keys/
+keys/
+
+# Test keys/certificates (allowed in test directories only)
 !test_keys/
 !test_certs/
+!example_keys/
 
 # Blockchain data
 *.blockchain
@@ -151,8 +162,6 @@ update_*.tar.gz
 # Device fingerprints and identities
 device_fingerprint.json
 device_identity.json
-*.pem
-!example_keys/
 
 # Logs
 *.log
