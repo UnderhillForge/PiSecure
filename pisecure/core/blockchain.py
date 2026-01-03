@@ -801,7 +801,7 @@ class SignChain:
         }
 
     def _calculate_network_health(self) -> Dict[str, Any]:
-        """Calculate network health metrics for adaptive systems"""
+        """Calculate network health metrics for adaptive systems with safe arithmetic"""
         if not self.chain:
             return {"participation": 0, "avg_block_time": 0, "health_score": 0}
 
@@ -810,18 +810,41 @@ class SignChain:
         if len(recent_blocks) > 1:
             block_times = []
             for i in range(1, len(recent_blocks)):
-                time_diff = recent_blocks[i].timestamp - recent_blocks[i-1].timestamp
-                block_times.append(time_diff)
-            avg_block_time = sum(block_times) / len(block_times)
+                # Safe timestamp arithmetic - ensure both timestamps are valid floats
+                current_ts = recent_blocks[i].timestamp
+                prev_ts = recent_blocks[i-1].timestamp
+
+                # Skip if either timestamp is None or invalid
+                if current_ts is None or prev_ts is None:
+                    continue
+
+                try:
+                    # Ensure timestamps are numeric
+                    current_ts = float(current_ts)
+                    prev_ts = float(prev_ts)
+
+                    # Only add positive time differences
+                    time_diff = current_ts - prev_ts
+                    if time_diff > 0:
+                        block_times.append(time_diff)
+                except (TypeError, ValueError):
+                    # Skip invalid timestamps
+                    continue
+
+            # Calculate average safely
+            avg_block_time = sum(block_times) / len(block_times) if block_times else 600
         else:
             avg_block_time = 600  # 10 minutes default
 
         # Participation score based on transaction volume
-        total_txs = sum(len(block.transactions) for block in recent_blocks)
+        total_txs = sum(len(block.transactions) for block in recent_blocks if block.transactions)
         participation = min(1.0, total_txs / 50)  # Scale to 0-1
 
-        # Health score combines multiple factors
-        health_score = (participation * 0.6) + ((1 - min(1, avg_block_time / 1200)) * 0.4)
+        # Health score combines multiple factors (safe division)
+        try:
+            health_score = (participation * 0.6) + ((1 - min(1, avg_block_time / 1200)) * 0.4)
+        except (ZeroDivisionError, TypeError):
+            health_score = participation * 0.6  # Fallback to participation only
 
         return {
             "participation": participation,
