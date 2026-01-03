@@ -1011,9 +1011,15 @@ class MiningLogic:
         # Log mining start
         logging.info(f"Mining session started - Target: Block #{len(self.blockchain.chain)}, Wallet: {self.miner_wallet[:16] if self.miner_wallet else 'None'}")
 
+        # Log before starting mining thread
+        logging.info("Starting mining thread...")
+
         # Start mining thread
         self.mining_thread = threading.Thread(target=self._mining_worker, daemon=True)
         self.mining_thread.start()
+
+        # Log successful thread start
+        logging.info("Mining thread started successfully")
 
         return "Mining started"
 
