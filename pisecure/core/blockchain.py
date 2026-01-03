@@ -233,7 +233,7 @@ class SignChain:
 
     def __init__(self, chain_file: str = "/var/lib/pisecure/blockchain.json",
                  difficulty: int = 8, use_hybrid_storage: bool = None,
-                 mining_algorithm: str = 'sha3'):
+                 mining_algorithm: str = 'sha256'):
         self.chain_file = Path(chain_file)
         self.pending_file = Path(chain_file).parent / "pending_transactions.json"
         self.names_file = Path(chain_file).parent / "name_registry.json"
