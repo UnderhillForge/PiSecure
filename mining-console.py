@@ -153,20 +153,25 @@ class MiningApp(App):
     /* Middle column - processes style (mining log) */
     #middle-column {
         width: 40%;
+        height: 20;
         background: #0d1117;
     }
 
     #processes-section {
-        height: 100%;
+        height: 18;
+        max-height: 18;
         background: #161b22;
         border: solid #30363d;
+        overflow: hidden;
     }
 
     #mining-log {
-        height: 100%;
+        height: 16;
+        max-height: 16;
         background: #0d1117;
         color: #c9d1d9;
         border: none;
+        overflow-y: auto;
     }
 
     /* Right column - network and info */
@@ -723,32 +728,40 @@ class MiningApp(App):
 
     def _mining_worker(self):
         """Background mining worker"""
-        self.logger.info("Mining worker started")
-        self.logger.info(f"Wallet: {self.miner_wallet or 'None'}")
-        self.logger.info(f"Chain height: {len(self.blockchain.chain)}")
+        self.logger.info("⛏️  Mining worker started")
+        self.logger.info(f"📍 Wallet: {self.miner_wallet[:20] + '...' if self.miner_wallet else 'None'}")
+        self.logger.info(f"📦 Chain height: {len(self.blockchain.chain)}")
+        self.logger.info(f"⚙️  Difficulty: {self.blockchain.difficulty}")
 
         while not self.stop_event.is_set():
             try:
                 pending_count = len(self.blockchain.pending_transactions)
 
                 if pending_count > 0:
-                    self.logger.info(f"Mining {pending_count} pending transactions")
+                    self.logger.info(f"🔍 Found {pending_count} pending transaction(s)")
+                    self.logger.info(f"⛏️  Starting mining attempt...")
 
                     start_time = time.time()
+                    
+                    # Mine with progress updates
                     block = self.blockchain.mine_pending_transactions(self.miner_wallet, verbose=False)
                     mining_duration = time.time() - start_time
 
                     if block:
-                        self.logger.info(f"✅ Block #{block.index} mined in {mining_duration:.2f}s")
+                        # Calculate hashrate
+                        nonce = getattr(block, 'nonce', 0)
+                        if nonce > 0:
+                            self.stats['hashrate'] = max(0.1, nonce / max(1, mining_duration)) / 1000
+                        
+                        self.logger.info(f"🎉 BLOCK #{block.index} MINED!")
+                        self.logger.info(f"   ├─ Hash: {block.hash[:32]}...")
+                        self.logger.info(f"   ├─ Nonce: {nonce:,}")
+                        self.logger.info(f"   ├─ Time: {mining_duration:.2f}s")
+                        self.logger.info(f"   └─ Rate: {self.stats['hashrate']:.1f} KH/s")
 
                         self.stats['blocks_mined'] += 1
                         self.stats['session_blocks'] += 1
                         self.stats['last_block_time'] = time.time()
-
-                        # Calculate hashrate
-                        if hasattr(block, 'nonce') and block.nonce > 0:
-                            self.stats['hashrate'] = max(0.1, block.nonce / max(1, mining_duration)) / 1000
-                            self.logger.info(f"Hashrate: {self.stats['hashrate']:.1f} KH/s")
 
                         # Check for rewards
                         reward_txs = [tx for tx in block.transactions if tx.get('type') == 'mining_reward']
@@ -756,15 +769,20 @@ class MiningApp(App):
                             reward_amount = reward_txs[0].get('amount', 0)
                             self.stats['total_rewards'] += reward_amount
                             self.stats['session_rewards'] += reward_amount
-                            self.logger.info(f"💰 Reward: {reward_amount:.2f} tokens")
+                            self.logger.info(f"💰 Reward: +{reward_amount:.2f} tokens → wallet")
+
+                        # Log transaction summary
+                        tx_count = len(block.transactions)
+                        self.logger.info(f"📝 Block contains {tx_count} transaction(s)")
 
                         self.notify(f"✅ Block #{block.index} mined!", severity="success")
                     else:
-                        self.logger.warning("Mining returned None")
+                        self.logger.warning("⚠️  Mining attempt failed (exceeded nonce limit)")
                         time.sleep(2)
                 else:
-                    self.logger.debug("No pending transactions")
-                    time.sleep(2)
+                    # Periodically log waiting status
+                    self.logger.info("⏳ Waiting for transactions...")
+                    time.sleep(5)  # Wait longer when no TXs
 
             except Exception as e:
                 self.logger.error(f"Mining error: {e}")
