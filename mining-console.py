@@ -333,7 +333,14 @@ class StatsPanel(Static):
             mining_table.add_column("Value", style="green" if mining_active else "red")
 
             status_icon = "🟢" if mining_active else "🔴"
-            mining_table.add_row("Status", f"{status_icon} {'Active' if mining_active else 'Stopped'}")
+            status_text = "Active"
+            if not mining_active:
+                status_text = "Stopped"
+            elif self.console_app.mining_console.mining_paused:
+                status_text = "Paused"
+                status_icon = "⏸️"
+
+            mining_table.add_row("Status", f"{status_icon} {status_text}")
             mining_table.add_row("Total Blocks", str(stats['blocks_mined']))
             mining_table.add_row("Session Blocks", str(stats['session_blocks']))
             mining_table.add_row("Total Rewards", f"{stats['total_rewards']:.2f} tokens")
@@ -900,8 +907,10 @@ class MiningLogic:
 
         # Mining state
         self.mining_active = False
+        self.mining_paused = False
         self.mining_process = None
         self.stop_mining = multiprocessing.Event()
+        self.pause_mining = multiprocessing.Event()
 
         # Stats tracking
         self.stats = {
@@ -999,6 +1008,36 @@ class MiningLogic:
 
         return "Mining started"
 
+    def pause_mining(self):
+        """Pause the mining process"""
+        if not self.mining_active:
+            return "Mining is not active"
+
+        if self.mining_paused:
+            return "Mining is already paused"
+
+        self.mining_paused = True
+        self.pause_mining.set()
+        self._send_activity_message("⏸️ Mining paused - CPU usage reduced")
+        print("[MINING PAUSE] Mining paused by user")
+
+        return "Mining paused"
+
+    def resume_mining(self):
+        """Resume the paused mining process"""
+        if not self.mining_active:
+            return "Mining is not active"
+
+        if not self.mining_paused:
+            return "Mining is not paused"
+
+        self.mining_paused = False
+        self.pause_mining.clear()
+        self._send_activity_message("▶️ Mining resumed")
+        print("[MINING RESUME] Mining resumed by user")
+
+        return "Mining resumed"
+
     def stop_mining(self):
         """Stop the mining process"""
         if not self.mining_active:
@@ -1043,6 +1082,13 @@ class MiningLogic:
                 # Update market factors for USD valuation (every 30 seconds)
                 if int(time.time()) % 30 == 0:
                     self.valuation_engine.update_market_factors(self.blockchain, self.stats)
+
+                # Check if mining is paused - sleep and continue
+                if self.pause_mining.is_set():
+                    self._send_activity_message("⏸️ Mining paused - sleeping...")
+                    print("[MINING PAUSED] Mining is paused, sleeping 1s")
+                    time.sleep(1)  # Sleep while paused
+                    continue
 
                 # Check for stop request before starting mining
                 if self.stop_mining.is_set():
@@ -1241,6 +1287,7 @@ class MiningConsoleApp(App):
 
     BINDINGS = [
         Binding("s", "start_mining", "Start Mining"),
+        Binding("p", "pause_mining", "Pause/Resume Mining"),
         Binding("x", "stop_mining", "Stop Mining"),
         Binding("c", "create_transaction", "Create Test TX"),
         Binding("w", "wallet_info", "Wallet Info"),
@@ -1293,6 +1340,17 @@ class MiningConsoleApp(App):
             self.notify("Mining started!", severity="information")
         except Exception as e:
             self.notify(f"Failed to start mining: {e}", severity="error")
+
+    def action_pause_mining(self):
+        """Pause or resume mining action"""
+        try:
+            if self.mining_console.mining_paused:
+                result = self.mining_console.resume_mining()
+            else:
+                result = self.mining_console.pause_mining()
+            self.notify(result, severity="information")
+        except Exception as e:
+            self.notify(f"Failed to toggle mining pause: {e}", severity="error")
 
     def action_stop_mining(self):
         """Stop mining action"""
