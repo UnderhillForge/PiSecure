@@ -1050,46 +1050,30 @@ class MiningLogic:
                     self._send_activity_message("🛑 Mining stopped by user request")
                     break
 
-                # Mine a block with shorter timeout for more responsive stopping
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(self.blockchain.mine_pending_transactions, self.miner_wallet, False)
+                # Mine a block - let it run until completion or stopped
+                try:
+                    # Check for stop request before starting mining
+                    if self.stop_mining.is_set():
+                        self._send_activity_message("🛑 Mining stopped by user request")
+                        break
 
-                    try:
-                        # Shorter timeout for more responsive stopping (0.5 seconds)
-                        block = future.result(timeout=0.5)  # 0.5 second timeout
-                    except concurrent.futures.TimeoutError:
-                        # Mining timed out - check if we should stop
-                        if self.stop_mining.is_set():
-                            self._send_activity_message("🛑 Mining stopped immediately by user request")
-                            break
-                        else:
-                            # Continue mining this block with another short timeout
-                            try:
-                                block = future.result(timeout=0.5)  # Try again briefly
-                            except concurrent.futures.TimeoutError:
-                                # Still no block found, send detailed progress update and continue
-                                elapsed = time.time() - start_time
-                                if nonce_count % 20 == 0:  # More frequent updates
-                                    hashrate = nonce_count / elapsed if elapsed > 0 else 0
+                    # Start mining without timeout - mining will complete when block is found
+                    block = self.blockchain.mine_pending_transactions(self.miner_wallet, False)
 
-                                    # Show detailed mining progress
-                                    progress_percent = min(100, (nonce_count / max(1, elapsed * 1000)) * 100)  # Rough progress estimate
-                                    target_zeros = '0' * self.blockchain.difficulty
+                    if block is None:
+                        # No pending transactions to mine
+                        self._send_activity_message("⚠️ No pending transactions to mine, waiting...")
+                        time.sleep(2)  # Wait before trying again
+                        continue
 
-                                    self._send_activity_message(f"⛏️ Mining... Nonce: {nonce_count:,}")
-                                    self._send_activity_message(f"   Target: {target_zeros} (Difficulty: {self.blockchain.difficulty})")
-                                    self._send_activity_message(f"   Rate: {hashrate:.1f} H/s | Progress: ~{progress_percent:.1f}%")
-                                    self._send_activity_message(f"   Time: {elapsed:.1f}s | Attempts: {nonce_count:,}")
-
-                                    # Show a sample hash calculation (demonstration)
-                                    import hashlib
-                                    sample_data = f"block_{block_index}_nonce_{nonce_count}"
-                                    sample_hash = hashlib.sha256(sample_data.encode()).hexdigest()
-                                    self._send_activity_message(f"   Sample Hash: {sample_hash[:32]}...")
-
-                                time.sleep(0.01)  # Very brief pause
-                                nonce_count += 1
-                                continue
+                except Exception as e:
+                    if self.stop_mining.is_set():
+                        self._send_activity_message("🛑 Mining stopped by user request")
+                        break
+                    else:
+                        self._send_activity_message(f"❌ Mining error: {e}")
+                        time.sleep(5)  # Wait before retrying on error
+                        continue
 
                 if block is not None:
                     # Check if we should stop before processing the found block
@@ -1228,12 +1212,12 @@ class MiningConsoleApp(App):
     }
 
     #network_container {
-        layout: horizontal;
-        height: 8;
+        layout: vertical;
+        height: 16;
     }
 
     #blockchain_stats, #wallet_info {
-        width: 50%;
+        height: 8;
         margin: 0 1;
     }
 
@@ -1245,11 +1229,6 @@ class MiningConsoleApp(App):
     #activity_display {
         height: 12;
         margin: 1;
-    }
-
-    #controls {
-        height: 6;
-        content-align: center middle;
     }
     """
 
@@ -1279,7 +1258,6 @@ class MiningConsoleApp(App):
             yield NetworkPanel(self)
             yield BlocksPanel(self)
             yield MiningActivityPanel(self)
-        yield Static(self._get_controls_text(), id="controls")
         yield Footer()
 
     def on_mount(self):
@@ -1305,18 +1283,6 @@ class MiningConsoleApp(App):
             status_widget.update(self._get_status_bar())
         except:
             pass  # Panels might not be mounted yet
-
-    def _get_controls_text(self):
-        """Get the controls text"""
-        return """
-[dim]┌─[/dim][bold cyan] Mining Console Controls [/bold cyan][dim]─┐[/dim]
-[dim]│[/dim] [green]S[/green] Start Mining  [red]X[/red] Stop Mining   [dim]│[/dim]
-[dim]│[/dim] [yellow]C[/yellow] Test TX      [blue]W[/blue] Wallet Info  [dim]│[/dim]
-[dim]│[/dim] [magenta]N[/magenta] Network     [cyan]R[/cyan] Toggle Relay [dim]│[/dim]
-[dim]│[/dim] [white]V[/white] Valuation    [white]E[/white] Export Stats [dim]│[/dim]
-[dim]│[/dim] [white]H[/white] Help          [white]Q[/white] Quit         [dim]│[/dim]
-[dim]└─────────────────────────────────┘[/dim]
-        """
 
     def _get_status_bar(self):
         """Get the status bar text"""
