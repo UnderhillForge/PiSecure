@@ -469,6 +469,193 @@ class BlockchainAPI:
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
 
+        # Transfer from trust to wallet
+        @self.app.route(f'/api/{self.api_version}/trust/<trust_id>/transfer-to-wallet', methods=['POST'])
+        def transfer_trust_to_wallet(trust_id):
+            try:
+                transfer_data = request.get_json()
+
+                if not transfer_data:
+                    return jsonify({'error': 'No transfer data provided'}), 400
+
+                wallet_address = transfer_data.get('wallet_address')
+                amount = transfer_data.get('amount', 0)
+                reason = transfer_data.get('reason', '')
+
+                if not wallet_address or amount <= 0:
+                    return jsonify({'error': 'wallet_address and valid amount required'}), 400
+
+                trust = token_economics.get_trust(trust_id)
+                if not trust:
+                    return jsonify({'error': 'Trust not found'}), 404
+
+                result = trust.transfer_to_wallet(wallet_address, amount, reason)
+
+                if result.get('success'):
+                    return jsonify(result)
+                else:
+                    return jsonify({'error': result.get('error', 'Transfer failed')}), 400
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Transfer from wallet to foundation
+        @self.app.route(f'/api/{self.api_version}/foundation/contribute', methods=['POST'])
+        def contribute_to_foundation():
+            try:
+                contribution_data = request.get_json()
+
+                if not contribution_data:
+                    return jsonify({'error': 'No contribution data provided'}), 400
+
+                wallet_address = contribution_data.get('wallet_address')
+                amount = contribution_data.get('amount', 0)
+                purpose = contribution_data.get('purpose', 'community_contribution')
+
+                if not wallet_address or amount <= 0:
+                    return jsonify({'error': 'wallet_address and valid amount required'}), 400
+
+                foundation = get_foundation_trust()
+                if foundation is None:
+                    return jsonify({'error': 'Foundation trust not available'}), 503
+
+                success = foundation.receive_from_wallet(wallet_address, amount, purpose)
+
+                if success:
+                    return jsonify({
+                        'success': True,
+                        'contribution_amount': amount,
+                        'purpose': purpose,
+                        'foundation_balance': foundation.balance
+                    })
+                else:
+                    return jsonify({'error': 'Contribution failed'}), 400
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Transfer from foundation to wallet
+        @self.app.route(f'/api/{self.api_version}/foundation/transfer-to-wallet', methods=['POST'])
+        def transfer_foundation_to_wallet():
+            try:
+                transfer_data = request.get_json()
+
+                if not transfer_data:
+                    return jsonify({'error': 'No transfer data provided'}), 400
+
+                wallet_address = transfer_data.get('wallet_address')
+                amount = transfer_data.get('amount', 0)
+                purpose = transfer_data.get('purpose', 'community_reward')
+
+                if not wallet_address or amount <= 0:
+                    return jsonify({'error': 'wallet_address and valid amount required'}), 400
+
+                foundation = get_foundation_trust()
+                if foundation is None:
+                    return jsonify({'error': 'Foundation trust not available - genesis keys required'}), 503
+
+                result = foundation.transfer_to_wallet(wallet_address, amount, purpose)
+
+                if result.get('success'):
+                    return jsonify(result)
+                else:
+                    return jsonify({'error': result.get('error', 'Transfer failed')}), 400
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Register bootstrap operator
+        @self.app.route(f'/api/{self.api_version}/bootstrap/register', methods=['POST'])
+        def register_bootstrap_operator():
+            try:
+                operator_data = request.get_json()
+
+                if not operator_data:
+                    return jsonify({'error': 'No operator data provided'}), 400
+
+                operator_id = operator_data.get('operator_id')
+                if not operator_id:
+                    return jsonify({'error': 'operator_id required'}), 400
+
+                foundation = get_foundation_trust()
+                if foundation is None:
+                    return jsonify({'error': 'Foundation trust not available'}), 503
+
+                success = foundation.register_bootstrap_operator(operator_id, operator_data)
+
+                if success:
+                    return jsonify({
+                        'success': True,
+                        'operator_id': operator_id,
+                        'message': 'Bootstrap operator registered'
+                    })
+                else:
+                    return jsonify({'error': 'Registration failed'}), 400
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Update bootstrap operator metrics
+        @self.app.route(f'/api/{self.api_version}/bootstrap/<operator_id>/metrics', methods=['POST'])
+        def update_bootstrap_metrics(operator_id):
+            try:
+                metrics_data = request.get_json()
+
+                if not metrics_data:
+                    return jsonify({'error': 'No metrics data provided'}), 400
+
+                foundation = get_foundation_trust()
+                if foundation is None:
+                    return jsonify({'error': 'Foundation trust not available'}), 503
+
+                success = foundation.update_bootstrap_metrics(operator_id, metrics_data)
+
+                if success:
+                    return jsonify({
+                        'success': True,
+                        'operator_id': operator_id,
+                        'message': 'Metrics updated'
+                    })
+                else:
+                    return jsonify({'error': 'Metrics update failed'}), 400
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Get bootstrap funding status
+        @self.app.route(f'/api/{self.api_version}/bootstrap/funding-status', methods=['GET'])
+        def get_bootstrap_funding_status():
+            try:
+                foundation = get_foundation_trust()
+                if foundation is None:
+                    return jsonify({'error': 'Foundation trust not available'}), 503
+
+                status = foundation.get_bootstrap_funding_status()
+                return jsonify(status)
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Allocate bootstrap funding (admin/governance function)
+        @self.app.route(f'/api/{self.api_version}/bootstrap/allocate-funding', methods=['POST'])
+        def allocate_bootstrap_funding():
+            try:
+                foundation = get_foundation_trust()
+                if foundation is None:
+                    return jsonify({'error': 'Foundation trust not available - genesis keys required'}), 503
+
+                allocations = foundation.allocate_bootstrap_funding()
+
+                return jsonify({
+                    'success': True,
+                    'allocations': allocations,
+                    'total_operators_funded': len(allocations),
+                    'message': f'Funding allocated to {len(allocations)} bootstrap operators'
+                })
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
         # Foundation status
         @self.app.route(f'/api/{self.api_version}/foundation/status', methods=['GET'])
         def foundation_status():
@@ -769,6 +956,202 @@ class BlockchainAPI:
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
 
+        # === BOOTSTRAP NODE ENDPOINTS ===
+
+        # Bootstrap peer discovery
+        @self.app.route(f'/api/{self.api_version}/bootstrap/peers', methods=['GET'])
+        def get_bootstrap_peers():
+            """Serve initial peer list for new nodes joining the network"""
+            try:
+                # Get verified active peers for bootstrapping
+                bootstrap_peers = self._get_verified_bootstrap_peers()
+
+                # Add this node as a bootstrap reference
+                bootstrap_info = {
+                    'peers': bootstrap_peers,
+                    'bootstrap_node': {
+                        'host': self.host,
+                        'port': self.port,
+                        'node_id': self.peer_discovery.node_id,
+                        'capabilities': ['api', 'p2p_sync', 'mining']
+                    },
+                    'network_info': {
+                        'total_blocks': len(self.blockchain.chain),
+                        'active_nodes': len(bootstrap_peers),
+                        'protocol_version': '1.0',
+                        'genesis_hash': self.blockchain.chain[0].hash if self.blockchain.chain else None
+                    },
+                    'last_updated': time.time(),
+                    'ttl': 300  # Cache for 5 minutes
+                }
+
+                return jsonify(bootstrap_info)
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Network statistics (public dashboard)
+        @self.app.route(f'/api/{self.api_version}/network/stats', methods=['GET'])
+        def network_statistics():
+            """Public network health and statistics dashboard"""
+            try:
+                stats = self._calculate_network_stats()
+
+                return jsonify({
+                    'network_health': stats,
+                    'mining_stats': self._get_mining_stats(),
+                    'geographic_distribution': self._get_node_geography(),
+                    'protocol_info': {
+                        'version': '1.0',
+                        'features': ['p2p_sync', 'mining_teams', 'hardware_verification'],
+                        'consensus': 'proof_of_work'
+                    },
+                    'last_updated': time.time()
+                })
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Node registration for enhanced discovery
+        @self.app.route(f'/api/{self.api_version}/nodes/register', methods=['POST'])
+        def register_node():
+            """Allow nodes to register themselves for better network discovery"""
+            try:
+                node_data = request.get_json()
+
+                if not node_data:
+                    return jsonify({'error': 'No node data provided'}), 400
+
+                required_fields = ['address', 'port', 'node_id']
+                for field in required_fields:
+                    if field not in node_data:
+                        return jsonify({'error': f'Missing required field: {field}'}), 400
+
+                # Validate node information
+                node_id = node_data['node_id']
+                address = node_data['address']
+                port = node_data['port']
+
+                # Basic validation
+                if not isinstance(port, int) or port < 1 or port > 65535:
+                    return jsonify({'error': 'Invalid port number'}), 400
+
+                # Register or update node
+                registered_node = {
+                    'node_id': node_id,
+                    'address': address,
+                    'port': port,
+                    'capabilities': node_data.get('capabilities', []),
+                    'hashrate': node_data.get('hashrate', 0),
+                    'location': node_data.get('location', 'unknown'),
+                    'is_mining': node_data.get('is_mining', False),
+                    'registered_at': time.time(),
+                    'last_seen': time.time(),
+                    'version': node_data.get('version', 'unknown')
+                }
+
+                # Store in registered nodes (in production, use database)
+                if not hasattr(self, 'registered_nodes'):
+                    self.registered_nodes = {}
+
+                self.registered_nodes[node_id] = registered_node
+
+                # Update peer discovery
+                try:
+                    self.peer_discovery.add_peer(
+                        peer_id=node_id,
+                        address=address,
+                        port=port,
+                        capabilities=registered_node['capabilities']
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to update peer discovery: {e}")
+
+                logger.info(f"✅ Registered node: {node_id} at {address}:{port}")
+
+                return jsonify({
+                    'success': True,
+                    'node_id': node_id,
+                    'registered_at': registered_node['registered_at'],
+                    'bootstrap_peers': len(self._get_verified_bootstrap_peers())
+                })
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Node heartbeat/status updates
+        @self.app.route(f'/api/{self.api_version}/nodes/heartbeat', methods=['POST'])
+        def node_heartbeat():
+            """Receive heartbeat from registered nodes"""
+            try:
+                heartbeat_data = request.get_json()
+
+                if not heartbeat_data or 'node_id' not in heartbeat_data:
+                    return jsonify({'error': 'node_id required'}), 400
+
+                node_id = heartbeat_data['node_id']
+
+                if hasattr(self, 'registered_nodes') and node_id in self.registered_nodes:
+                    # Update last seen time and status
+                    node_info = self.registered_nodes[node_id]
+                    node_info['last_seen'] = time.time()
+                    node_info.update(heartbeat_data)  # Update any provided fields
+
+                    return jsonify({'success': True, 'updated': True})
+                else:
+                    return jsonify({'error': 'Node not registered'}), 404
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Get registered nodes (dashboard endpoint)
+        @self.app.route(f'/api/{self.api_version}/nodes', methods=['GET'])
+        def get_registered_nodes():
+            """Get list of registered nodes for dashboard"""
+            try:
+                if not hasattr(self, 'registered_nodes'):
+                    return jsonify({'nodes': [], 'total': 0})
+
+                current_time = time.time()
+                active_nodes = []
+                inactive_nodes = []
+
+                for node_id, node_info in self.registered_nodes.items():
+                    last_seen = node_info.get('last_seen', 0)
+                    is_active = current_time - last_seen < 3600  # Active within 1 hour
+
+                    node_data = {
+                        'node_id': node_id,
+                        'address': node_info.get('address'),
+                        'port': node_info.get('port'),
+                        'capabilities': node_info.get('capabilities', []),
+                        'hashrate': node_info.get('hashrate', 0),
+                        'location': node_info.get('location', 'unknown'),
+                        'is_mining': node_info.get('is_mining', False),
+                        'registered_at': node_info.get('registered_at'),
+                        'last_seen': last_seen,
+                        'version': node_info.get('version', 'unknown'),
+                        'status': 'active' if is_active else 'inactive'
+                    }
+
+                    if is_active:
+                        active_nodes.append(node_data)
+                    else:
+                        inactive_nodes.append(node_data)
+
+                # Sort active nodes by last seen (most recent first)
+                active_nodes.sort(key=lambda x: x['last_seen'], reverse=True)
+
+                return jsonify({
+                    'nodes': active_nodes + inactive_nodes,
+                    'total': len(self.registered_nodes),
+                    'active': len(active_nodes),
+                    'inactive': len(inactive_nodes)
+                })
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
         # === MINING ENDPOINTS ===
 
         # Start mining
@@ -999,10 +1382,21 @@ class BlockchainAPI:
                     'create_trust': {'method': 'POST', 'path': '/trust', 'description': 'Create developer trust fund'},
                     'get_trust': {'method': 'GET', 'path': '/trust/<trust_id>', 'description': 'Get trust fund status'},
                     'fund_trust': {'method': 'POST', 'path': '/trust/<trust_id>/fund', 'description': 'Fund trust account'},
+                    'transfer_trust_to_wallet': {'method': 'POST', 'path': '/trust/<trust_id>/transfer-to-wallet', 'description': 'Transfer tokens from trust to wallet'},
                     'create_subscription_plan': {'method': 'POST', 'path': '/trust/<trust_id>/plan', 'description': 'Create subscription plan'},
                     'subscribe_user': {'method': 'POST', 'path': '/trust/<trust_id>/subscribe', 'description': 'Subscribe user to plan'},
                     'check_user_access': {'method': 'POST', 'path': '/trust/<trust_id>/access/<user_id>', 'description': 'Check user access permissions'},
                     'fee_distribution': {'method': 'GET', 'path': '/economics/fees', 'description': 'Get fee distribution rules'},
+
+                    # Foundation Transfers (Genesis Key Required)
+                    'contribute_to_foundation': {'method': 'POST', 'path': '/foundation/contribute', 'description': 'Contribute tokens from wallet to foundation'},
+                    'transfer_foundation_to_wallet': {'method': 'POST', 'path': '/foundation/transfer-to-wallet', 'description': 'Transfer tokens from foundation to wallet'},
+
+                    # Bootstrap Operators (Foundation Managed)
+                    'register_bootstrap_operator': {'method': 'POST', 'path': '/bootstrap/register', 'description': 'Register bootstrap operator for funding'},
+                    'update_bootstrap_metrics': {'method': 'POST', 'path': '/bootstrap/<operator_id>/metrics', 'description': 'Update operator service metrics'},
+                    'get_bootstrap_funding_status': {'method': 'GET', 'path': '/bootstrap/funding-status', 'description': 'Get bootstrap funding allocation status'},
+                    'allocate_bootstrap_funding': {'method': 'POST', 'path': '/bootstrap/allocate-funding', 'description': 'Allocate funding to bootstrap operators'},
 
                     # Foundation (Genesis Key Required)
                     'foundation_status': {'method': 'GET', 'path': '/foundation/status', 'description': 'Get foundation trust status'},
@@ -1245,6 +1639,198 @@ class BlockchainAPI:
         except Exception as e:
             logger.debug(f"Low load discovery failed: {e}")
 
+    # === BOOTSTRAP NODE HELPER METHODS ===
+
+    def _get_verified_bootstrap_peers(self) -> List[Dict[str, Any]]:
+        """Get list of verified, active peers for bootstrapping new nodes"""
+        try:
+            # Get known peers from discovery
+            known_peers = self.peer_discovery.get_known_peers()
+
+            verified_peers = []
+            current_time = time.time()
+
+            for peer_id, peer_info in known_peers.items():
+                # Check if peer is active (seen within last hour)
+                last_seen = peer_info.get('last_seen', 0)
+                if current_time - last_seen > 3600:  # 1 hour
+                    continue
+
+                # Check if peer has required capabilities
+                capabilities = peer_info.get('capabilities', [])
+                if 'p2p_sync' not in capabilities:
+                    continue
+
+                # Add to verified list
+                verified_peers.append({
+                    'node_id': peer_id,
+                    'address': peer_info.get('address'),
+                    'port': peer_info.get('port', 3142),
+                    'capabilities': capabilities,
+                    'last_seen': last_seen
+                })
+
+                # Limit to prevent abuse
+                if len(verified_peers) >= 50:
+                    break
+
+            return verified_peers
+
+        except Exception as e:
+            logger.error(f"Failed to get verified bootstrap peers: {e}")
+            return []
+
+    def _calculate_network_stats(self) -> Dict[str, Any]:
+        """Calculate comprehensive network statistics"""
+        try:
+            # Get blockchain info
+            chain_info = self.blockchain.get_chain_info()
+            network_health = chain_info.get('network_health', {})
+
+            # Get peer counts
+            known_peers = len(self.peer_discovery.get_known_peers())
+            connected_peers = len(self.peer_discovery.get_connected_peers())
+
+            # Get registered nodes if available
+            registered_nodes = getattr(self, 'registered_nodes', {})
+            active_registered = sum(
+                1 for node in registered_nodes.values()
+                if time.time() - node.get('last_seen', 0) < 3600  # Active within 1 hour
+            )
+
+            # Calculate estimated network hashrate (simplified)
+            estimated_hashrate = self._estimate_network_hashrate()
+
+            # Calculate participation score
+            participation = min(1.0, active_registered / max(1, known_peers)) if known_peers > 0 else 0
+
+            # Network health score
+            health_score = (participation * 0.4) + (network_health.get('health_score', 0.5) * 0.6)
+
+            return {
+                'active_nodes': max(connected_peers, active_registered),
+                'total_known_peers': known_peers,
+                'connected_peers': connected_peers,
+                'registered_nodes': len(registered_nodes),
+                'estimated_hashrate': estimated_hashrate,
+                'participation_score': participation,
+                'health_score': health_score,
+                'avg_block_time': network_health.get('avg_block_time', 600),
+                'total_blocks': chain_info.get('blocks', 0),
+                'pending_transactions': chain_info.get('pending_transactions', 0),
+                'difficulty': chain_info.get('difficulty', 4)
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to calculate network stats: {e}")
+            return {
+                'active_nodes': 0,
+                'total_known_peers': 0,
+                'connected_peers': 0,
+                'registered_nodes': 0,
+                'estimated_hashrate': 0,
+                'participation_score': 0,
+                'health_score': 0,
+                'avg_block_time': 600,
+                'total_blocks': 0,
+                'pending_transactions': 0,
+                'difficulty': 4
+            }
+
+    def _estimate_network_hashrate(self) -> float:
+        """Estimate total network hashrate based on registered nodes"""
+        try:
+            registered_nodes = getattr(self, 'registered_nodes', {})
+            total_hashrate = 0
+
+            for node_info in registered_nodes.values():
+                # Only count recently active nodes
+                if time.time() - node_info.get('last_seen', 0) < 3600:  # 1 hour
+                    total_hashrate += node_info.get('hashrate', 0)
+
+            # Add some estimation for unregistered nodes
+            estimated_unregistered = max(0, len(registered_nodes) * 0.5)
+            total_hashrate += estimated_unregistered * 1.0  # Assume 1 MH/s average
+
+            return max(total_hashrate, 0.1)  # Minimum estimate
+
+        except Exception as e:
+            logger.debug(f"Hashrate estimation failed: {e}")
+            return 0.1
+
+    def _get_mining_stats(self) -> Dict[str, Any]:
+        """Get comprehensive mining statistics"""
+        try:
+            # Get registered mining nodes
+            registered_nodes = getattr(self, 'registered_nodes', {})
+            mining_nodes = [
+                node for node in registered_nodes.values()
+                if node.get('is_mining', False) and time.time() - node.get('last_seen', 0) < 3600
+            ]
+
+            # Calculate mining statistics
+            active_miners = len(mining_nodes)
+            total_mining_hashrate = sum(node.get('hashrate', 0) for node in mining_nodes)
+
+            # Get recent blocks for mining activity
+            recent_blocks = self.blockchain.chain[-10:] if len(self.blockchain.chain) > 10 else self.blockchain.chain
+            blocks_last_hour = sum(
+                1 for block in recent_blocks
+                if time.time() - block.timestamp < 3600
+            )
+
+            return {
+                'active_miners': active_miners,
+                'total_mining_hashrate': total_mining_hashrate,
+                'blocks_last_hour': blocks_last_hour,
+                'avg_blocks_per_hour': blocks_last_hour,
+                'mining_nodes': [
+                    {
+                        'node_id': node['node_id'],
+                        'hashrate': node.get('hashrate', 0),
+                        'location': node.get('location', 'unknown')
+                    } for node in mining_nodes[:10]  # Top 10 miners
+                ]
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get mining stats: {e}")
+            return {
+                'active_miners': 0,
+                'total_mining_hashrate': 0,
+                'blocks_last_hour': 0,
+                'avg_blocks_per_hour': 0,
+                'mining_nodes': []
+            }
+
+    def _get_node_geography(self) -> Dict[str, Any]:
+        """Get geographic distribution of registered nodes"""
+        try:
+            registered_nodes = getattr(self, 'registered_nodes', {})
+
+            # Count nodes by location (simplified - would use IP geolocation in production)
+            locations = {}
+            for node_info in registered_nodes.values():
+                location = node_info.get('location', 'unknown')
+                locations[location] = locations.get(location, 0) + 1
+
+            # Sort by count
+            sorted_locations = sorted(locations.items(), key=lambda x: x[1], reverse=True)
+
+            return {
+                'total_locations': len(locations),
+                'top_locations': dict(sorted_locations[:10]),
+                'distribution': locations
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get node geography: {e}")
+            return {
+                'total_locations': 0,
+                'top_locations': {},
+                'distribution': {}
+            }
+
     def run(self, debug: bool = False):
         """
         Start the API server with automatic network discovery and P2P sync.
@@ -1255,12 +1841,18 @@ class BlockchainAPI:
         logger.info(f"🚀 Starting PiSecure API Server on {self.host}:{self.port}")
         logger.info(f"📚 API Documentation: http://{self.host}:{self.port}/api/{self.api_version}/docs")
 
+        # Register this node with bootstrap service
+        self._register_with_bootstrap()
+
         # Start automatic network discovery
         self._start_automatic_discovery()
 
         # Start P2P blockchain synchronization
         self.p2p_sync.start_sync()
         logger.info("🔄 Started P2P blockchain synchronization")
+
+        # Start heartbeat reporting
+        self._start_heartbeat_reporting()
 
         try:
             self.app.run(
@@ -1273,6 +1865,163 @@ class BlockchainAPI:
             # Clean up on shutdown
             logger.info("🛑 Shutting down P2P sync...")
             self.p2p_sync.stop_sync()
+            if hasattr(self, '_heartbeat_thread'):
+                self._heartbeat_thread.join(timeout=5)
+
+    def _register_with_bootstrap(self):
+        """Register this node with the bootstrap service on startup"""
+        try:
+            # Get node information
+            node_id = self.peer_discovery.node_id
+            host = self.host if self.host != '0.0.0.0' else 'localhost'
+            port = self.port
+
+            # Get system information
+            import platform
+            import psutil
+
+            # Determine location (simplified - would use IP geolocation)
+            location = 'unknown'
+            try:
+                # Try to get a basic location hint
+                hostname = platform.node()
+                if 'pi' in hostname.lower() or 'raspberry' in hostname.lower():
+                    location = 'raspberry-pi'
+                else:
+                    location = 'server'
+            except:
+                pass
+
+            # Get capabilities
+            capabilities = ['api', 'p2p_sync', 'mining']
+
+            # Prepare registration data (matching bootstrap server requirements)
+            registration_data = {
+                'node_id': node_id,
+                'node_type': 'standard',  # Default type, can be updated based on services
+                'services': ['api', 'p2p_sync'],  # Services offered
+                'capabilities': capabilities,
+                'location': location,
+                'wallet_address': None  # Will be set if available
+            }
+
+            # Determine node type based on capabilities
+            if 'mining' in capabilities:
+                registration_data['node_type'] = 'miner'
+            elif 'block_validation' in capabilities:
+                registration_data['node_type'] = 'validator'
+
+            # Try to get wallet address from config
+            try:
+                import json as json_lib
+                config_path = "/etc/pisecure/config.json"
+                with open(config_path, 'r') as f:
+                    config = json_lib.load(f)
+                wallet_addr = config.get('mining', {}).get('wallet_address')
+                if wallet_addr:
+                    registration_data['wallet_address'] = wallet_addr
+            except:
+                pass
+
+            # Register with bootstrap service
+            import requests
+
+            bootstrap_urls = [
+                "https://bootstrap.pisecure.org/api/v1/nodes/register",
+                "https://pisecure-bootstrap-production.up.railway.app/api/v1/nodes/register"
+            ]
+
+            registered = False
+            for bootstrap_url in bootstrap_urls:
+                try:
+                    response = requests.post(bootstrap_url, json=registration_data, timeout=10)
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get('registration_success'):
+                            logger.info(f"✅ Node registered with bootstrap: {node_id}")
+                            registered = True
+                            break
+                        else:
+                            logger.warning(f"⚠️ Bootstrap registration rejected: {result}")
+                    else:
+                        logger.debug(f"Bootstrap URL {bootstrap_url} returned {response.status_code}")
+                except Exception as e:
+                    logger.debug(f"Failed to register with {bootstrap_url}: {e}")
+                    continue
+
+            if not registered:
+                logger.warning("⚠️ Could not register with any bootstrap service - node may not appear on dashboard")
+            else:
+                # Store our node ID for heartbeat updates
+                self._registered_node_id = node_id
+                logger.info(f"📡 Node {node_id} registered with bootstrap network")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to register with bootstrap service: {e}")
+
+    def _start_heartbeat_reporting(self):
+        """Start periodic heartbeat reporting to bootstrap service"""
+        try:
+            if not hasattr(self, '_registered_node_id'):
+                logger.debug("Node not registered with bootstrap - skipping heartbeat")
+                return
+
+            # Start heartbeat thread
+            self._heartbeat_thread = threading.Thread(
+                target=self._heartbeat_worker,
+                daemon=True,
+                name="BootstrapHeartbeat"
+            )
+            self._heartbeat_thread.start()
+            logger.info("💓 Started bootstrap heartbeat reporting")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to start heartbeat reporting: {e}")
+
+    def _heartbeat_worker(self):
+        """Background worker for sending periodic heartbeats to bootstrap"""
+        import time
+
+        heartbeat_interval = 300  # 5 minutes
+        time.sleep(60)  # Wait 1 minute before first heartbeat
+
+        while True:
+            try:
+                # Get current node status
+                heartbeat_data = {
+                    'node_id': self._registered_node_id,
+                    'is_mining': getattr(self, '_mining_active', False),
+                    'hashrate': getattr(self, '_current_hashrate', 0.0),
+                    'last_seen': time.time()
+                }
+
+                # Try to send heartbeat to bootstrap services
+                bootstrap_urls = [
+                    "https://bootstrap.pisecure.org/api/v1/nodes/status",
+                    "https://pisecure-bootstrap-production.up.railway.app/api/v1/nodes/status"
+                ]
+
+                sent = False
+                for bootstrap_url in bootstrap_urls:
+                    try:
+                        import requests
+                        response = requests.post(bootstrap_url, json=heartbeat_data, timeout=10)
+                        if response.status_code == 200:
+                            sent = True
+                            break
+                    except Exception as e:
+                        logger.debug(f"Heartbeat failed to {bootstrap_url}: {e}")
+                        continue
+
+                if sent:
+                    logger.debug(f"💓 Heartbeat sent for node {self._registered_node_id}")
+                else:
+                    logger.debug("⚠️ Could not send heartbeat to any bootstrap service")
+
+            except Exception as e:
+                logger.debug(f"Heartbeat error: {e}")
+
+            time.sleep(heartbeat_interval)
 
 
 # Standalone server runner

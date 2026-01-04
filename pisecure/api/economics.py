@@ -63,8 +63,8 @@ class FeeDistribution:
         self.distribution_rules = {
             'miner': 0.60,           # 60% to block miner
             'stakers': 0.20,         # 20% to token stakers
-            'loan_holders': 0.10,   # 10% to PiSecure loan holders
-            'foundation': 0.05,     # 5% to 314ST Foundation
+            'loan_holders': 0.08,   # 8% to PiSecure loan holders (reduced for bootstrap funding)
+            'foundation': 0.07,     # 7% to 314ST Foundation (increased for bootstrap operators)
             'burn': 0.05            # 5% burned (deflationary)
         }
 
@@ -269,6 +269,84 @@ class DeveloperTrust:
 
         return billing_events
 
+    def transfer_to_wallet(self, wallet_address: str, amount: float, reason: str = "") -> Dict[str, Any]:
+        """
+        Transfer tokens from trust fund to a wallet.
+
+        This allows trust funds to distribute tokens back to users
+        (e.g., refunds, bonuses, dividends).
+        """
+        if amount <= 0:
+            return {'success': False, 'error': 'Invalid transfer amount'}
+
+        if self.balance < amount:
+            return {'success': False, 'error': 'Insufficient trust balance'}
+
+        # Deduct from trust balance
+        self.balance -= amount
+
+        # Create transfer transaction (would be submitted to blockchain)
+        transfer_tx = {
+            'type': 'trust_to_wallet_transfer',
+            'trust_id': self.trust_id,
+            'recipient_wallet': wallet_address,
+            'amount': amount,
+            'reason': reason,
+            'timestamp': time.time(),
+            'signature': f"trust_transfer_{self.trust_id}_{time.time()}"
+        }
+
+        # Log the transfer
+        if not hasattr(self, 'transfer_history'):
+            self.transfer_history = []
+
+        self.transfer_history.append({
+            'type': 'outgoing',
+            'recipient': wallet_address,
+            'amount': amount,
+            'reason': reason,
+            'timestamp': time.time()
+        })
+
+        return {
+            'success': True,
+            'transfer_tx': transfer_tx,
+            'new_balance': self.balance
+        }
+
+    def receive_from_wallet(self, wallet_address: str, amount: float, reference: str = "") -> bool:
+        """
+        Receive tokens from a wallet to the trust fund.
+
+        This provides an alternative to the fund_trust method
+        for direct wallet-to-trust transfers.
+        """
+        if amount <= 0:
+            return False
+
+        # Credit the trust balance
+        self.balance += amount
+
+        # Log the receipt
+        if not hasattr(self, 'transfer_history'):
+            self.transfer_history = []
+
+        self.transfer_history.append({
+            'type': 'incoming',
+            'sender': wallet_address,
+            'amount': amount,
+            'reference': reference,
+            'timestamp': time.time()
+        })
+
+        return True
+
+    def get_transfer_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get trust fund transfer history"""
+        if not hasattr(self, 'transfer_history'):
+            return []
+        return self.transfer_history[-limit:] if limit > 0 else self.transfer_history
+
     def get_status(self) -> Dict[str, Any]:
         """Get trust status"""
         return {
@@ -280,6 +358,7 @@ class DeveloperTrust:
             'subscribers_count': len(self.subscribers),
             'free_users_count': len(self.free_access_users),
             'plans_count': len(self.subscription_plans),
+            'transfer_history_count': len(getattr(self, 'transfer_history', [])),
             'created_at': self.created_at
         }
 
@@ -294,14 +373,16 @@ class FoundationTrust:
         self.genesis_public_key = self._load_genesis_public_key()
 
         self.allocation_rules = {
-            'development': 0.40,      # 40% Core development
-            'grants': 0.30,          # 30% Developer grants
-            'marketing': 0.15,       # 15% Ecosystem growth
-            'reserve': 0.15          # 15% Strategic reserve
+            'development': 0.35,      # 35% Core development
+            'grants': 0.25,           # 25% Developer grants
+            'bootstrap_operators': 0.20,  # 20% Bootstrap operators
+            'marketing': 0.10,        # 10% Ecosystem growth
+            'reserve': 0.10           # 10% Strategic reserve
         }
         self.funds_allocated = {category: 0 for category in self.allocation_rules}
         self.active_grants: List[Dict[str, Any]] = []
         self.governance_proposals: List[Dict[str, Any]] = []
+        self.bootstrap_operators: Dict[str, Dict[str, Any]] = {}
         self.transaction_log: List[Dict[str, Any]] = []
 
     def _load_genesis_private_key(self):
@@ -555,9 +636,283 @@ class FoundationTrust:
         if len(self.transaction_log) > 1000:
             self.transaction_log = self.transaction_log[-1000:]
 
+    def transfer_to_wallet(self, wallet_address: str, amount: float, purpose: str = "") -> Dict[str, Any]:
+        """
+        Transfer tokens from foundation to a wallet.
+
+        Requires genesis key signature for security.
+        Used for community rewards, grants, or governance decisions.
+        """
+        if amount <= 0:
+            return {'success': False, 'error': 'Invalid transfer amount'}
+
+        if self.balance < amount:
+            return {'success': False, 'error': 'Insufficient foundation balance'}
+
+        # Create transaction data
+        transaction_data = {
+            'type': 'foundation_to_wallet_transfer',
+            'foundation_address': self.address,
+            'recipient_wallet': wallet_address,
+            'amount': amount,
+            'purpose': purpose,
+            'timestamp': time.time()
+        }
+
+        # Sign with genesis key
+        signature = self.sign_foundation_transaction(transaction_data)
+
+        # Execute transfer
+        self.balance -= amount
+
+        # Log transaction
+        self._log_transaction({
+            'type': 'wallet_transfer',
+            'recipient': wallet_address,
+            'amount': amount,
+            'purpose': purpose,
+            'signature': signature,
+            'timestamp': time.time()
+        })
+
+        return {
+            'success': True,
+            'transaction_data': transaction_data,
+            'signature': signature,
+            'new_balance': self.balance
+        }
+
+    def receive_from_wallet(self, wallet_address: str, amount: float, purpose: str = "") -> bool:
+        """
+        Receive tokens from a wallet to the foundation.
+
+        Used for community donations or foundation funding.
+        """
+        if amount <= 0:
+            return False
+
+        # Credit foundation balance
+        self.balance += amount
+
+        # Log transaction
+        self._log_transaction({
+            'type': 'wallet_contribution',
+            'sender': wallet_address,
+            'amount': amount,
+            'purpose': purpose,
+            'timestamp': time.time()
+        })
+
+        return True
+
     def get_transaction_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Get foundation transaction history"""
         return self.transaction_log[-limit:] if limit > 0 else self.transaction_log
+
+    def register_bootstrap_operator(self, operator_id: str, operator_data: Dict[str, Any]) -> bool:
+        """
+        Register a bootstrap operator for funding consideration.
+
+        Bootstrap operators provide critical infrastructure services:
+        - Network discovery and peer lists
+        - Intelligence services (threat detection, routing)
+        - Geographic clustering and optimization
+        """
+        required_fields = ['wallet_address', 'services', 'location']
+        for field in required_fields:
+            if field not in operator_data:
+                return False
+
+        # Initialize operator record
+        operator_record = {
+            'operator_id': operator_id,
+            'wallet_address': operator_data['wallet_address'],
+            'services': operator_data['services'],  # ['discovery', 'intelligence', 'monitoring']
+            'location': operator_data['location'],
+            'uptime_percentage': operator_data.get('uptime_percentage', 95.0),
+            'registered_at': time.time(),
+            'last_active': time.time(),
+            'service_quality_score': 0.0,  # Calculated from metrics
+            'funding_received': 0.0,
+            'performance_metrics': {
+                'total_requests_served': 0,
+                'successful_responses': 0,
+                'avg_response_time': 0.0,
+                'threat_detections': 0,
+                'peers_discovered': 0
+            }
+        }
+
+        self.bootstrap_operators[operator_id] = operator_record
+        return True
+
+    def update_bootstrap_metrics(self, operator_id: str, metrics: Dict[str, Any]) -> bool:
+        """Update service quality metrics for a bootstrap operator"""
+        if operator_id not in self.bootstrap_operators:
+            return False
+
+        operator = self.bootstrap_operators[operator_id]
+
+        # Update performance metrics
+        perf_metrics = operator['performance_metrics']
+        for key, value in metrics.items():
+            if key in perf_metrics:
+                if isinstance(perf_metrics[key], (int, float)):
+                    perf_metrics[key] += value
+                else:
+                    perf_metrics[key] = value
+
+        # Update last active timestamp
+        operator['last_active'] = time.time()
+
+        # Recalculate service quality score
+        operator['service_quality_score'] = self._calculate_service_quality_score(operator)
+
+        return True
+
+    def _calculate_service_quality_score(self, operator: Dict[str, Any]) -> float:
+        """Calculate service quality score based on metrics"""
+        metrics = operator['performance_metrics']
+
+        # Base score from uptime
+        score = operator.get('uptime_percentage', 95.0) / 100.0
+
+        # Bonus for successful responses
+        total_requests = metrics.get('total_requests_served', 0)
+        successful_responses = metrics.get('successful_responses', 0)
+
+        if total_requests > 0:
+            success_rate = successful_responses / total_requests
+            score *= (0.8 + 0.2 * success_rate)  # 80-100% based on success rate
+
+        # Bonus for performance
+        avg_response_time = metrics.get('avg_response_time', 0)
+        if avg_response_time > 0:
+            # Faster responses get higher scores
+            performance_bonus = max(0, 1.0 - (avg_response_time / 1000.0))  # Assume <1s is perfect
+            score *= (0.9 + 0.1 * performance_bonus)
+
+        # Bonus for threat detections and peer discoveries
+        threat_detections = metrics.get('threat_detections', 0)
+        peers_discovered = metrics.get('peers_discovered', 0)
+
+        intelligence_bonus = min(0.1, (threat_detections + peers_discovered) / 1000.0)
+        score += intelligence_bonus
+
+        return min(1.0, score)  # Cap at 1.0
+
+    def allocate_bootstrap_funding(self) -> Dict[str, Dict[str, Any]]:
+        """Allocate bootstrap operator funding based on service quality"""
+        if not self.bootstrap_operators:
+            return {}
+
+        # Calculate total available funding for bootstrap operators
+        available_funds = self.funds_allocated.get('bootstrap_operators', 0)
+        if available_funds <= 0:
+            return {}
+
+        # Filter active operators (seen within last 24 hours)
+        active_operators = {}
+        current_time = time.time()
+
+        for op_id, operator in self.bootstrap_operators.items():
+            if current_time - operator['last_active'] < 86400:  # 24 hours
+                active_operators[op_id] = operator
+
+        if not active_operators:
+            return {}
+
+        # Calculate funding allocation based on service quality scores
+        total_quality_score = sum(op['service_quality_score'] for op in active_operators.values())
+
+        if total_quality_score == 0:
+            # Equal distribution if no quality metrics
+            equal_share = available_funds / len(active_operators)
+            allocations = {}
+            for op_id in active_operators.keys():
+                allocations[op_id] = {
+                    'amount': equal_share,
+                    'reason': 'equal_distribution_no_metrics'
+                }
+        else:
+            # Proportional distribution based on quality scores
+            allocations = {}
+            for op_id, operator in active_operators.items():
+                quality_ratio = operator['service_quality_score'] / total_quality_score
+                allocation_amount = available_funds * quality_ratio
+
+                allocations[op_id] = {
+                    'amount': allocation_amount,
+                    'quality_score': operator['service_quality_score'],
+                    'reason': 'quality_based_allocation'
+                }
+
+        # Execute funding transfers
+        funded_operators = {}
+        for op_id, allocation in allocations.items():
+            operator = self.bootstrap_operators[op_id]
+            amount = allocation['amount']
+
+            if amount > 0 and self.balance >= amount:
+                # Transfer funds to operator wallet
+                result = self.transfer_to_wallet(
+                    operator['wallet_address'],
+                    amount,
+                    f"Bootstrap operator funding - {allocation['reason']}"
+                )
+
+                if result.get('success'):
+                    operator['funding_received'] += amount
+                    funded_operators[op_id] = {
+                        'operator_id': op_id,
+                        'wallet_address': operator['wallet_address'],
+                        'amount_funded': amount,
+                        'quality_score': operator['service_quality_score'],
+                        'services': operator['services'],
+                        'transaction_signature': result['signature']
+                    }
+
+                    # Log the funding
+                    self._log_transaction({
+                        'type': 'bootstrap_funding',
+                        'operator_id': op_id,
+                        'amount': amount,
+                        'quality_score': operator['service_quality_score'],
+                        'reason': allocation['reason'],
+                        'timestamp': time.time()
+                    })
+
+        # Reset allocated funds for next period
+        self.funds_allocated['bootstrap_operators'] = 0
+
+        return funded_operators
+
+    def get_bootstrap_operators(self) -> Dict[str, Dict[str, Any]]:
+        """Get all registered bootstrap operators"""
+        return self.bootstrap_operators
+
+    def get_bootstrap_funding_status(self) -> Dict[str, Any]:
+        """Get bootstrap funding allocation status"""
+        active_operators = {}
+        current_time = time.time()
+
+        for op_id, operator in self.bootstrap_operators.items():
+            if current_time - operator['last_active'] < 86400:  # 24 hours
+                active_operators[op_id] = {
+                    'operator_id': op_id,
+                    'services': operator['services'],
+                    'location': operator['location'],
+                    'quality_score': operator['service_quality_score'],
+                    'funding_received': operator['funding_received'],
+                    'last_active': operator['last_active']
+                }
+
+        return {
+            'active_operators': active_operators,
+            'total_operators': len(self.bootstrap_operators),
+            'available_funding': self.funds_allocated.get('bootstrap_operators', 0),
+            'allocation_rules': self.allocation_rules.get('bootstrap_operators', 0)
+        }
 
     def get_status(self) -> Dict[str, Any]:
         """Get foundation status"""
@@ -567,6 +922,7 @@ class FoundationTrust:
             'funds_allocated': self.funds_allocated,
             'active_grants': len(self.active_grants),
             'allocation_rules': self.allocation_rules,
+            'bootstrap_operators_count': len(self.bootstrap_operators),
             'total_transactions': len(self.transaction_log),
             'genesis_key_loaded': self.genesis_private_key is not None
         }

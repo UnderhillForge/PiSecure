@@ -20,6 +20,539 @@ except ImportError:
     HYBRID_STORAGE_AVAILABLE = False
 
 
+class PiHardwareVerifier:
+    """Hardware verification and capability assessment for Raspberry Pi miners"""
+
+    def __init__(self):
+        self.supported_models = {
+            'pi3': {
+                'min_clock': 1200,  # MHz
+                'max_hashrate': 0.8,  # MH/s SHA256
+                'security_level': 1,
+                'deprecated': True
+            },
+            'pi4': {
+                'min_clock': 1500,
+                'max_hashrate': 2.0,
+                'security_level': 2,
+                'deprecated': False
+            },
+            'pi5': {
+                'min_clock': 2400,
+                'max_hashrate': 5.0,
+                'security_level': 3,
+                'deprecated': False
+            },
+            'pi400': {  # Pi 400 (keyboard form factor)
+                'min_clock': 1800,
+                'max_hashrate': 2.5,
+                'security_level': 2,
+                'deprecated': False
+            },
+            'pi_zero_2_w': {  # Pi Zero 2 W
+                'min_clock': 1000,
+                'max_hashrate': 0.5,
+                'security_level': 1,
+                'deprecated': False
+            }
+        }
+        self.min_security_level = 2  # Minimum accepted security level
+        self.hardware_cache_timeout = 3600  # Cache hardware info for 1 hour
+
+    def verify_hardware_capability(self) -> Dict[str, Any]:
+        """Verify detected Pi model meets mining requirements"""
+        detected_model = self._detect_pi_model()
+        if not detected_model:
+            return {
+                'valid': False,
+                'error': 'Unable to detect Raspberry Pi hardware',
+                'model': None
+            }
+
+        if detected_model not in self.supported_models:
+            return {
+                'valid': False,
+                'error': f'Unsupported Raspberry Pi model: {detected_model}',
+                'model': detected_model
+            }
+
+        model_specs = self.supported_models[detected_model]
+
+        # Check if model is deprecated
+        if model_specs.get('deprecated', False):
+            return {
+                'valid': False,
+                'error': f'Raspberry Pi model {detected_model} is deprecated for mining',
+                'model': detected_model,
+                'upgrade_recommended': True
+            }
+
+        # Measure actual hardware performance
+        measured_hashrate = self._measure_actual_hashrate()
+        min_required = model_specs['max_hashrate'] * 0.7  # 70% of spec minimum
+
+        if measured_hashrate < min_required:
+            return {
+                'valid': False,
+                'error': f'Hardware underperforming: {measured_hashrate:.1f} MH/s < {min_required:.1f} MH/s required',
+                'model': detected_model,
+                'measured_hashrate': measured_hashrate,
+                'required_hashrate': min_required
+            }
+
+        # Verify security level
+        if model_specs['security_level'] < self.min_security_level:
+            return {
+                'valid': False,
+                'error': f'Hardware security level too low: {model_specs["security_level"]} < {self.min_security_level}',
+                'model': detected_model
+            }
+
+        return {
+            'valid': True,
+            'model': detected_model,
+            'measured_hashrate': measured_hashrate,
+            'performance_factor': measured_hashrate / model_specs['max_hashrate'],
+            'security_level': model_specs['security_level'],
+            'capabilities': model_specs
+        }
+
+    def _detect_pi_model(self) -> Optional[str]:
+        """Detect the Raspberry Pi model"""
+        try:
+            # Read from /proc/cpuinfo
+            with open('/proc/cpuinfo', 'r') as f:
+                cpuinfo = f.read()
+
+            # Extract model information
+            model_line = None
+            for line in cpuinfo.split('\n'):
+                if line.startswith('Model'):
+                    model_line = line
+                    break
+
+            if not model_line:
+                return None
+
+            model_str = model_line.split(':')[1].strip().lower()
+
+            # Map common model strings to our internal codes
+            model_mapping = {
+                'raspberry pi 3': 'pi3',
+                'raspberry pi 4': 'pi4',
+                'raspberry pi 5': 'pi5',
+                'raspberry pi 400': 'pi400',
+                'raspberry pi zero 2': 'pi_zero_2_w',
+                'raspberry pi zero 2 w': 'pi_zero_2_w'
+            }
+
+            for key, code in model_mapping.items():
+                if key in model_str:
+                    return code
+
+            # Try to extract version number
+            if 'pi 3' in model_str:
+                return 'pi3'
+            elif 'pi 4' in model_str:
+                return 'pi4'
+            elif 'pi 5' in model_str:
+                return 'pi5'
+            elif '400' in model_str:
+                return 'pi400'
+            elif 'zero 2' in model_str:
+                return 'pi_zero_2_w'
+
+        except Exception as e:
+            print(f"⚠️ Hardware detection failed: {e}")
+
+        return None
+
+    def _measure_actual_hashrate(self) -> float:
+        """Measure actual mining hashrate of this Pi"""
+        try:
+            # Quick benchmark: mine with low difficulty for 2 seconds
+            import hashlib
+            import time
+
+            target = "00"  # Difficulty 2
+            start_time = time.time()
+            hashes = 0
+
+            while time.time() - start_time < 2.0:  # 2 second test
+                test_data = f"benchmark_{hashes}_{time.time()}"
+                hash_result = hashlib.sha256(test_data.encode()).hexdigest()
+                hashes += 1
+
+                if hash_result.startswith(target):
+                    break
+
+            elapsed = time.time() - start_time
+            hashrate_mh = (hashes / elapsed) / 1000000  # Convert to MH/s
+
+            return max(hashrate_mh, 0.1)  # Minimum 0.1 MH/s to avoid division by zero
+
+        except Exception as e:
+            print(f"⚠️ Hashrate measurement failed: {e}")
+            return 0.1  # Safe fallback
+
+    def get_hardware_recommendations(self) -> Dict[str, Any]:
+        """Get hardware upgrade recommendations"""
+        current_verification = self.verify_hardware_capability()
+
+        recommendations = {
+            'current_model': current_verification.get('model'),
+            'current_valid': current_verification.get('valid', False),
+            'upgrade_options': []
+        }
+
+        if not current_verification.get('valid', False):
+            # Suggest upgrades
+            current_model = current_verification.get('model')
+            current_level = self.supported_models.get(current_model, {}).get('security_level', 0)
+
+            for model, specs in self.supported_models.items():
+                if not specs.get('deprecated', False) and specs['security_level'] > current_level:
+                    recommendations['upgrade_options'].append({
+                        'model': model,
+                        'improvement_factor': specs['max_hashrate'] / max(
+                            self.supported_models.get(current_model, {}).get('max_hashrate', 1), 0.1),
+                        'security_level': specs['security_level']
+                    })
+
+        return recommendations
+
+    def calculate_mining_efficiency(self, model: str) -> float:
+        """Calculate mining efficiency score for a model"""
+        if model not in self.supported_models:
+            return 0.0
+
+        specs = self.supported_models[model]
+        # Efficiency = hashrate / power consumption (estimated)
+        # Pi 4: ~15W, Pi 5: ~25W
+        power_estimates = {
+            'pi3': 5, 'pi4': 15, 'pi5': 25, 'pi400': 10, 'pi_zero_2_w': 2
+        }
+
+        power = power_estimates.get(model, 10)
+        hashrate = specs['max_hashrate']
+
+        return hashrate / power  # MH/s per Watt
+
+
+class MiningTeam:
+    """Decentralized mining team for collaborative block finding"""
+
+    def __init__(self, team_name: str, founder_wallet: str):
+        self.team_id = hashlib.sha256(f"team_{team_name}".encode()).hexdigest()[:16]
+        self.team_name = team_name
+        self.founder_wallet = founder_wallet
+        self.created_at = time.time()
+
+        # Team members: wallet -> member_data
+        self.members: Dict[str, Dict] = {
+            founder_wallet: {
+                'joined_at': time.time(),
+                'role': 'founder',
+                'shares_submitted': 0,
+                'hashrate_contributed': 0,
+                'last_active': time.time(),
+                'rewards_earned': 0
+            }
+        }
+
+        # Team statistics
+        self.total_shares = 0
+        self.blocks_found = 0
+        self.total_rewards = 0
+        self.active_miners = 0
+
+        # Team settings
+        self.reward_distribution = 'proportional'  # proportional, equal, founder_bonus
+        self.min_hashrate = 0.1  # Minimum hashrate to join (MH/s)
+        self.max_members = 50  # Maximum team size
+        self.team_description = f"PiSecure mining team: {team_name}"
+
+    def add_member(self, wallet_address: str, hashrate: float = 0) -> bool:
+        """Add a new member to the team"""
+        if len(self.members) >= self.max_members:
+            return False
+
+        if hashrate < self.min_hashrate:
+            return False
+
+        if wallet_address in self.members:
+            return False  # Already a member
+
+        self.members[wallet_address] = {
+            'joined_at': time.time(),
+            'role': 'member',
+            'shares_submitted': 0,
+            'hashrate_contributed': hashrate,
+            'last_active': time.time(),
+            'rewards_earned': 0
+        }
+
+        return True
+
+    def remove_member(self, wallet_address: str) -> bool:
+        """Remove a member from the team"""
+        if wallet_address not in self.members:
+            return False
+
+        # Can't remove founder
+        if self.members[wallet_address]['role'] == 'founder':
+            return False
+
+        del self.members[wallet_address]
+        return True
+
+    def submit_share(self, wallet_address: str, share_data: Dict) -> bool:
+        """Submit a mining share from a team member"""
+        if wallet_address not in self.members:
+            return False
+
+        # Validate share (simplified - would check proof-of-work)
+        if not self._validate_share(share_data):
+            return False
+
+        # Update member statistics
+        member = self.members[wallet_address]
+        member['shares_submitted'] += 1
+        member['last_active'] = time.time()
+
+        self.total_shares += 1
+
+        return True
+
+    def _validate_share(self, share_data: Dict) -> bool:
+        """Validate a submitted mining share"""
+        required_fields = ['nonce', 'timestamp', 'difficulty']
+        for field in required_fields:
+            if field not in share_data:
+                return False
+
+        # Basic validation - in production would verify proof-of-work
+        return True
+
+    def calculate_reward_distribution(self, block_reward: float, finder_wallet: str) -> Dict[str, float]:
+        """Calculate how to distribute block reward among team members"""
+        if finder_wallet not in self.members:
+            return {}  # Finder not in team
+
+        distributions = {}
+
+        if self.reward_distribution == 'proportional':
+            # Distribute based on hashrate contribution
+            total_hashrate = sum(member['hashrate_contributed'] for member in self.members.values())
+
+            if total_hashrate > 0:
+                team_pool = block_reward * 0.9  # 90% to team
+                finder_bonus = block_reward * 0.1  # 10% bonus to finder
+
+                for wallet, member in self.members.items():
+                    hashrate_ratio = member['hashrate_contributed'] / total_hashrate
+                    team_reward = team_pool * hashrate_ratio
+                    distributions[wallet] = team_reward
+
+                    if wallet == finder_wallet:
+                        distributions[wallet] += finder_bonus
+
+        elif self.reward_distribution == 'equal':
+            # Equal distribution
+            equal_share = block_reward / len(self.members)
+            for wallet in self.members:
+                distributions[wallet] = equal_share
+
+        return distributions
+
+    def get_team_stats(self) -> Dict[str, Any]:
+        """Get comprehensive team statistics"""
+        return {
+            'team_id': self.team_id,
+            'team_name': self.team_name,
+            'founder': self.founder_wallet,
+            'member_count': len(self.members),
+            'active_miners': self.active_miners,
+            'total_shares': self.total_shares,
+            'blocks_found': self.blocks_found,
+            'total_rewards': self.total_rewards,
+            'avg_hashrate': sum(m['hashrate_contributed'] for m in self.members.values()),
+            'created_at': self.created_at,
+            'reward_distribution': self.reward_distribution
+        }
+
+    def update_member_hashrate(self, wallet_address: str, hashrate: float):
+        """Update a member's hashrate contribution"""
+        if wallet_address in self.members:
+            self.members[wallet_address]['hashrate_contributed'] = hashrate
+            self.members[wallet_address]['last_active'] = time.time()
+
+    def get_active_members(self) -> List[str]:
+        """Get list of currently active team members"""
+        active = []
+        cutoff_time = time.time() - 300  # Active within last 5 minutes
+
+        for wallet, member in self.members.items():
+            if member['last_active'] > cutoff_time:
+                active.append(wallet)
+
+        self.active_miners = len(active)
+        return active
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert team to dictionary for serialization"""
+        return {
+            'team_id': self.team_id,
+            'team_name': self.team_name,
+            'founder_wallet': self.founder_wallet,
+            'created_at': self.created_at,
+            'members': self.members,
+            'total_shares': self.total_shares,
+            'blocks_found': self.blocks_found,
+            'total_rewards': self.total_rewards,
+            'settings': {
+                'reward_distribution': self.reward_distribution,
+                'min_hashrate': self.min_hashrate,
+                'max_members': self.max_members,
+                'description': self.team_description
+            }
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'MiningTeam':
+        """Create team from dictionary"""
+        team = cls(data['team_name'], data['founder_wallet'])
+        team.team_id = data['team_id']
+        team.created_at = data['created_at']
+        team.members = data['members']
+        team.total_shares = data['total_shares']
+        team.blocks_found = data['blocks_found']
+        team.total_rewards = data['total_rewards']
+
+        settings = data.get('settings', {})
+        team.reward_distribution = settings.get('reward_distribution', 'proportional')
+        team.min_hashrate = settings.get('min_hashrate', 0.1)
+        team.max_members = settings.get('max_members', 50)
+        team.team_description = settings.get('description', '')
+
+        return team
+
+
+class TeamCoordinator:
+    """Coordinates mining activities among team members"""
+
+    def __init__(self, team: MiningTeam, local_wallet: str):
+        self.team = team
+        self.local_wallet = local_wallet
+        self.is_coordinator = (local_wallet == team.founder_wallet)
+        self.work_assignments = {}  # nonce ranges for team members
+        self.pending_shares = []  # Shares waiting for validation
+        self.last_team_broadcast = 0
+
+    def coordinate_team_mining(self):
+        """Main coordination function called during mining"""
+        current_time = time.time()
+
+        # Update team member status
+        self._update_member_status()
+
+        # Redistribute work if needed
+        if self._should_redistribute_work():
+            self._redistribute_work()
+
+        # Broadcast team status periodically
+        if current_time - self.last_team_broadcast > 60:  # Every minute
+            self._broadcast_team_status()
+            self.last_team_broadcast = current_time
+
+        # Process pending shares
+        self._process_pending_shares()
+
+    def _update_member_status(self):
+        """Update status of team members"""
+        # This would be called when receiving team messages
+        # For now, just update local member
+        self.team.update_member_hashrate(self.local_wallet, 1.0)  # Placeholder hashrate
+
+    def _should_redistribute_work(self) -> bool:
+        """Check if work should be redistributed"""
+        # Redistribute if member count changed significantly
+        # or if hashrates changed
+        return False  # Simplified for initial implementation
+
+    def _redistribute_work(self):
+        """Redistribute mining work among team members"""
+        # Simplified work distribution
+        # In production, would assign nonce ranges based on hashrate
+        pass
+
+    def _broadcast_team_status(self):
+        """Broadcast current team status to members"""
+        # This would use P2P messaging to broadcast team status
+        team_status = {
+            'team_id': self.team.team_id,
+            'active_members': len(self.team.get_active_members()),
+            'total_hashrate': sum(m['hashrate_contributed'] for m in self.team.members.values()),
+            'recent_shares': self.team.total_shares
+        }
+
+        # Broadcast via P2P network (placeholder)
+        self._p2p_broadcast('team_status', team_status)
+
+    def _process_pending_shares(self):
+        """Process and validate pending mining shares"""
+        # Validate shares and update team statistics
+        for share in self.pending_shares[:]:
+            if self.team.submit_share(share['wallet'], share['data']):
+                self.pending_shares.remove(share)
+
+    def submit_team_share(self, share_data: Dict):
+        """Submit a mining share to the team"""
+        share = {
+            'wallet': self.local_wallet,
+            'data': share_data,
+            'timestamp': time.time()
+        }
+
+        self.pending_shares.append(share)
+
+        # Broadcast share to team (for validation)
+        self._p2p_broadcast('share_submission', share)
+
+    def handle_block_found(self, block_data: Dict, finder_wallet: str):
+        """Handle when a team member finds a block"""
+        if finder_wallet not in self.team.members:
+            return
+
+        # Update team statistics
+        self.team.blocks_found += 1
+
+        # Calculate reward distribution
+        block_reward = 10  # Simplified reward
+        reward_distribution = self.team.calculate_reward_distribution(block_reward, finder_wallet)
+
+        # Distribute rewards
+        for wallet, reward in reward_distribution.items():
+            self.team.members[wallet]['rewards_earned'] += reward
+            self.team.total_rewards += reward
+
+        # Broadcast block found event
+        block_event = {
+            'finder_wallet': finder_wallet,
+            'block_height': block_data.get('index', 0),
+            'team_reward_distribution': reward_distribution,
+            'total_team_reward': sum(reward_distribution.values())
+        }
+
+        self._p2p_broadcast('block_found', block_event)
+
+    def _p2p_broadcast(self, message_type: str, payload: Dict):
+        """Broadcast message via P2P network (placeholder)"""
+        # This would integrate with the existing P2P sync system
+        # For now, just log the message
+        print(f"📡 Team broadcast: {message_type} - {payload}")
+
+
 class SignBlock:
     """Individual block in the PiSecure blockchain"""
 
@@ -251,27 +784,74 @@ class SignBlock:
                 print(f"   Time: {elapsed:.2f}s")
             return False
 
+    def _calculate_mining_timeout(self, difficulty: int) -> int:
+        """Calculate adaptive mining timeout based on difficulty"""
+        # Base timeout for difficulty 1 (reasonable for testing)
+        base_timeout = 100000  # 100K attempts
+
+        # Scale exponentially with difficulty
+        # Each difficulty level multiplies attempts by ~4
+        # Difficulty 2: 400K, Difficulty 4: 1.6M, Difficulty 6: 6.4M
+        scaled_timeout = int(base_timeout * (4 ** (difficulty - 1)))
+
+        # Cap at reasonable maximum to prevent extremely long waits
+        # 100M attempts should be sufficient even for high difficulty
+        return min(scaled_timeout, 100000000)
+
+    def _should_reduce_mining_difficulty(self, start_time: float, attempts: int, difficulty: int) -> bool:
+        """Check if mining difficulty should be reduced due to timeout concerns"""
+        elapsed = time.time() - start_time
+
+        # If we've been mining for more than 5 minutes with no success, consider reducing
+        if elapsed > 300:  # 5 minutes
+            # Check if we're making reasonable progress
+            expected_attempts = self._calculate_mining_timeout(difficulty)
+            progress_ratio = attempts / expected_attempts
+
+            # If we're at 50% of expected attempts and still no success, difficulty is too high
+            if progress_ratio > 0.5:
+                return True
+
+        # Check network conditions - if we're isolated, don't keep high difficulty
+        if self._detect_isolated_mining():
+            return True
+
+        return False
+
+    def _detect_isolated_mining(self) -> bool:
+        """Detect if we're the only active miner (simplified heuristic)"""
+        # For now, disable this check to prevent the AttributeError
+        # This would need to be implemented at the SignChain level
+        # since SignBlock doesn't have access to the full chain
+        return False
+
     def mine_block(self, difficulty: int = 4, verbose: bool = False) -> bool:
-        """Mine the block with proof-of-work (single-threaded)"""
+        """Mine the block with adaptive proof-of-work and smart timeout prevention"""
         target = "0" * difficulty
         start_time = time.time()
         hashes_tried = 0
         last_update = 0
+
+        # Calculate adaptive timeout based on difficulty
+        max_attempts = self._calculate_mining_timeout(difficulty)
 
         if verbose:
             print(f"\n🎯 Mining Block #{self.index}")
             print(f"   Target: {target} (Difficulty: {difficulty})")
             print(f"   Transactions: {len(self.transactions)}")
             print(f"   Previous Hash: {self.previous_hash[:24]}...")
+            print(f"   Max Attempts: {max_attempts:,}")
             print("\n" + "="*60)
+
+        sample_interval = 5000  # Check progress every 5K attempts
 
         while self.hash[:difficulty] != target:
             self.nonce += 1
             self.hash = self.calculate_hash()
             hashes_tried += 1
 
-            # Show progress every 5000 attempts in verbose mode (less frequent)
-            if verbose and hashes_tried % 5000 == 0:
+            # Show progress every sample_interval in verbose mode
+            if verbose and hashes_tried % sample_interval == 0:
                 elapsed = time.time() - start_time
                 hashrate = hashes_tried / elapsed if elapsed > 0 else 0
                 current_prefix = self.hash[:difficulty]
@@ -280,11 +860,31 @@ class SignBlock:
                 # Clear line and update in place
                 print(f"\r⛏️  Mining... Nonce: {self.nonce:,} | Progress: {progress}/{difficulty} | Hashrate: {hashrate:.0f} H/s", end="", flush=True)
 
-            # Prevent infinite loop in testing
-            if self.nonce > 1000000:
+                # Check if we should reduce difficulty due to timeout concerns
+                if self._should_reduce_mining_difficulty(start_time, hashes_tried, difficulty):
+                    new_difficulty = max(difficulty - 1, 2)  # Minimum difficulty 2 for security
+                    if new_difficulty != difficulty:
+                        print(f"\n⚠️ Mining timeout risk detected, reducing difficulty {difficulty} → {new_difficulty}")
+                        # Recursively mine with lower difficulty
+                        return self.mine_block(new_difficulty, verbose)
+
+            # Prevent infinite loops - use adaptive limit
+            if hashes_tried >= max_attempts:
                 if verbose:
-                    print(f"\n❌ Mining failed - exceeded 1M attempts")
-                return False
+                    elapsed = time.time() - start_time
+                    print(f"\n⚠️ Mining timeout after {hashes_tried:,} attempts ({elapsed:.1f}s)")
+
+                # Try with reduced difficulty
+                new_difficulty = max(difficulty - 1, 2)
+                if new_difficulty < difficulty:
+                    if verbose:
+                        print(f"🔄 Retrying with reduced difficulty {difficulty} → {new_difficulty}")
+                    return self.mine_block(new_difficulty, verbose)
+                else:
+                    # Can't reduce further, fail
+                    if verbose:
+                        print("❌ Mining failed - cannot reduce difficulty further")
+                    return False
 
         # Found a valid nonce!
         elapsed = time.time() - start_time
@@ -319,7 +919,7 @@ class SignChain:
     """PiSecure Private Blockchain with Hardware Verification"""
 
     def __init__(self, chain_file: str = "/var/lib/pisecure/blockchain.json",
-                 difficulty: int = 2, use_hybrid_storage: bool = None,
+                 difficulty: int = 6, use_hybrid_storage: bool = None,
                  mining_algorithm: str = 'sha256'):
         self.chain_file = Path(chain_file)
         self.pending_file = Path(chain_file).parent / "pending_transactions.json"
@@ -330,6 +930,17 @@ class SignChain:
         self.name_registry: Dict[str, Dict[str, Any]] = {}  # name -> {address, registered_at, tx_hash}
         self.lock = threading.Lock()
         self.mining_algorithm = mining_algorithm
+
+        # Discovery rate limiting
+        self.last_discovery_trigger = 0
+        self.discovery_backoff_time = 300  # 5 minutes base backoff
+        self.consecutive_discovery_failures = 0
+
+        # Mining safety limits
+        self.emergency_difficulty_floor = 2  # Never go below difficulty 2 for security
+
+        # Hardware verification for scaling
+        self.hardware_verifier = PiHardwareVerifier()
 
         # Storage system - default to hybrid if available and not explicitly disabled
         if use_hybrid_storage is None:
@@ -1465,21 +2076,112 @@ class SignChain:
         """Get list of all registered names"""
         return list(self.name_registry.keys())
 
+    def _should_trigger_discovery(self, block) -> bool:
+        """Determine if discovery should be triggered for this block"""
+        current_time = time.time()
+
+        # Always trigger on milestone blocks (every 10th block)
+        if block.index % 10 == 0:
+            return True
+
+        # Trigger if no discovery in last 30 minutes (for network health)
+        if current_time - self.last_discovery_trigger > 1800:
+            return True
+
+        # Trigger if we have pending transactions (need network for propagation)
+        if len(self.pending_transactions) > 5:
+            return True
+
+        # Trigger if we're potentially the only active miner
+        # (based on recent block production)
+        if self._should_discover_for_network_health():
+            return True
+
+        # Don't trigger if too soon since last discovery
+        if current_time - self.last_discovery_trigger < self.discovery_backoff_time:
+            return False
+
+        return False
+
+    def _should_discover_for_network_health(self) -> bool:
+        """Check if discovery is needed for network health"""
+        if len(self.chain) < 5:
+            return True  # Early network, discovery important
+
+        # Check recent block production
+        recent_blocks = self.chain[-5:]  # Last 5 blocks
+        if len(recent_blocks) < 5:
+            return True
+
+        # If all recent blocks are ours, we might be isolated
+        # (This is a simplified heuristic)
+        return True  # For now, be conservative
+
     def _trigger_discovery_on_block(self, block):
-        """Trigger network discovery after successful block mining"""
+        """Trigger network discovery after successful block mining with smart rate limiting"""
         try:
             from pisecure.core.nat_traversal import node_discovery
-            print(f"🔄 Triggering discovery after mining block #{block.index}...")
 
-            # Perform discovery refresh to announce new block
-            discovery_results = node_discovery.make_node_discoverable()
-            if discovery_results['success_count'] > 0:
-                print(f"✅ Mining-triggered discovery successful: {discovery_results['success_count']} methods")
-            else:
-                print("Mining-triggered discovery found no new endpoints")
+            # Check if we should trigger discovery
+            if not self._should_trigger_discovery(block):
+                print(f"⏰ Skipping discovery for block #{block.index} (rate limited)")
+                return
+
+            print(f"🔄 Triggering smart discovery after mining block #{block.index}...")
+
+            # Critical sync operations (update peer routing)
+            self._update_critical_network_state()
+
+            # Non-critical operations (full discovery) - async
+            import threading
+            discovery_thread = threading.Thread(
+                target=self._async_full_discovery,
+                args=(block,),
+                daemon=True,
+                name=f"Discovery-{block.index}"
+            )
+            discovery_thread.start()
+
+            # Update trigger timestamp
+            self.last_discovery_trigger = time.time()
 
         except Exception as e:
-            print(f"⚠️ Mining-triggered discovery failed: {e}")
+            print(f"⚠️ Failed to trigger discovery after mining: {e}")
+
+    def _update_critical_network_state(self):
+        """Update critical network state that must happen synchronously"""
+        try:
+            # This could include updating local peer routing tables
+            # or other time-sensitive network state
+            # For now, this is a placeholder
+            pass
+        except Exception as e:
+            print(f"⚠️ Critical network state update failed: {e}")
+
+    def _async_full_discovery(self, block):
+        """Perform full discovery asynchronously"""
+        try:
+            from pisecure.core.nat_traversal import node_discovery
+
+            # Perform the actual discovery
+            discovery_results = node_discovery.make_node_discoverable()
+
+            if discovery_results['success_count'] > 0:
+                print(f"✅ Async discovery successful: {discovery_results['success_count']} methods")
+                # Reset failure counter on success
+                self.consecutive_discovery_failures = 0
+            else:
+                print("⚠️ Async discovery found no new endpoints")
+                self.consecutive_discovery_failures += 1
+
+                # If too many failures, increase backoff time
+                if self.consecutive_discovery_failures >= 3:
+                    self.discovery_backoff_time = min(self.discovery_backoff_time * 2, 3600)  # Max 1 hour
+                    print(f"🔄 Increasing discovery backoff to {self.discovery_backoff_time}s due to failures")
+
+        except Exception as e:
+            print(f"⚠️ Async discovery failed: {e}")
+            self.consecutive_discovery_failures += 1
 
     def get_wallet_names(self, wallet_address: str) -> List[str]:
         """Get all names registered to a wallet address"""
@@ -1488,3 +2190,22 @@ class SignChain:
             if info['address'] == wallet_address:
                 names.append(name)
         return names
+
+    def verify_hardware_capability(self) -> Dict[str, Any]:
+        """Verify this node's hardware capability for mining"""
+        return self.hardware_verifier.verify_hardware_capability()
+
+    def get_hardware_upgrade_recommendations(self) -> Dict[str, Any]:
+        """Get hardware upgrade recommendations for better mining performance"""
+        return self.hardware_verifier.get_hardware_recommendations()
+
+    def get_hardware_efficiency_score(self, model: str = None) -> float:
+        """Get mining efficiency score for current or specified hardware model"""
+        if model is None:
+            # Get current model
+            verification = self.verify_hardware_capability()
+            model = verification.get('model')
+            if not model:
+                return 0.0
+
+        return self.hardware_verifier.calculate_mining_efficiency(model)

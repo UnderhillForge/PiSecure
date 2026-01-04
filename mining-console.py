@@ -40,11 +40,35 @@ try:
     from pisecure.core.blockchain import SignChain
     from pisecure.core.hardware import HardwareVerifier
     from pisecure.core.nat_traversal import node_discovery
+    from pisecure.core.p2p_sync import P2PSyncManager
+    from pisecure.core.consensus import get_consensus_engine
+    from pisecure.network.discovery import PeerDiscovery
 except ImportError:
     # Fall back to absolute imports (for direct execution)
     from core.blockchain import SignChain
     from core.hardware import HardwareVerifier
     from core.nat_traversal import node_discovery
+    from core.p2p_sync import P2PSyncManager
+    from core.consensus import get_consensus_engine
+    from network.discovery import PeerDiscovery
+
+
+class SyndicateCoordinator:
+    """Simple syndicate coordinator wrapper for consensus engine"""
+
+    def __init__(self, syndicate_info: dict, miner_wallet: str):
+        self.syndicate_info = syndicate_info
+        self.miner_wallet = miner_wallet
+        self.participants = syndicate_info.get('participants', {})
+        self.total_hashrate = syndicate_info.get('total_hashrate', 0)
+
+    def get_syndicate_stats(self) -> dict:
+        """Get syndicate statistics"""
+        return {
+            'participants': len(self.participants),
+            'total_hashrate': self.total_hashrate,
+            'name': self.syndicate_info.get('syndicate_id', 'Unknown')
+        }
 
 
 class TextualLogHandler(logging.Handler):
@@ -291,16 +315,38 @@ class MiningApp(App):
         Binding("q", "quit", "Quit", show=True),
     ]
 
-    def __init__(self):
+    def __init__(self, team_name=None, create_team=None, wallet=None):
         super().__init__()
+
+        # Handle command line arguments
+        self.team_name = team_name
+        self.create_team = create_team
+        self.miner_wallet = wallet or self._load_miner_wallet()
+
         self.blockchain = SignChain()
         self.hardware = HardwareVerifier()
-        self.miner_wallet = self._load_miner_wallet()
+
+        # Initialize syndicate support
+        self.current_syndicate = None
+        self.syndicate_coordinator = None
+        # Syndicate support will be initialized after P2P sync
 
         # Mining state
         self.mining_active = False
         self.mining_thread = None
         self.stop_event = threading.Event()
+
+        # Setup logging early for P2P sync
+        self._setup_logging()
+        self.logger = logging.getLogger('mining_console')
+
+        # P2P sync integration
+        self.p2p_sync = None
+        self.peer_discovery = None
+        self._init_p2p_sync()
+
+        # Initialize syndicate support after P2P sync
+        self._init_syndicate_support()
 
         # CPU/Hashrate history for graphs (last 60 samples)
         self.cpu_history = deque([0.0] * 60, maxlen=60)
@@ -327,10 +373,6 @@ class MiningApp(App):
         self.network_update_counter = 0
         self.network_update_interval = 20
 
-        # Setup logging
-        self._setup_logging()
-        self.logger = logging.getLogger('mining_console')
-
     def _setup_logging(self):
         """Setup logging to write to the Textual Log widget"""
         pass
@@ -344,6 +386,89 @@ class MiningApp(App):
             return config.get('mining', {}).get('wallet_address')
         except (FileNotFoundError, json.JSONDecodeError, KeyError):
             return None
+
+    def _init_syndicate_support(self):
+        """Initialize syndicate mining support based on command line arguments"""
+        # Get consensus engine
+        self.consensus_engine = get_consensus_engine(self.blockchain, p2p_sync=self.p2p_sync)
+
+        if self.create_team:  # create_team argument refers to syndicate
+            # Create a new syndicate
+            try:
+                syndicate = self.consensus_engine.create_mining_syndicate(self.create_team, self.miner_wallet)
+                self.current_syndicate = self.create_team
+                self.syndicate_coordinator = SyndicateCoordinator(
+                    syndicate.get_syndicate_stats(),
+                    self.miner_wallet
+                )
+                self.logger.info(f"🏢 Created syndicate '{self.create_team}'")
+            except ValueError as e:
+                self.logger.error(f"Failed to create syndicate: {e}")
+
+        elif self.team_name:  # team_name argument refers to syndicate
+            # Join existing syndicate
+            success = self.consensus_engine.join_mining_syndicate(
+                self.team_name, self.miner_wallet, hashrate=1.0,
+                hardware_score=2.0, location="unknown"
+            )
+            if success:
+                self.current_syndicate = self.team_name
+                syndicate_stats = self.consensus_engine.get_syndicate_stats(self.team_name)
+                self.syndicate_coordinator = SyndicateCoordinator(
+                    syndicate_stats,
+                    self.miner_wallet
+                )
+                self.logger.info(f"🤝 Joined syndicate '{self.team_name}'")
+            else:
+                self.logger.error(f"Failed to join syndicate '{self.team_name}'")
+
+        # Log syndicate status
+        if self.current_syndicate:
+            syndicate_info = self.consensus_engine.get_syndicate_stats(self.current_syndicate)
+            participant_count = syndicate_info.get('participant_count', 0)
+            syndicate_name = self.team_name or self.create_team
+            self.logger.info(f"📊 Syndicate '{syndicate_name}': {participant_count} participants")
+        else:
+            self.logger.info("👤 Solo mining (no syndicate)")
+
+    def _init_p2p_sync(self):
+        """Initialize P2P sync manager for network synchronization before mining"""
+        try:
+            self.peer_discovery = PeerDiscovery()
+            self.p2p_sync = P2PSyncManager(self.blockchain, self.peer_discovery)
+            self.logger.info("✅ P2P sync initialized for network synchronization")
+        except Exception as e:
+            self.logger.warning(f"⚠️ Failed to initialize P2P sync: {e}")
+            self.p2p_sync = None
+
+    def _sync_with_network(self):
+        """Synchronize blockchain with network before mining"""
+        if not self.p2p_sync:
+            self.logger.warning("P2P sync not available - mining without network sync")
+            return
+
+        try:
+            self.logger.info("🔄 Syncing with network before mining...")
+
+            # Perform a sync cycle
+            sync_stats = self.p2p_sync.get_sync_status()
+            initial_height = len(self.blockchain.chain)
+
+            # Force a sync cycle by calling the internal method
+            self.p2p_sync._perform_sync_cycle()
+
+            # Check if we got new blocks
+            final_height = len(self.blockchain.chain)
+            blocks_synced = final_height - initial_height
+
+            if blocks_synced > 0:
+                self.logger.info(f"✅ Synced {blocks_synced} blocks from network")
+                self.logger.info(f"   New chain height: {final_height}")
+            else:
+                self.logger.info("✅ Already up-to-date with network")
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Network sync failed: {e} - proceeding with mining")
 
     def compose(self) -> ComposeResult:
         """Create the bashtop-inspired dashboard layout"""
@@ -740,11 +865,14 @@ class MiningApp(App):
         self.notify(f"✅ Mining stopped - {session_blocks} blocks mined", severity="information")
 
     def _mining_worker(self):
-        """Background mining worker"""
+        """Background mining worker with network sync before mining"""
         self.logger.info("⛏️  Mining worker started")
         self.logger.info(f"📍 Wallet: {self.miner_wallet[:20] + '...' if self.miner_wallet else 'None'}")
         self.logger.info(f"📦 Chain height: {len(self.blockchain.chain)}")
         self.logger.info(f"⚙️  Difficulty: {self.blockchain.difficulty}")
+
+        # Sync with network before starting mining
+        self._sync_with_network()
 
         while not self.stop_event.is_set():
             try:
@@ -787,6 +915,18 @@ class MiningApp(App):
                         # Log transaction summary
                         tx_count = len(block.transactions)
                         self.logger.info(f"📝 Block contains {tx_count} transaction(s)")
+
+                        # Broadcast the new block to the P2P network
+                        if self.p2p_sync:
+                            self.p2p_sync.broadcast_new_block({
+                                'index': block.index,
+                                'hash': block.hash,
+                                'timestamp': block.timestamp,
+                                'transactions': len(block.transactions),
+                                'miner_wallet': self.miner_wallet,
+                                'nonce': nonce
+                            })
+                            self.logger.info("📡 Block broadcasted to P2P network")
 
                         self.notify(f"✅ Block #{block.index} mined!", severity="success")
                     else:
@@ -902,7 +1042,20 @@ class MiningApp(App):
 
 def main():
     """Main entry point"""
-    app = MiningApp()
+    import argparse
+
+    parser = argparse.ArgumentParser(description='PiSecure Mining Console')
+    parser.add_argument('--wallet', type=str, default='miner_wallet',
+                       help='Wallet address for mining rewards (default: miner_wallet)')
+    parser.add_argument('--syndicate', type=str,
+                       help='Join existing mining syndicate')
+    parser.add_argument('--create-syndicate', type=str,
+                       help='Create new mining syndicate')
+
+    args = parser.parse_args()
+
+    # Pass syndicate arguments to the app (map to existing parameters for backward compatibility)
+    app = MiningApp(team_name=args.syndicate, create_team=args.create_syndicate, wallet=args.wallet)
     app.run()
 
 

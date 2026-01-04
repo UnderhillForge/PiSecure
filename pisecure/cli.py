@@ -14,11 +14,15 @@ from rich.table import Table
 try:
     # Try relative imports first (for package installation)
     from .core import SignChain, HardwareVerifier, SignTokenMiner
+    from .core.p2p_sync import P2PSyncManager
+    from .network.discovery import PeerDiscovery
     from .updates import OTAUpdater
     from .identity import DeviceIdentity, DeviceAuthenticator
 except ImportError:
     # Fall back to absolute imports (for direct execution)
     from core import SignChain, HardwareVerifier, SignTokenMiner
+    from core.p2p_sync import P2PSyncManager
+    from network.discovery import PeerDiscovery
     from updates import OTAUpdater
     from identity import DeviceIdentity, DeviceAuthenticator
 
@@ -129,7 +133,8 @@ def create_tx(count):
 @click.option('--interactive/--background', default=True,
               help='Interactive mining with progress display')
 @click.option('--wallet', help='Wallet address to receive mining rewards')
-def mine(interactive, wallet):
+@click.option('--no-sync', is_flag=True, help='Skip network synchronization before mining')
+def mine(interactive, wallet, no_sync):
     """Start blockchain mining"""
     try:
         blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
@@ -151,6 +156,27 @@ def mine(interactive, wallet):
             console.print("[yellow]⚠️ No miner wallet configured[/yellow]")
             console.print("[dim]Use --wallet to specify wallet address, or set mining.wallet_address in /etc/pisecure/config.json[/dim]")
             miner_wallet = None
+
+        # Sync with network before mining (unless disabled)
+        if not no_sync:
+            try:
+                console.print("[blue]🔄 Syncing with network before mining...[/blue]")
+                peer_discovery = PeerDiscovery()
+                p2p_sync = P2PSyncManager(blockchain, peer_discovery)
+
+                initial_height = len(blockchain.chain)
+                p2p_sync._perform_sync_cycle()
+                final_height = len(blockchain.chain)
+                blocks_synced = final_height - initial_height
+
+                if blocks_synced > 0:
+                    console.print(f"[green]✅ Synced {blocks_synced} blocks from network[/green]")
+                else:
+                    console.print("[green]✅ Already up-to-date with network[/green]")
+            except Exception as e:
+                console.print(f"[yellow]⚠️ Network sync failed, proceeding with mining: {e}[/yellow]")
+        else:
+            console.print("[yellow]⚠️ Skipping network sync (--no-sync flag used)[/yellow]")
 
         if interactive:
             console.print("[green]⛏️ Starting interactive mining...[/green]")

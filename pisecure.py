@@ -18,8 +18,13 @@ def main():
         print("  pisecure.py status          - Show blockchain status")
         print("  pisecure.py wallet          - Show wallet information")
         print("  pisecure.py mine           - Start mining")
+        print("  pisecure.py mine --team NAME - Join mining team")
         print("  pisecure.py dashboard      - Start web dashboard")
         print("  pisecure.py create-wallet  - Create new wallet")
+        print()
+        print("Team Mining:")
+        print("  --team NAME        Join existing team")
+        print("  --create-team NAME Create new team")
         print()
         print("For full CLI: python -m pisecure.cli")
         return

@@ -89,8 +89,9 @@ class PeerDiscovery:
 
     def get_known_peers(self) -> Dict[str, Dict]:
         """Get all known peers."""
+        import copy
         with self.lock:
-            return self.known_peers.copy()
+            return copy.deepcopy(self.known_peers)
 
     def get_connected_peers(self) -> List[str]:
         """Get list of currently connected peers."""

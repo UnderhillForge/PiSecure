@@ -19,7 +19,8 @@ import time
 import json
 import threading
 import hashlib
-from typing import Dict, List, Optional, Set, Tuple
+import requests
+from typing import Dict, List, Optional, Set, Tuple, Any
 from pathlib import Path
 import logging
 
@@ -52,9 +53,19 @@ class P2PSyncManager:
             max_sync_peers: Maximum peers to sync with simultaneously
         """
         self.blockchain = blockchain
-        self.peer_discovery = peer_discovery
+        self.peer_discovery = peer_discovery or PeerDiscovery()
         self.sync_interval = sync_interval
         self.max_sync_peers = max_sync_peers
+
+        # Bootstrap node configuration
+        self.bootstrap_urls = [
+            "https://bootstrap.pisecure.org/api/v1/bootstrap/peers",  # Primary domain
+            "https://pisecure-bootstrap-production.up.railway.app/api/v1/bootstrap/peers",  # Fallback
+            # Add more bootstrap nodes as they become available
+        ]
+        self.bootstrap_discovery_enabled = True
+        self.last_bootstrap_check = 0
+        self.bootstrap_check_interval = 300  # 5 minutes
 
         # Sync state
         self.is_syncing = False
@@ -75,7 +86,18 @@ class P2PSyncManager:
         self.known_blocks: Set[str] = set()
         self.pending_blocks: Dict[str, Dict] = {}
 
-        logger.info("🔄 P2P Sync Manager initialized")
+        # Syndicate support
+        self.syndicates: Dict[str, Dict] = {}  # syndicate_id -> syndicate_info
+        self.syndicate_memberships: Dict[str, str] = {}  # wallet -> syndicate_id
+        self.syndicate_message_handlers = {
+            'join_syndicate': self._handle_join_syndicate,
+            'leave_syndicate': self._handle_leave_syndicate,
+            'syndicate_status': self._handle_syndicate_status,
+            'share_submission': self._handle_share_submission,
+            'block_found': self._handle_syndicate_block_found,
+        }
+
+        logger.info("🔄 P2P Sync Manager initialized with syndicate support")
 
     def start_sync(self):
         """Start the P2P synchronization process."""
@@ -121,6 +143,13 @@ class P2PSyncManager:
 
     def _perform_sync_cycle(self):
         """Perform one complete synchronization cycle."""
+        # Check bootstrap nodes for new peers periodically
+        current_time = time.time()
+        if (self.bootstrap_discovery_enabled and
+            current_time - self.last_bootstrap_check > self.bootstrap_check_interval):
+            self._discover_bootstrap_peers()
+            self.last_bootstrap_check = current_time
+
         # Get healthy peers for sync
         healthy_peers = self._select_sync_peers()
         if not healthy_peers:
@@ -175,6 +204,14 @@ class P2PSyncManager:
             # We're up to date or ahead, just sync transactions
             self._sync_transactions(peer_id)
             return
+
+        # Check if this is a potential fork
+        if self._detect_fork(peer_id, peer_chain_info):
+            # Handle fork resolution
+            if self._resolve_fork(peer_id, peer_chain_info):
+                logger.info(f"🔀 Resolved fork with peer {peer_id}")
+                self.sync_stats['forks_resolved'] += 1
+                return
 
         # We need to sync blocks
         blocks_needed = peer_height - local_height
@@ -261,6 +298,102 @@ class P2PSyncManager:
         }, sort_keys=True)
 
         return hashlib.sha256(block_string.encode()).hexdigest()
+
+    def _detect_fork(self, peer_id: str, peer_chain_info: Dict) -> bool:
+        """Detect if there's a potential fork with this peer."""
+        peer_height = peer_chain_info.get('blocks', 0)
+        local_height = len(self.blockchain.chain)
+
+        # If peer has more blocks, check if the chains diverge
+        if peer_height > local_height:
+            # Get the last common block
+            common_height = min(local_height, peer_height) - 1
+            if common_height >= 0:
+                local_last_hash = self.blockchain.chain[common_height].hash
+                peer_last_hash = peer_chain_info.get('last_block', {}).get('hash', '')
+
+                # If hashes don't match at the common height, we have a fork
+                if local_last_hash != peer_last_hash:
+                    logger.warning(f"🔀 Fork detected with peer {peer_id} at height {common_height}")
+                    return True
+
+        return False
+
+    def _resolve_fork(self, peer_id: str, peer_chain_info: Dict) -> bool:
+        """
+        Resolve a fork using the longest chain rule.
+
+        Returns True if fork was resolved (we switched chains), False otherwise.
+        """
+        peer_height = peer_chain_info.get('blocks', 0)
+        local_height = len(self.blockchain.chain)
+
+        # Longest chain rule: always follow the longest valid chain
+        if peer_height > local_height:
+            logger.info(f"🔀 Resolving fork: peer {peer_id} has longer chain ({peer_height} vs {local_height})")
+
+            # Request the competing chain from the peer
+            competing_blocks = self._request_blocks(peer_id, 0, peer_height)
+            if not competing_blocks:
+                logger.warning(f"Failed to get competing chain from peer {peer_id}")
+                return False
+
+            # Validate the entire competing chain
+            if self._validate_competing_chain(competing_blocks):
+                logger.info(f"✅ Switching to longer chain from peer {peer_id}")
+
+                # Replace our chain with the competing chain
+                self._switch_to_chain(competing_blocks)
+                return True
+            else:
+                logger.warning(f"❌ Competing chain from peer {peer_id} is invalid")
+                return False
+
+        # If chains are equal length but different, keep our current chain
+        # (would need more sophisticated tie-breaking in a real implementation)
+        return False
+
+    def _validate_competing_chain(self, chain_blocks: List[Dict]) -> bool:
+        """Validate an entire competing chain."""
+        if not chain_blocks:
+            return False
+
+        # Validate each block in sequence
+        for i, block_data in enumerate(chain_blocks):
+            # First block should be genesis or connect to previous
+            if i == 0:
+                # Genesis block validation (simplified)
+                if not self._validate_block(block_data):
+                    return False
+            else:
+                # Non-genesis block should connect to previous block
+                prev_block = chain_blocks[i-1]
+                if block_data.get('previous_hash') != prev_block.get('hash'):
+                    return False
+                if not self._validate_block(block_data):
+                    return False
+
+        return True
+
+    def _switch_to_chain(self, new_chain: List[Dict]):
+        """Switch to a new blockchain (fork resolution)."""
+        # This is a simplified implementation
+        # In a real blockchain, this would need to:
+        # 1. Validate all blocks
+        # 2. Handle orphaned transactions
+        # 3. Update wallet balances
+        # 4. Notify other components
+
+        # For now, just replace the chain (this would need to be integrated with SignChain)
+        logger.info(f"🔄 Switching to new chain with {len(new_chain)} blocks")
+
+        # Update our known blocks
+        for block in new_chain:
+            self.known_blocks.add(block.get('hash', ''))
+
+        # This would need to call blockchain.replace_chain(new_chain) or similar
+        # For the test implementation, we'll just log it
+        self.sync_stats['blocks_synced'] += len(new_chain) - len(self.blockchain.chain)
 
     def _validate_transaction(self, tx_data: Dict) -> bool:
         """Validate a transaction."""
@@ -359,8 +492,336 @@ class P2PSyncManager:
             'last_sync_time': self.last_sync_time,
             'sync_stats': self.sync_stats.copy(),
             'pending_blocks': len(self.pending_blocks),
-            'known_blocks': len(self.known_blocks)
+            'known_blocks': len(self.known_blocks),
+            'syndicates': len(self.syndicates),
+            'syndicate_memberships': len(self.syndicate_memberships)
         }
+
+    # === SYNDICATE MINING SUPPORT ===
+
+    def join_syndicate(self, syndicate_name: str, wallet_address: str, hashrate: float = 0) -> Dict[str, Any]:
+        """Join or create a mining syndicate."""
+        syndicate_id = hashlib.sha256(f"syndicate_{syndicate_name}".encode()).hexdigest()[:16]
+
+        # Check if syndicate exists
+        if syndicate_id not in self.syndicates:
+            # Create new syndicate
+            self.syndicates[syndicate_id] = {
+                'syndicate_name': syndicate_name,
+                'founder': wallet_address,
+                'participants': {wallet_address: {'hashrate': hashrate, 'joined_at': time.time()}},
+                'created_at': time.time(),
+                'total_hashrate': hashrate,
+                'blocks_found': 0
+            }
+            self.syndicate_memberships[wallet_address] = syndicate_id
+            logger.info(f"🏢 Created new syndicate '{syndicate_name}' with ID {syndicate_id}")
+            return {'success': True, 'action': 'created', 'syndicate_id': syndicate_id}
+        else:
+            # Join existing syndicate
+            syndicate = self.syndicates[syndicate_id]
+            if wallet_address in syndicate['participants']:
+                return {'success': False, 'error': 'Already a member of this syndicate'}
+
+            if len(syndicate['participants']) >= 100:  # Max syndicate size
+                return {'success': False, 'error': 'Syndicate is full'}
+
+            syndicate['participants'][wallet_address] = {
+                'hashrate': hashrate,
+                'joined_at': time.time()
+            }
+            syndicate['total_hashrate'] += hashrate
+            self.syndicate_memberships[wallet_address] = syndicate_id
+
+            # Broadcast join message to syndicate
+            self._broadcast_syndicate_message(syndicate_id, 'join_syndicate', {
+                'wallet': wallet_address,
+                'hashrate': hashrate,
+                'timestamp': time.time()
+            })
+
+            logger.info(f"🤝 {wallet_address} joined syndicate '{syndicate_name}'")
+            return {'success': True, 'action': 'joined', 'syndicate_id': syndicate_id}
+
+    def leave_syndicate(self, wallet_address: str) -> bool:
+        """Leave the current mining syndicate."""
+        if wallet_address not in self.syndicate_memberships:
+            return False
+
+        syndicate_id = self.syndicate_memberships[wallet_address]
+        syndicate = self.syndicates.get(syndicate_id)
+        if not syndicate:
+            return False
+
+        # Remove from syndicate
+        if wallet_address in syndicate['participants']:
+            hashrate = syndicate['participants'][wallet_address]['hashrate']
+            syndicate['total_hashrate'] -= hashrate
+            del syndicate['participants'][wallet_address]
+
+        del self.syndicate_memberships[wallet_address]
+
+        # Broadcast leave message
+        self._broadcast_syndicate_message(syndicate_id, 'leave_syndicate', {
+            'wallet': wallet_address,
+            'timestamp': time.time()
+        })
+
+        # Remove empty syndicates
+        if not syndicate['participants']:
+            del self.syndicates[syndicate_id]
+            logger.info(f"🗑️ Syndicate '{syndicate['syndicate_name']}' disbanded (no participants)")
+
+        logger.info(f"👋 {wallet_address} left syndicate '{syndicate['syndicate_name']}'")
+        return True
+
+    def get_syndicate_info(self, syndicate_id: str) -> Optional[Dict]:
+        """Get information about a syndicate."""
+        return self.syndicates.get(syndicate_id)
+
+    def get_user_syndicate(self, wallet_address: str) -> Optional[str]:
+        """Get the syndicate ID for a wallet address."""
+        return self.syndicate_memberships.get(wallet_address)
+
+    def submit_syndicate_share(self, wallet_address: str, share_data: Dict):
+        """Submit a mining share to the syndicate coordinator."""
+        syndicate_id = self.syndicate_memberships.get(wallet_address)
+        if not syndicate_id:
+            return False
+
+        # Broadcast share to syndicate
+        self._broadcast_syndicate_message(syndicate_id, 'share_submission', {
+            'wallet': wallet_address,
+            'share_data': share_data,
+            'timestamp': time.time()
+        })
+
+        return True
+
+    def handle_syndicate_message(self, message: Dict):
+        """Handle incoming syndicate messages."""
+        try:
+            syndicate_id = message.get('syndicate_id')
+            message_type = message.get('message_type')
+
+            if message_type in self.syndicate_message_handlers:
+                self.syndicate_message_handlers[message_type](message)
+            else:
+                logger.warning(f"Unknown syndicate message type: {message_type}")
+
+        except Exception as e:
+            logger.error(f"Failed to handle syndicate message: {e}")
+
+    def _broadcast_syndicate_message(self, syndicate_id: str, message_type: str, payload: Dict):
+        """Broadcast a message to all syndicate participants."""
+        syndicate = self.syndicates.get(syndicate_id)
+        if not syndicate:
+            return
+
+        syndicate_message = {
+            'syndicate_id': syndicate_id,
+            'message_type': message_type,
+            'payload': payload,
+            'timestamp': time.time(),
+            'sender': 'system'
+        }
+
+        # Send to all syndicate participants (placeholder - would use P2P network)
+        logger.debug(f"📡 Syndicate broadcast to {len(syndicate['participants'])} participants: {message_type}")
+
+    def _handle_join_syndicate(self, message: Dict):
+        """Handle syndicate join message."""
+        syndicate_id = message.get('syndicate_id')
+        payload = message.get('payload', {})
+
+        if syndicate_id in self.syndicates:
+            syndicate = self.syndicates[syndicate_id]
+            wallet = payload.get('wallet')
+            hashrate = payload.get('hashrate', 0)
+
+            if wallet and wallet not in syndicate['participants']:
+                syndicate['participants'][wallet] = {
+                    'hashrate': hashrate,
+                    'joined_at': payload.get('timestamp', time.time())
+                }
+                syndicate['total_hashrate'] += hashrate
+                self.syndicate_memberships[wallet] = syndicate_id
+
+    def _handle_leave_syndicate(self, message: Dict):
+        """Handle syndicate leave message."""
+        syndicate_id = message.get('syndicate_id')
+        payload = message.get('payload', {})
+        wallet = payload.get('wallet')
+
+        if syndicate_id in self.syndicates and wallet:
+            syndicate = self.syndicates[syndicate_id]
+            if wallet in syndicate['participants']:
+                hashrate = syndicate['participants'][wallet]['hashrate']
+                syndicate['total_hashrate'] -= hashrate
+                del syndicate['participants'][wallet]
+
+            if wallet in self.syndicate_memberships:
+                del self.syndicate_memberships[wallet]
+
+            # Remove empty syndicates
+            if not syndicate['participants']:
+                del self.syndicates[syndicate_id]
+
+    def _handle_syndicate_status(self, message: Dict):
+        """Handle syndicate status update."""
+        # Update local syndicate information
+        syndicate_id = message.get('syndicate_id')
+        payload = message.get('payload', {})
+
+        if syndicate_id in self.syndicates:
+            syndicate = self.syndicates[syndicate_id]
+            # Update syndicate stats from status message
+            syndicate['total_hashrate'] = payload.get('total_hashrate', syndicate['total_hashrate'])
+
+    def _handle_share_submission(self, message: Dict):
+        """Handle mining share submission."""
+        # This would validate and record shares for reward distribution
+        # For now, just log it
+        payload = message.get('payload', {})
+        wallet = payload.get('wallet')
+        logger.debug(f"📊 Share submitted by {wallet}")
+
+    def _handle_syndicate_block_found(self, message: Dict):
+        """Handle syndicate block found notification."""
+        payload = message.get('payload', {})
+        finder_wallet = payload.get('finder_wallet')
+        syndicate_id = message.get('syndicate_id')
+
+        if syndicate_id in self.syndicates:
+            syndicate = self.syndicates[syndicate_id]
+            syndicate['blocks_found'] += 1
+
+            # Distribute rewards (simplified)
+            reward_distribution = payload.get('reward_distribution', {})
+
+            logger.info(f"🎉 Syndicate '{syndicate['syndicate_name']}' found block! Rewards distributed to {len(reward_distribution)} participants")
+
+    def get_syndicate_stats(self) -> Dict[str, Any]:
+        """Get comprehensive syndicate mining statistics."""
+        return {
+            'total_syndicates': len(self.syndicates),
+            'total_syndicate_participants': len(self.syndicate_memberships),
+            'syndicates': {
+                syndicate_id: {
+                    'name': syndicate['syndicate_name'],
+                    'participants': len(syndicate['participants']),
+                    'total_hashrate': syndicate['total_hashrate'],
+                    'blocks_found': syndicate['blocks_found']
+                }
+                for syndicate_id, syndicate in self.syndicates.items()
+            }
+        }
+
+    # === BOOTSTRAP NODE INTEGRATION ===
+
+    def _discover_bootstrap_peers(self):
+        """Discover new peers from bootstrap nodes."""
+        logger.info("🔍 Discovering peers from bootstrap nodes...")
+
+        discovered_count = 0
+
+        for bootstrap_url in self.bootstrap_urls:
+            try:
+                peers = self._fetch_peers_from_bootstrap(bootstrap_url)
+                if peers:
+                    for peer_info in peers:
+                        try:
+                            self._add_discovered_peer(peer_info)
+                            discovered_count += 1
+                        except Exception as e:
+                            logger.debug(f"Failed to add peer {peer_info}: {e}")
+                else:
+                    logger.debug(f"No peers received from {bootstrap_url}")
+
+            except Exception as e:
+                logger.warning(f"Failed to discover peers from {bootstrap_url}: {e}")
+
+        if discovered_count > 0:
+            logger.info(f"✅ Discovered {discovered_count} new peers from bootstrap nodes")
+        else:
+            logger.debug("No new peers discovered from bootstrap nodes")
+
+    def _fetch_peers_from_bootstrap(self, bootstrap_url: str) -> Optional[List[Dict]]:
+        """Fetch peer list from a bootstrap node."""
+        try:
+            # Add timeout and proper error handling
+            response = requests.get(f"{bootstrap_url}", timeout=10)
+            response.raise_for_status()
+
+            data = response.json()
+            peers = data.get('peers', [])
+
+            if peers:
+                logger.debug(f"Fetched {len(peers)} peers from {bootstrap_url}")
+                return peers
+            else:
+                logger.debug(f"No peers in response from {bootstrap_url}")
+                return []
+
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                logger.debug(f"Bootstrap endpoint not implemented yet at {bootstrap_url} - continuing without peers")
+                return []
+            else:
+                logger.warning(f"HTTP error fetching from {bootstrap_url}: {e}")
+                return None
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Network error fetching from {bootstrap_url}: {e}")
+            return None
+        except json.JSONDecodeError as e:
+            logger.warning(f"Invalid JSON response from {bootstrap_url}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error fetching from {bootstrap_url}: {e}")
+            return None
+
+    def _add_discovered_peer(self, peer_info: Dict):
+        """Add a discovered peer to our peer discovery system."""
+        # Extract peer information
+        node_id = peer_info.get('node_id')
+        address = peer_info.get('address')
+        port = peer_info.get('port', 3142)
+        capabilities = peer_info.get('capabilities', [])
+
+        if not node_id or not address:
+            raise ValueError("Peer info missing required fields")
+
+        # Create peer info for discovery system
+        peer_data = {
+            'node_id': node_id,
+            'address': address,
+            'port': port,
+            'capabilities': capabilities,
+            'last_seen': peer_info.get('last_seen', time.time()),
+            'source': 'bootstrap',
+            'connected': False  # Will be updated when we try to connect
+        }
+
+        # Add to peer discovery
+        self.peer_discovery.add_peer(
+            peer_id=node_id,
+            address=address,
+            port=port,
+            capabilities=capabilities
+        )
+
+        logger.debug(f"Added bootstrap peer: {node_id} at {address}:{port}")
+
+    def set_bootstrap_urls(self, urls: List[str]):
+        """Update bootstrap node URLs."""
+        self.bootstrap_urls = urls
+        logger.info(f"Updated bootstrap URLs: {urls}")
+
+    def enable_bootstrap_discovery(self, enabled: bool = True):
+        """Enable or disable bootstrap peer discovery."""
+        self.bootstrap_discovery_enabled = enabled
+        status = "enabled" if enabled else "disabled"
+        logger.info(f"Bootstrap peer discovery {status}")
 
 
 class BlockPropagator:

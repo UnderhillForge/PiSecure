@@ -55,7 +55,7 @@ log_error() {
 
 # Detect Raspberry Pi
 detect_pi() {
-    if [[ ! -f /proc/device-tree/model ]] || ! grep -q "Raspberry Pi" /proc/device-tree/model; then
+    if
         log_error "This script is designed for Raspberry Pi only."
         exit 1
     fi
@@ -83,6 +83,7 @@ install_dependencies() {
         unattended-upgrades \
         python3-dev \
         build-essential
+        tor
 
     log_success "System dependencies installed"
 }
@@ -622,6 +623,8 @@ main() {
     log_warning "Genesis keys are OPTIONAL - system works without them!"
 
     detect_pi
+    configure_tor
+    configure_tor
     install_dependencies
     setup_directories
     install_pisecure
@@ -640,3 +643,83 @@ main() {
 
 # Run main function
 main "$@"
+# Configure Tor for PiSecure
+configure_tor() {
+    log_info "Configuring Tor for PiSecure..."
+
+    # Create Tor configuration directory if it does not exist
+    sudo mkdir -p /etc/tor
+
+    # Create basic Tor configuration for PiSecure
+    sudo tee /etc/tor/torrc > /dev/null <<EOF
+# PiSecure Tor Configuration
+# Basic anonymity and privacy setup for blockchain operations
+
+## Torrc configuration for PiSecure node
+## This provides basic Tor connectivity without exposing the node
+
+# Socks proxy for applications
+SocksPort 9050
+
+# Control port for Tor control protocol
+ControlPort 9051
+CookieAuthentication 1
+
+# Exit policy - reject all exit traffic for safety
+ExitPolicy reject *:*
+
+# Data directory
+DataDirectory /var/lib/tor
+
+# Log configuration
+Log notice syslog
+Log info syslog
+
+# Performance settings
+NumCPUs 1
+DisableDebuggerAttachment 1
+
+# Hidden service configuration (optional, for future use)
+# HiddenServiceDir /var/lib/tor/hidden_pisecure/
+# HiddenServicePort 3142 127.0.0.1:3142
+
+# Bandwidth limits (optional)
+# RelayBandwidthRate 100 KBytes
+# RelayBandwidthBurst 200 KBytes
+EOF
+
+    # Set proper permissions
+    sudo chown debian-tor:debian-tor /etc/tor/torrc
+    sudo chmod 644 /etc/tor/torrc
+
+    # Create data directory
+    sudo mkdir -p /var/lib/tor
+    sudo chown debian-tor:debian-tor /var/lib/tor
+    sudo chmod 700 /var/lib/tor
+
+    # Test Tor configuration
+    if sudo -u debian-tor tor --verify-config -f /etc/tor/torrc; then
+        log_success "Tor configuration is valid"
+    else
+        log_error "Tor configuration is invalid"
+        exit 1
+    fi
+
+    # Enable and start Tor service
+    sudo systemctl enable tor.service
+    sudo systemctl start tor.service
+
+    # Wait for Tor to bootstrap
+    log_info "Waiting for Tor to bootstrap..."
+    sleep 10
+
+    # Test Tor connectivity
+    if curl --socks5 localhost:9050 --max-time 10 https://check.torproject.org/ | grep -q "Congratulations"; then
+        log_success "Tor is working correctly"
+    else
+        log_warning "Tor may not be fully connected yet - this is normal on first startup"
+        log_info "Tor will continue bootstrapping in the background"
+    fi
+
+    log_success "Tor configured for PiSecure"
+}

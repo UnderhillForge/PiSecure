@@ -45,12 +45,39 @@ class ConnectionPool {
     }
   }
 
-  getNextEndpoint() {
+  async getNextEndpoint(serviceType = 'general') {
     if (this.endpoints.length === 0) {
       throw new Error('No available endpoints');
     }
 
-    // Simple round-robin with health check
+    // Try intelligence-optimized selection first
+    try {
+      const client = this._getClientReference();
+      if (client && client.config.intelligence?.threatAware !== false) {
+        const candidateData = this.endpoints.map(endpoint => ({
+          node_id: endpoint,
+          location: 'unknown', // Would need geocoding in production
+          load_factor: this._estimateLoadFactor(endpoint),
+          reliability_score: this._getReliabilityScore(endpoint)
+        }));
+
+        const optimization = await client._makeRequest('POST', 'intelligence/optimize', {
+          available_nodes: candidateData,
+          service_type: serviceType
+        });
+
+        if (optimization.optimized_nodes && optimization.optimized_nodes.length > 0) {
+          const optimizedEndpoint = optimization.optimized_nodes[0].node;
+          if (this.endpoints.includes(optimizedEndpoint) && this.isHealthy(optimizedEndpoint)) {
+            return optimizedEndpoint;
+          }
+        }
+      }
+    } catch (error) {
+      // Intelligence optimization failed, fall back to round-robin
+    }
+
+    // Fallback to simple round-robin with health check
     let attempts = 0;
     while (attempts < this.endpoints.length) {
       const endpoint = this.endpoints[this.currentIndex];
@@ -83,6 +110,38 @@ class ConnectionPool {
     }
 
     return true;
+  }
+
+  _getClientReference() {
+    // This will be set by the PiSecureClient when the pool is created
+    return this._client;
+  }
+
+  _setClientReference(client) {
+    this._client = client;
+  }
+
+  _estimateLoadFactor(endpoint) {
+    // Estimate load factor based on health status and usage patterns
+    // In production, this would track actual request patterns
+    const status = this.healthStatus.get(endpoint);
+    if (!status) return 0.5; // Default medium load
+
+    // Higher load if marked unhealthy recently
+    if (!status.healthy) return 0.9;
+    return 0.3; // Assume healthy endpoints have lower load
+  }
+
+  _getReliabilityScore(endpoint) {
+    // Calculate reliability score based on health history
+    const status = this.healthStatus.get(endpoint);
+    if (!status) return 0.8; // Default good reliability
+
+    // Lower score if recently unhealthy
+    if (!status.healthy && Date.now() - status.lastCheck < 300000) { // 5 minutes
+      return 0.3;
+    }
+    return 0.9; // Healthy endpoints get high reliability
   }
 }
 
@@ -132,6 +191,7 @@ class PiSecureClient extends EventEmitter {
 
     this.config = new PiSecureConfig(config);
     this.connectionPool = new ConnectionPool();
+    this.connectionPool._setClientReference(this); // Enable intelligence in connection pool
     this.cache = new ResponseCache(this.config.cacheTTL);
     this.httpClient = axios.create({
       timeout: this.config.timeout,
@@ -377,6 +437,111 @@ class PiSecureClient extends EventEmitter {
 
   async healthCheck() {
     return await this._makeRequest('GET', 'health');
+  }
+
+  // === ML-POWERED INTELLIGENCE FEATURES ===
+
+  // Attack Detection & Threat Intelligence
+
+  async getThreatIntelligence() {
+    try {
+      return await this._makeRequest('GET', 'intelligence/attacks');
+    } catch (error) {
+      this.emit('intelligence:error', { method: 'getThreatIntelligence', error: error.message });
+      return { detected_attacks: [], threat_level: 'unknown', analysis_period: 'unknown' };
+    }
+  }
+
+  async getDefenseStatus() {
+    try {
+      return await this._makeRequest('GET', 'intelligence/defense');
+    } catch (error) {
+      this.emit('intelligence:error', { method: 'getDefenseStatus', error: error.message });
+      return { defense_intelligence: { automated_defense_active: false, threat_intelligence_level: 'unknown' } };
+    }
+  }
+
+  async getNetworkHealth() {
+    try {
+      return await this._makeRequest('GET', 'intelligence/health');
+    } catch (error) {
+      this.emit('intelligence:error', { method: 'getNetworkHealth', error: error.message });
+      return { network_health: { overall_health: 50, threat_level: 'unknown' } };
+    }
+  }
+
+  // Smart Routing & Geographic Intelligence
+
+  async getOptimizedPeers(serviceType = 'general', threatAware = true) {
+    try {
+      // Get basic peers first
+      const basicPeers = await this.getNetworkPeers();
+
+      if (!threatAware || basicPeers.length === 0) {
+        return basicPeers;
+      }
+
+      // Get AI-optimized routing from intelligence
+      const peerData = basicPeers.map(peer => ({
+        node_id: peer.node_id || peer.address || `peer_${Math.random()}`,
+        location: peer.location || 'unknown',
+        load_factor: peer.load_factor || Math.random() * 0.5, // Estimate if not provided
+        reliability_score: peer.reliability_score || 0.8 // Estimate if not provided
+      }));
+
+      const optimization = await this._makeRequest('POST', 'intelligence/optimize', {
+        available_nodes: peerData,
+        service_type: serviceType
+      });
+
+      if (optimization.optimized_nodes && optimization.optimized_nodes.length > 0) {
+        this.emit('intelligence:optimization', {
+          method: 'smart_routing',
+          original_count: basicPeers.length,
+          optimized_count: optimization.optimized_nodes.length,
+          scoring_method: optimization.optimization_method
+        });
+        return optimization.optimized_nodes;
+      }
+
+      // Fallback to basic peers if intelligence fails
+      return basicPeers;
+
+    } catch (error) {
+      this.emit('intelligence:error', { method: 'getOptimizedPeers', error: error.message });
+      // Return basic peers as fallback
+      return await this.getNetworkPeers();
+    }
+  }
+
+  async getGeographicClusters() {
+    try {
+      return await this._makeRequest('GET', 'intelligence/clusters');
+    } catch (error) {
+      this.emit('intelligence:error', { method: 'getGeographicClusters', error: error.message });
+      return { geographic_clusters: {}, clustering_method: 'unavailable' };
+    }
+  }
+
+  // Predictive Analytics
+
+  async predictNetworkLoad(hoursAhead = 1) {
+    try {
+      const params = { hours_ahead: Math.min(hoursAhead, 24) };
+      return await this._makeRequest('GET', 'intelligence/predict', null, params);
+    } catch (error) {
+      this.emit('intelligence:error', { method: 'predictNetworkLoad', error: error.message });
+      return { predictions: { predicted_connections: 0, confidence: 'unknown' } };
+    }
+  }
+
+  async getNetworkInsights() {
+    try {
+      return await this._makeRequest('GET', 'intelligence/health');
+    } catch (error) {
+      this.emit('intelligence:error', { method: 'getNetworkInsights', error: error.message });
+      return { network_health: { overall_health: 50, threat_level: 'unknown' } };
+    }
   }
 
   // WebSocket Streaming
