@@ -1104,6 +1104,643 @@ class BlockchainAPI:
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
 
+        # Miner status reporting endpoint
+        @self.app.route(f'/api/{self.api_version}/nodes/status', methods=['POST'])
+        def report_miner_status():
+            """Receive mining status reports from active miners for dashboard and intelligence"""
+            try:
+                status_data = request.get_json()
+
+                if not status_data or 'node_id' not in status_data:
+                    return jsonify({'error': 'node_id required'}), 400
+
+                node_id = status_data['node_id']
+
+                # Initialize miner status storage if needed
+                if not hasattr(self, 'miner_status_reports'):
+                    self.miner_status_reports = {}
+
+                # Store the status report with timestamp
+                status_report = {
+                    'node_id': node_id,
+                    'mining_active': status_data.get('mining_active', False),
+                    'hashrate': status_data.get('hashrate', 0.0),
+                    'blocks_mined': status_data.get('blocks_mined', 0),
+                    'session_start_time': status_data.get('session_start_time'),
+                    'temperature': status_data.get('temperature'),
+                    'memory_usage': status_data.get('memory_usage'),
+                    'network_metrics': status_data.get('network_metrics', {}),
+                    'system_health': status_data.get('system_health', {}),
+                    'wallet_address': status_data.get('wallet_address'),
+                    'location': status_data.get('location', 'unknown'),
+                    'hardware_model': status_data.get('hardware_model', 'unknown'),
+                    'reported_at': time.time(),
+                    'ip_address': request.remote_addr
+                }
+
+                # Store in miner status reports (keep last 100 reports per node for intelligence)
+                if node_id not in self.miner_status_reports:
+                    self.miner_status_reports[node_id] = []
+
+                self.miner_status_reports[node_id].append(status_report)
+
+                # Keep only last 100 reports per node to prevent memory bloat
+                if len(self.miner_status_reports[node_id]) > 100:
+                    self.miner_status_reports[node_id] = self.miner_status_reports[node_id][-100:]
+
+                # Update registered node info if available
+                if hasattr(self, 'registered_nodes') and node_id in self.registered_nodes:
+                    node_info = self.registered_nodes[node_id]
+                    node_info.update({
+                        'last_seen': time.time(),
+                        'is_mining': status_report['mining_active'],
+                        'hashrate': status_report['hashrate'],
+                        'blocks_mined': status_report['blocks_mined'],
+                        'temperature': status_report['temperature'],
+                        'location': status_report['location'],
+                        'hardware_model': status_report['hardware_model']
+                    })
+
+                # Trigger intelligence processing
+                intelligence_insights = self._process_miner_intelligence(status_report)
+
+                return jsonify({
+                    'success': True,
+                    'status': 'reported',
+                    'intelligence_processed': True,
+                    'insights': intelligence_insights
+                })
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+    def _process_miner_intelligence(self, status_report: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process miner status reports for network intelligence and analytics
+
+        Args:
+            status_report: Miner status report from POST /nodes/status
+
+        Returns:
+            Intelligence insights and alerts
+        """
+        insights = {
+            'processed_at': time.time(),
+            'alerts': [],
+            'anomalies': [],
+            'recommendations': [],
+            'network_impact': {}
+        }
+
+        try:
+            node_id = status_report['node_id']
+            hashrate = status_report.get('hashrate', 0)
+            temperature = status_report.get('temperature')
+            memory_usage = status_report.get('memory_usage')
+            mining_active = status_report.get('mining_active', False)
+
+            # Get historical data for this node (last 10 reports)
+            historical_reports = []
+            if hasattr(self, 'miner_status_reports') and node_id in self.miner_status_reports:
+                recent_reports = [r for r in self.miner_status_reports[node_id][-10:]
+                                if r['reported_at'] > time.time() - 3600]  # Last hour
+                historical_reports = recent_reports
+
+            # 1. Performance Analysis
+            if mining_active and hashrate > 0:
+                # Check for hashrate anomalies
+                avg_hashrate = self._calculate_average_hashrate(historical_reports)
+                if avg_hashrate > 0:
+                    hashrate_variance = abs(hashrate - avg_hashrate) / avg_hashrate
+                    if hashrate_variance > 0.3:  # 30% variance
+                        insights['anomalies'].append({
+                            'type': 'hashrate_anomaly',
+                            'severity': 'warning',
+                            'message': f'Hashrate deviation: {hashrate:.2f} vs avg {avg_hashrate:.2f}',
+                            'current': hashrate,
+                            'average': avg_hashrate
+                        })
+
+            # 2. Temperature Analysis
+            if temperature is not None:
+                if temperature >= 80:
+                    insights['alerts'].append({
+                        'type': 'thermal_emergency',
+                        'severity': 'critical',
+                        'message': f'Miner {node_id} at critical temperature: {temperature}°C',
+                        'recommendation': 'Stop mining immediately to prevent hardware damage'
+                    })
+                elif temperature >= 75:
+                    insights['alerts'].append({
+                        'type': 'thermal_warning',
+                        'severity': 'warning',
+                        'message': f'Miner {node_id} running hot: {temperature}°C',
+                        'recommendation': 'Consider cooling or reduced mining intensity'
+                    })
+
+            # 3. Memory Analysis
+            if memory_usage is not None:
+                if memory_usage >= 95:
+                    insights['alerts'].append({
+                        'type': 'memory_emergency',
+                        'severity': 'critical',
+                        'message': f'Miner {node_id} memory usage critical: {memory_usage}%',
+                        'recommendation': 'Restart miner to clear memory leaks'
+                    })
+                elif memory_usage >= 85:
+                    insights['alerts'].append({
+                        'type': 'memory_warning',
+                        'severity': 'warning',
+                        'message': f'Miner {node_id} high memory usage: {memory_usage}%',
+                        'recommendation': 'Monitor for memory leaks'
+                    })
+
+            # 4. Network Impact Analysis
+            network_metrics = status_report.get('network_metrics', {})
+            connected_peers = network_metrics.get('connected_peers', 0)
+            p2p_messages = network_metrics.get('p2p_messages_sent', 0) + network_metrics.get('p2p_messages_received', 0)
+
+            insights['network_impact'] = {
+                'peer_connectivity': 'good' if connected_peers >= 3 else 'poor' if connected_peers == 0 else 'fair',
+                'message_activity': 'high' if p2p_messages > 100 else 'normal' if p2p_messages > 10 else 'low',
+                'network_contribution': self._assess_network_contribution(status_report)
+            }
+
+            # 5. Mining Efficiency Analysis
+            if mining_active and hashrate > 0:
+                efficiency_score = self._calculate_mining_efficiency(status_report)
+                insights['mining_efficiency'] = {
+                    'score': efficiency_score,
+                    'rating': 'excellent' if efficiency_score >= 0.9 else 'good' if efficiency_score >= 0.7 else 'fair' if efficiency_score >= 0.5 else 'poor',
+                    'temperature_penalty': temperature > 70 if temperature else False,
+                    'memory_penalty': memory_usage > 80 if memory_usage else False
+                }
+
+            # 6. Generate Recommendations
+            insights['recommendations'] = self._generate_miner_recommendations(status_report, insights)
+
+        except Exception as e:
+            insights['processing_error'] = str(e)
+
+        return insights
+
+    def _get_miner_intelligence(self, hours_back: float = 1) -> Dict[str, Any]:
+        """
+        Aggregate intelligence from all miner reports
+
+        Args:
+            hours_back: Hours of data to analyze
+
+        Returns:
+            Comprehensive network intelligence
+        """
+        intelligence = {
+            'analysis_period_hours': hours_back,
+            'generated_at': time.time(),
+            'network_health': {},
+            'performance_insights': {},
+            'anomaly_summary': {},
+            'recommendations': []
+        }
+
+        try:
+            cutoff_time = time.time() - (hours_back * 3600)
+
+            # Collect all recent reports
+            all_reports = []
+            if hasattr(self, 'miner_status_reports'):
+                for node_reports in self.miner_status_reports.values():
+                    recent_reports = [r for r in node_reports if r['reported_at'] >= cutoff_time]
+                    all_reports.extend(recent_reports)
+
+            if not all_reports:
+                intelligence['network_health']['status'] = 'no_data'
+                return intelligence
+
+            # Network Health Analysis
+            active_miners = len(set(r['node_id'] for r in all_reports if r.get('mining_active')))
+            total_reports = len(all_reports)
+            avg_temperature = self._calculate_average_metric(all_reports, 'temperature')
+            avg_memory = self._calculate_average_metric(all_reports, 'memory_usage')
+            total_hashrate = sum(r.get('hashrate', 0) for r in all_reports if r.get('mining_active'))
+
+            intelligence['network_health'] = {
+                'active_miners': active_miners,
+                'total_reports': total_reports,
+                'avg_temperature': avg_temperature,
+                'avg_memory_usage': avg_memory,
+                'total_network_hashrate': total_hashrate,
+                'status': self._assess_network_health(avg_temperature, avg_memory, active_miners)
+            }
+
+            # Performance Insights
+            intelligence['performance_insights'] = {
+                'top_performers': self._identify_top_performers(all_reports),
+                'efficiency_distribution': self._analyze_efficiency_distribution(all_reports),
+                'geographic_distribution': self._analyze_geographic_distribution(all_reports),
+                'hardware_distribution': self._analyze_hardware_distribution(all_reports)
+            }
+
+            # Anomaly Summary
+            intelligence['anomaly_summary'] = self._summarize_anomalies(all_reports)
+
+            # Network Recommendations
+            intelligence['recommendations'] = self._generate_network_recommendations(all_reports)
+
+        except Exception as e:
+            intelligence['processing_error'] = str(e)
+
+        return intelligence
+
+    def _calculate_average_hashrate(self, reports: List[Dict[str, Any]]) -> float:
+        """Calculate average hashrate from historical reports"""
+        hashrates = [r.get('hashrate', 0) for r in reports if r.get('mining_active') and r.get('hashrate', 0) > 0]
+        return sum(hashrates) / len(hashrates) if hashrates else 0
+
+    def _calculate_average_metric(self, reports: List[Dict[str, Any]], metric: str) -> Optional[float]:
+        """Calculate average of a metric across reports"""
+        values = [r[metric] for r in reports if metric in r and r[metric] is not None]
+        return sum(values) / len(values) if values else None
+
+    def _assess_network_health(self, avg_temp: Optional[float], avg_memory: Optional[float], active_miners: int) -> str:
+        """Assess overall network health"""
+        if active_miners == 0:
+            return 'inactive'
+
+        health_score = 0
+
+        # Temperature component
+        if avg_temp is not None:
+            if avg_temp < 60:
+                health_score += 1
+            elif avg_temp < 70:
+                health_score += 0.7
+            elif avg_temp < 75:
+                health_score += 0.3
+
+        # Memory component
+        if avg_memory is not None:
+            if avg_memory < 70:
+                health_score += 1
+            elif avg_memory < 80:
+                health_score += 0.7
+            elif avg_memory < 90:
+                health_score += 0.3
+
+        # Activity component
+        if active_miners >= 5:
+            health_score += 1
+        elif active_miners >= 2:
+            health_score += 0.7
+        else:
+            health_score += 0.3
+
+        health_score /= 3  # Average the components
+
+        if health_score >= 0.8:
+            return 'excellent'
+        elif health_score >= 0.6:
+            return 'good'
+        elif health_score >= 0.4:
+            return 'fair'
+        else:
+            return 'poor'
+
+    def _assess_network_contribution(self, status_report: Dict[str, Any]) -> str:
+        """Assess how much a miner contributes to network health"""
+        contribution_score = 0
+
+        # Mining activity
+        if status_report.get('mining_active'):
+            contribution_score += 0.4
+
+        # Hashrate contribution
+        hashrate = status_report.get('hashrate', 0)
+        if hashrate >= 2.0:  # Good hashrate
+            contribution_score += 0.3
+        elif hashrate >= 0.5:  # Decent hashrate
+            contribution_score += 0.2
+
+        # Network connectivity
+        network_metrics = status_report.get('network_metrics', {})
+        connected_peers = network_metrics.get('connected_peers', 0)
+        if connected_peers >= 5:
+            contribution_score += 0.3
+        elif connected_peers >= 2:
+            contribution_score += 0.2
+
+        if contribution_score >= 0.8:
+            return 'high'
+        elif contribution_score >= 0.5:
+            return 'medium'
+        else:
+            return 'low'
+
+    def _calculate_mining_efficiency(self, status_report: Dict[str, Any]) -> float:
+        """Calculate mining efficiency score (0-1)"""
+        efficiency = 1.0
+
+        # Temperature penalties
+        temperature = status_report.get('temperature')
+        if temperature:
+            if temperature > 80:
+                efficiency *= 0.3  # Severe penalty
+            elif temperature > 75:
+                efficiency *= 0.6  # Heavy penalty
+            elif temperature > 70:
+                efficiency *= 0.8  # Moderate penalty
+
+        # Memory penalties
+        memory_usage = status_report.get('memory_usage')
+        if memory_usage:
+            if memory_usage > 95:
+                efficiency *= 0.3
+            elif memory_usage > 85:
+                efficiency *= 0.7
+            elif memory_usage > 75:
+                efficiency *= 0.9
+
+        # System health penalties
+        system_health = status_report.get('system_health', {})
+        cpu_usage = system_health.get('cpu_usage')
+        if cpu_usage:
+            if cpu_usage > 95:
+                efficiency *= 0.5
+            elif cpu_usage > 85:
+                efficiency *= 0.8
+
+        return efficiency
+
+    def _generate_miner_recommendations(self, status_report: Dict[str, Any], insights: Dict[str, Any]) -> List[str]:
+        """Generate personalized recommendations for a miner"""
+        recommendations = []
+
+        temperature = status_report.get('temperature')
+        memory_usage = status_report.get('memory_usage')
+        hashrate = status_report.get('hashrate', 0)
+
+        # Temperature recommendations
+        if temperature and temperature > 75:
+            recommendations.append("Reduce mining intensity or improve cooling to prevent hardware damage")
+        elif temperature and temperature > 70:
+            recommendations.append("Consider additional cooling or mining during cooler periods")
+
+        # Memory recommendations
+        if memory_usage and memory_usage > 85:
+            recommendations.append("Monitor for memory leaks - consider restarting miner periodically")
+        elif memory_usage and memory_usage > 75:
+            recommendations.append("Keep an eye on memory usage trends")
+
+        # Performance recommendations
+        if hashrate > 0 and hashrate < 0.5:
+            recommendations.append("Consider hardware upgrade for better mining performance")
+
+        # Network recommendations
+        network_metrics = status_report.get('network_metrics', {})
+        connected_peers = network_metrics.get('connected_peers', 0)
+        if connected_peers < 2:
+            recommendations.append("Improve network connectivity to enhance mining rewards")
+
+        return recommendations
+
+    def _identify_top_performers(self, reports: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Identify top performing miners"""
+        # Group by node and calculate average hashrate
+        node_performance = {}
+        for report in reports:
+            node_id = report['node_id']
+            hashrate = report.get('hashrate', 0)
+
+            if node_id not in node_performance:
+                node_performance[node_id] = {'total_hashrate': 0, 'reports': 0, 'location': report.get('location', 'unknown')}
+
+            if hashrate > 0:
+                node_performance[node_id]['total_hashrate'] += hashrate
+                node_performance[node_id]['reports'] += 1
+
+        # Calculate averages and rank
+        performers = []
+        for node_id, data in node_performance.items():
+            if data['reports'] > 0:
+                avg_hashrate = data['total_hashrate'] / data['reports']
+                performers.append({
+                    'node_id': node_id,
+                    'avg_hashrate': avg_hashrate,
+                    'location': data['location'],
+                    'report_count': data['reports']
+                })
+
+        # Sort by hashrate and return top 5
+        performers.sort(key=lambda x: x['avg_hashrate'], reverse=True)
+        return performers[:5]
+
+    def _analyze_efficiency_distribution(self, reports: List[Dict[str, Any]]) -> Dict[str, int]:
+        """Analyze efficiency distribution across miners"""
+        efficiency_counts = {'excellent': 0, 'good': 0, 'fair': 0, 'poor': 0}
+
+        for report in reports:
+            efficiency = self._calculate_mining_efficiency(report)
+            if efficiency >= 0.9:
+                efficiency_counts['excellent'] += 1
+            elif efficiency >= 0.7:
+                efficiency_counts['good'] += 1
+            elif efficiency >= 0.5:
+                efficiency_counts['fair'] += 1
+            else:
+                efficiency_counts['poor'] += 1
+
+        return efficiency_counts
+
+    def _analyze_geographic_distribution(self, reports: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze geographic distribution of miners"""
+        locations = {}
+        for report in reports:
+            location = report.get('location', 'unknown')
+            hashrate = report.get('hashrate', 0) if report.get('mining_active') else 0
+
+            if location not in locations:
+                locations[location] = {'count': 0, 'total_hashrate': 0}
+
+            locations[location]['count'] += 1
+            locations[location]['total_hashrate'] += hashrate
+
+        # Convert to sorted list
+        sorted_locations = sorted(
+            [{'location': loc, **data} for loc, data in locations.items()],
+            key=lambda x: x['total_hashrate'],
+            reverse=True
+        )
+
+        return {
+            'distribution': locations,
+            'top_locations': sorted_locations[:5],
+            'total_regions': len(locations)
+        }
+
+    def _analyze_hardware_distribution(self, reports: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze hardware distribution"""
+        hardware = {}
+        for report in reports:
+            hw_model = report.get('hardware_model', 'unknown')
+
+            if hw_model not in hardware:
+                hardware[hw_model] = {'count': 0, 'total_hashrate': 0, 'active_miners': 0}
+
+            hardware[hw_model]['count'] += 1
+            if report.get('mining_active'):
+                hardware[hw_model]['active_miners'] += 1
+                hardware[hw_model]['total_hashrate'] += report.get('hashrate', 0)
+
+        # Calculate averages
+        for hw_data in hardware.values():
+            if hw_data['active_miners'] > 0:
+                hw_data['avg_hashrate'] = hw_data['total_hashrate'] / hw_data['active_miners']
+            else:
+                hw_data['avg_hashrate'] = 0
+
+        return hardware
+
+    def _summarize_anomalies(self, reports: List[Dict[str, Any]]) -> Dict[str, int]:
+        """Summarize anomalies across all reports"""
+        anomaly_counts = {}
+
+        for report in reports:
+            # Process intelligence for each report to count anomalies
+            temp_insights = self._process_miner_intelligence(report)
+
+            for anomaly in temp_insights.get('anomalies', []):
+                anomaly_type = anomaly.get('type', 'unknown')
+                anomaly_counts[anomaly_type] = anomaly_counts.get(anomaly_type, 0) + 1
+
+        return anomaly_counts
+
+    def _generate_network_recommendations(self, reports: List[Dict[str, Any]]) -> List[str]:
+        """Generate network-wide recommendations"""
+        recommendations = []
+
+        if not reports:
+            return recommendations
+
+        # Check overall network health
+        avg_temp = self._calculate_average_metric(reports, 'temperature')
+        avg_memory = self._calculate_average_metric(reports, 'memory_usage')
+        active_miners = len(set(r['node_id'] for r in reports if r.get('mining_active')))
+
+        if avg_temp and avg_temp > 75:
+            recommendations.append("Network experiencing high temperatures - recommend improved cooling across miners")
+
+        if avg_memory and avg_memory > 85:
+            recommendations.append("High memory usage detected network-wide - investigate potential memory leaks")
+
+        if active_miners < 3:
+            recommendations.append("Low miner participation - encourage more nodes to join mining pool")
+
+        # Geographic diversity check
+        locations = set(r.get('location', 'unknown') for r in reports)
+        if len(locations) < 3:
+            recommendations.append("Low geographic diversity - consider expanding to more regions")
+
+        return recommendations
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Get miner status and intelligence data
+        @self.app.route(f'/api/{self.api_version}/nodes/status', methods=['GET'])
+        def get_miner_status():
+            """Get comprehensive miner status and network intelligence for dashboard"""
+            try:
+                # Get query parameters
+                hours_back = float(request.args.get('hours', 1))  # Default last 1 hour
+                include_intelligence = request.args.get('intelligence', 'true').lower() == 'true'
+
+                current_time = time.time()
+                cutoff_time = current_time - (hours_back * 3600)
+
+                # Aggregate miner status data
+                active_miners = []
+                total_hashrate = 0.0
+                total_blocks_mined = 0
+                miners_by_location = {}
+                miners_by_hardware = {}
+
+                if hasattr(self, 'miner_status_reports'):
+                    for node_id, reports in self.miner_status_reports.items():
+                        # Get most recent report within time window
+                        recent_reports = [r for r in reports if r['reported_at'] >= cutoff_time]
+                        if recent_reports:
+                            latest_report = recent_reports[-1]
+
+                            miner_data = {
+                                'node_id': node_id,
+                                'mining_active': latest_report['mining_active'],
+                                'hashrate': latest_report['hashrate'],
+                                'blocks_mined': latest_report['blocks_mined'],
+                                'temperature': latest_report['temperature'],
+                                'memory_usage': latest_report['memory_usage'],
+                                'location': latest_report['location'],
+                                'hardware_model': latest_report['hardware_model'],
+                                'wallet_address': latest_report['wallet_address'],
+                                'last_report': latest_report['reported_at'],
+                                'network_metrics': latest_report['network_metrics'],
+                                'system_health': latest_report['system_health']
+                            }
+
+                            active_miners.append(miner_data)
+
+                            if latest_report['mining_active']:
+                                total_hashrate += latest_report['hashrate']
+                                total_blocks_mined += latest_report['blocks_mined']
+
+                            # Aggregate by location
+                            location = latest_report['location']
+                            if location not in miners_by_location:
+                                miners_by_location[location] = []
+                            miners_by_location[location].append(miner_data)
+
+                            # Aggregate by hardware
+                            hardware = latest_report['hardware_model']
+                            if hardware not in miners_by_hardware:
+                                miners_by_hardware[hardware] = []
+                            miners_by_hardware[hardware].append(miner_data)
+
+                # Prepare response
+                response_data = {
+                    'time_window_hours': hours_back,
+                    'total_active_miners': len(active_miners),
+                    'mining_miners': len([m for m in active_miners if m['mining_active']]),
+                    'total_network_hashrate': total_hashrate,
+                    'total_blocks_mined_recently': total_blocks_mined,
+                    'miners': active_miners,
+                    'aggregation': {
+                        'by_location': {
+                            location: {
+                                'count': len(miners),
+                                'total_hashrate': sum(m['hashrate'] for m in miners if m['mining_active']),
+                                'avg_temperature': sum(m['temperature'] for m in miners if m['temperature']) / len([m for m in miners if m['temperature']]) if any(m['temperature'] for m in miners) else 0
+                            }
+                            for location, miners in miners_by_location.items()
+                        },
+                        'by_hardware': {
+                            hardware: {
+                                'count': len(miners),
+                                'total_hashrate': sum(m['hashrate'] for m in miners if m['mining_active']),
+                                'models': list(set(m['hardware_model'] for m in miners))
+                            }
+                            for hardware, miners in miners_by_hardware.items()
+                        }
+                    }
+                }
+
+                # Add intelligence data if requested
+                if include_intelligence:
+                    response_data['intelligence'] = self._get_miner_intelligence(hours_back)
+
+                return jsonify(response_data)
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
         # Get registered nodes (dashboard endpoint)
         @self.app.route(f'/api/{self.api_version}/nodes', methods=['GET'])
         def get_registered_nodes():
@@ -1842,6 +2479,15 @@ class BlockchainAPI:
         logger.info(f"📚 API Documentation: http://{self.host}:{self.port}/api/{self.api_version}/docs")
 
         # Register this node with bootstrap service
+        import os
+        bootstrap_urls_env = os.getenv('BOOTSTRAP_URLS')
+        if bootstrap_urls_env:
+            self.bootstrap_urls = [url.strip() for url in bootstrap_urls_env.split(',')]
+        else:
+            self.bootstrap_urls = [
+                "https://bootstrap.pisecure.org/api/v1/nodes/register",
+                "https://pisecure-bootstrap-production.up.railway.app/api/v1/nodes/register"
+            ]
         self._register_with_bootstrap()
 
         # Start automatic network discovery
@@ -1926,13 +2572,8 @@ class BlockchainAPI:
             # Register with bootstrap service
             import requests
 
-            bootstrap_urls = [
-                "https://bootstrap.pisecure.org/api/v1/nodes/register",
-                "https://pisecure-bootstrap-production.up.railway.app/api/v1/nodes/register"
-            ]
-
             registered = False
-            for bootstrap_url in bootstrap_urls:
+            for bootstrap_url in self.bootstrap_urls:
                 try:
                     response = requests.post(bootstrap_url, json=registration_data, timeout=10)
                     if response.status_code == 200:
@@ -1996,13 +2637,8 @@ class BlockchainAPI:
                 }
 
                 # Try to send heartbeat to bootstrap services
-                bootstrap_urls = [
-                    "https://bootstrap.pisecure.org/api/v1/nodes/status",
-                    "https://pisecure-bootstrap-production.up.railway.app/api/v1/nodes/status"
-                ]
-
                 sent = False
-                for bootstrap_url in bootstrap_urls:
+                for bootstrap_url in self.bootstrap_urls:
                     try:
                         import requests
                         response = requests.post(bootstrap_url, json=heartbeat_data, timeout=10)

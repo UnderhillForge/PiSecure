@@ -303,7 +303,9 @@ class SQLiteIndex:
         # This is a simplified implementation
         # In production, you'd need proper transaction parsing
 
-        if tx.get('type') == 'token_transfer':
+        tx_type = tx.get('type')
+
+        if tx_type == 'token_transfer':
             # Remove spent inputs (simplified)
             # sender = tx.get('sender_address')
             # amount = tx.get('amount')
@@ -321,6 +323,21 @@ class SQLiteIndex:
                         (tx_hash, output_index, amount, script, block_height, address)
                         VALUES (?, ?, ?, ?, ?, ?)
                     ''', (tx_hash, 0, amount, '', block_height, recipient))
+
+        elif tx_type == 'mining_reward':
+            # Mining rewards create new coins for the miner
+            recipient = tx.get('recipient_address')
+            amount = tx.get('amount', 0)
+
+            if recipient and amount > 0:
+                # Generate a unique tx hash for the mining reward
+                tx_hash = hashlib.sha256(json.dumps(tx, sort_keys=True).encode()).hexdigest()
+                with self.conn as conn:
+                    conn.execute('''
+                        INSERT OR REPLACE INTO utxo
+                        (tx_hash, output_index, amount, script, block_height, address)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (tx_hash, 0, amount, 'mining_reward', block_height, recipient))
 
     def get_wallet_balance(self, address: str) -> float:
         """Get wallet balance by summing UTXO for address"""

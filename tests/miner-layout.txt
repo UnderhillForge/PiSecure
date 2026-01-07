@@ -1,0 +1,12 @@
+PiSecure version [version] - Started [time/date]
+---------------------------------------------------------------------
+Connected to [current bootstrap / peer_id]
+Syndicate: [Syndicate info if syndicated mining] Share [share info]
+Total Blocks: [blocks mined] Hash Avg: [Average Hashrate] Total Rewards: [Token total]
+Wallet: [wallet_id]
+---------------------------------------------------------------------
+Block: [block] Difficulty: [difficulty] Started: [Time started] 
+Miner Output: [console messages from miner]
+
+---------------------------------------------------------------------
+[E] Enable [D] Disable [R] Restart [Q] Quit

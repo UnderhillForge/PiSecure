@@ -7,6 +7,7 @@ Main CLI entry point for PiSecure framework.
 """
 
 import time
+import secrets
 import click
 from rich.console import Console
 from rich.table import Table
@@ -30,6 +31,70 @@ console = Console()
 
 # Global configuration
 USE_HYBRID_STORAGE = None  # None = auto-detect, True/False = explicit
+USE_PLAIN_OUTPUT = False   # Global flag for plain text output
+
+
+def print_output(message, style=None):
+    """Print message with optional Rich styling or plain text"""
+    if USE_PLAIN_OUTPUT:
+        # Strip Rich markup and print plain text
+        import re
+        # Remove Rich markup like [green]text[/green] and [red]❌ Error[/red]
+        plain_message = re.sub(r'\[.*?\]', '', message)
+        # Remove all non-ASCII characters (including emojis, Unicode symbols)
+        plain_message = re.sub(r'[^\x20-\x7E]+', '', plain_message)
+        # Clean up extra whitespace
+        plain_message = ' '.join(plain_message.split())
+        if plain_message:  # Only print if there's content left
+            print(plain_message)
+    else:
+        if style:
+            console.print(message, style=style)
+        else:
+            console.print(message)
+
+
+def strip_rich_formatting(text):
+    """Strip Rich markup and emojis from text"""
+    import re
+    # Remove Rich markup like [green]text[/green]
+    text = re.sub(r'\[.*?\]', '', text)
+    # Remove all non-ASCII characters (including emojis, Unicode symbols)
+    text = re.sub(r'[^\x20-\x7E]+', '', text)
+    # Clean up extra whitespace
+    return ' '.join(text.split()).strip()
+
+
+def print_success(message):
+    """Print success message"""
+    if USE_PLAIN_OUTPUT:
+        print(f"SUCCESS: {message}")
+    else:
+        console.print(f"[green]✅ {message}[/green]")
+
+
+def print_error(message):
+    """Print error message"""
+    if USE_PLAIN_OUTPUT:
+        print(f"ERROR: {message}")
+    else:
+        console.print(f"[red]❌ {message}[/red]")
+
+
+def print_warning(message):
+    """Print warning message"""
+    if USE_PLAIN_OUTPUT:
+        print(f"WARNING: {message}")
+    else:
+        console.print(f"[yellow]⚠️ {message}[/yellow]")
+
+
+def print_info(message):
+    """Print info message"""
+    if USE_PLAIN_OUTPUT:
+        print(f"INFO: {message}")
+    else:
+        console.print(f"[blue]ℹ️ {message}[/blue]")
 
 
 @click.group()
@@ -52,30 +117,51 @@ def status():
         # Get blockchain info
         info = blockchain.get_chain_info()
 
-        # Create status table
-        table = Table(title="🔗 PiSecure Blockchain Status")
-        table.add_column("Metric", style="cyan", no_wrap=True)
-        table.add_column("Value", style="magenta")
+        if USE_PLAIN_OUTPUT:
+            # Plain text output
+            print("PiSecure Blockchain Status")
+            print("=" * 30)
+            print(f"Blocks: {info['blocks']}")
+            print(f"Pending TX: {info['pending_transactions']}")
+            print(f"Difficulty: {info['difficulty']}")
+            print(f"Chain Valid: {'Yes' if info['is_valid'] else 'No'}")
 
-        table.add_row("Blocks", str(info['blocks']))
-        table.add_row("Pending TX", str(info['pending_transactions']))
-        table.add_row("Difficulty", str(info['difficulty']))
-        table.add_row("Chain Valid", "✅ Yes" if info['is_valid'] else "❌ No")
+            if info['latest_block']:
+                block = info['latest_block']
+                print(f"Latest Block: #{block['index']} ({len(block['transactions'])} TX)")
 
-        if info['latest_block']:
-            block = info['latest_block']
-            table.add_row("Latest Block", f"#{block['index']} ({len(block['transactions'])} TX)")
+            # Network health (if available)
+            if 'network_health' in info:
+                health = info['network_health']
+                print(f"Participation: {health.get('participation', 0):.1%}")
+                print(f"Avg Block Time: {health.get('avg_block_time', 0):.1f}s")
+                print(f"Network Health: {health.get('health_score', 0):.1%}")
+        else:
+            # Rich formatted output
+            table = Table(title="🔗 PiSecure Blockchain Status")
+            table.add_column("Metric", style="cyan", no_wrap=True)
+            table.add_column("Value", style="magenta")
 
-        # Network health
-        health = chain_info['network_health']
-        table.add_row("Participation", f"{health['participation']:.1%}")
-        table.add_row("Avg Block Time", f"{health['avg_block_time']:.1f}s")
-        table.add_row("Network Health", f"{health['health_score']:.1%}")
+            table.add_row("Blocks", str(info['blocks']))
+            table.add_row("Pending TX", str(info['pending_transactions']))
+            table.add_row("Difficulty", str(info['difficulty']))
+            table.add_row("Chain Valid", "✅ Yes" if info['is_valid'] else "❌ No")
 
-        console.print(table)
+            if info['latest_block']:
+                block = info['latest_block']
+                table.add_row("Latest Block", f"#{block['index']} ({len(block['transactions'])} TX)")
+
+            # Network health (if available)
+            if 'network_health' in info:
+                health = info['network_health']
+                table.add_row("Participation", f"{health.get('participation', 0):.1%}")
+                table.add_row("Avg Block Time", f"{health.get('avg_block_time', 0):.1f}s")
+                table.add_row("Network Health", f"{health.get('health_score', 0):.1%}")
+
+            console.print(table)
 
     except Exception as e:
-        console.print(f"[red]❌ Error getting status: {e}[/red]")
+        print_error(f"Error getting status: {e}")
 
 
 @cli.command()
@@ -134,8 +220,27 @@ def create_tx(count):
               help='Interactive mining with progress display')
 @click.option('--wallet', help='Wallet address to receive mining rewards')
 @click.option('--no-sync', is_flag=True, help='Skip network synchronization before mining')
-def mine(interactive, wallet, no_sync):
+@click.option('--safe-mode', is_flag=True, help='Enable system monitoring and thermal throttling')
+@click.option('--plain', is_flag=True, help='Disable ANSI colors and formatting for plain text output')
+def mine(interactive, wallet, no_sync, safe_mode, plain):
     """Start blockchain mining"""
+    global USE_PLAIN_OUTPUT
+    USE_PLAIN_OUTPUT = plain
+
+    # Signal handling for graceful shutdown
+    import signal
+    mining_stopped = False
+
+    def stop_mining_handler(signum, frame):
+        # Immediately terminate the process - no cleanup needed
+        import sys
+        print_output("\nMining stopped by user")
+        sys.stdout.flush()  # Ensure message is displayed
+        import os
+        os._exit(0)  # Force immediate termination
+
+    # Register signal handler for SIGINT (Ctrl-C)
+    signal.signal(signal.SIGINT, stop_mining_handler)
     try:
         blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
 
@@ -153,14 +258,14 @@ def mine(interactive, wallet, no_sync):
                 pass
 
         if not miner_wallet:
-            console.print("[yellow]⚠️ No miner wallet configured[/yellow]")
-            console.print("[dim]Use --wallet to specify wallet address, or set mining.wallet_address in /etc/pisecure/config.json[/dim]")
+            print_warning("No miner wallet configured")
+            print_info("Use --wallet to specify wallet address, or set mining.wallet_address in /etc/pisecure/config.json")
             miner_wallet = None
 
         # Sync with network before mining (unless disabled)
         if not no_sync:
             try:
-                console.print("[blue]🔄 Syncing with network before mining...[/blue]")
+                print_info("Syncing with network before mining...")
                 peer_discovery = PeerDiscovery()
                 p2p_sync = P2PSyncManager(blockchain, peer_discovery)
 
@@ -170,57 +275,264 @@ def mine(interactive, wallet, no_sync):
                 blocks_synced = final_height - initial_height
 
                 if blocks_synced > 0:
-                    console.print(f"[green]✅ Synced {blocks_synced} blocks from network[/green]")
+                    print_success(f"Synced {blocks_synced} blocks from network")
                 else:
-                    console.print("[green]✅ Already up-to-date with network[/green]")
+                    print_success("Already up-to-date with network")
             except Exception as e:
-                console.print(f"[yellow]⚠️ Network sync failed, proceeding with mining: {e}[/yellow]")
+                print_warning(f"Network sync failed, proceeding with mining: {e}")
         else:
-            console.print("[yellow]⚠️ Skipping network sync (--no-sync flag used)[/yellow]")
+            print_warning("Skipping network sync (--no-sync flag used)")
+
+        # Initialize system monitor if safe mode is enabled
+        system_monitor = None
+        if safe_mode:
+            try:
+                from .core.monitoring import get_system_monitor
+                system_monitor = get_system_monitor()
+                system_monitor.start_monitoring()
+                print_success("Safe mode enabled - System monitoring active")
+                print_info("Will monitor temperature, memory, and CPU usage")
+            except Exception as e:
+                print_warning(f"Could not enable safe mode monitoring: {e}")
+                safe_mode = False
+
+        # Initialize robust bootstrap-based status reporting
+        try:
+            from .core.bootstrap_manager import get_bootstrap_registry, get_status_reporter
+            bootstrap_registry = get_bootstrap_registry()
+            status_reporter = get_status_reporter(f"miner_{secrets.token_hex(4)}")
+            print_success("Bootstrap-based status reporting enabled")
+            print_info("Will report to bootstrap.pisecure.org with automatic failover")
+        except Exception as e:
+            print_warning(f"Could not initialize bootstrap reporting: {e}")
+            status_reporter = None
+
+        # Initialize miner variables
+        node_id = f"miner_{secrets.token_hex(4)}"  # Generate unique node ID
+        blocks_mined_session = 0
+        session_start_time = time.time()
+        last_discovery_check = 0
+        discovery_interval = 600  # Check for new bootstrap servers every 10 minutes
 
         if interactive:
-            console.print("[green]⛏️ Starting interactive mining...[/green]")
+            print_success("Starting PiSecure mining...")
             if miner_wallet:
-                console.print(f"[dim]Rewards will go to: {miner_wallet}[/dim]")
-            console.print("[dim]Press Ctrl-C to stop[/dim]\n")
+                print_output(f"Rewards will go to: {miner_wallet}")
+            if safe_mode:
+                print_output("Safe mode: Thermal throttling and memory cleanup enabled")
+            print_output("Press Ctrl-C to stop")
+            print()
 
             try:
-                while True:
-                    # Mine a single block
-                    block = blockchain.mine_pending_transactions(miner_wallet, verbose=True)
+                while not mining_stopped:
+                    # Check system resources in safe mode
+                    throttle_status = None
+                    if safe_mode and system_monitor:
+                        throttle_status = system_monitor.check_system_resources()
+
+                        # Display current system status
+                        if throttle_status:
+                            status_display = system_monitor.get_status_display(throttle_status)
+                            print_info(f"System status: {status_display}")
+
+                        # Apply cool-off strategy if needed
+                        if not throttle_status['should_pause_mining']:
+                            cool_off_action = system_monitor.apply_cool_off_strategy(throttle_status)
+                            if cool_off_action['action'] != 'none':
+                                action_msg = {
+                                    'emergency_stop': 'Emergency stop triggered',
+                                    'pause_mining': 'Cooling down - mining paused',
+                                    'throttle_mining': 'Increased delays for cooling',
+                                    'periodic_cleanup': 'Memory cleanup performed'
+                                }.get(cool_off_action['action'], cool_off_action['action'])
+
+                                if cool_off_action.get('memory_cleanup', {}).get('memory_freed_mb', 0) > 0:
+                                    freed_mb = cool_off_action['memory_cleanup']['memory_freed_mb']
+                                    action_msg += f" ({freed_mb:.1f}MB freed)"
+
+                                print_warning(action_msg)
+                        elif throttle_status['cool_down_time_remaining'] > 0:
+                            remaining = throttle_status['cool_down_time_remaining']
+                            print_warning(f"Cooling down... ({remaining:.0f}s remaining)")
+                            time.sleep(min(remaining, 10))  # Sleep for remaining time or 10s max
+                            continue
+
+                    # Check stop flag before mining
+                    if mining_stopped:
+                        break
+
+                    # Mine a single block (quietly - no Tor/P2P messages)
+                    block = blockchain.mine_pending_transactions(miner_wallet, verbose=False)
                     if block:
-                        console.print(f"[green]✅ Block mined! #{block.index}[/green]")
-                        # Brief pause before next mining attempt
-                        time.sleep(2)
-                    else:
-                        # No transactions to mine, wait a bit
-                        console.print("[dim]No pending transactions, waiting...[/dim]")
-                        time.sleep(5)
+                        blocks_mined_session += 1
+                        print_success(f"Block mined! #{block.index}")
+
+                        # Update wallet balance after mining reward
+                        if miner_wallet:
+                            try:
+                                # Sync wallet balance with blockchain
+                                blockchain_balance = blockchain.get_wallet_balance(miner_wallet)
+                                # Update local wallet balance
+                                try:
+                                    from .core.wallet import SignWallet
+                                    wallet = SignWallet()
+                                    # Find wallet file for this address
+                                    import os
+                                    wallet_dir = "/var/lib/pisecure/wallets"
+                                    if os.path.exists(wallet_dir):
+                                        for wallet_file in os.listdir(wallet_dir):
+                                            if wallet_file.endswith('.json'):
+                                                try:
+                                                    wallet_path = os.path.join(wallet_dir, wallet_file)
+                                                    temp_wallet = SignWallet(wallet_path)
+                                                    if temp_wallet.get_address() == miner_wallet:
+                                                        # Update balance to match blockchain
+                                                        temp_wallet.wallet_data['balance'] = blockchain_balance
+                                                        temp_wallet._save_wallet()
+                                                        # Count mining reward transactions in the block
+                                                        reward_txs = [tx for tx in block.transactions if tx.get('type') == 'mining_reward']
+                                                        if reward_txs:
+                                                            reward_amount = reward_txs[0].get('amount', 0)
+                                                            print_success(f"Mining reward: {reward_amount} tokens credited to {miner_wallet}")
+                                                            print_success(f"Updated wallet balance: {blockchain_balance:.2f} tokens")
+                                                        break
+                                                except:
+                                                    continue
+                                except Exception as e:
+                                    print_warning(f"Could not update wallet balance: {e}")
+                            except Exception as e:
+                                print_warning(f"Could not sync wallet balance: {e}")
+
+                    # Check stop flag before status reporting
+                    if mining_stopped:
+                        break
+
+                    # Queue status report for background sending (non-blocking)
+                    if status_reporter:
+                        current_time = time.time()
+
+                        # Check for bootstrap server discovery periodically
+                        if current_time - last_discovery_check >= discovery_interval:
+                            try:
+                                discovered = bootstrap_registry.discover_bootstrap_servers()
+                                if discovered > 0:
+                                    print_info(f"Discovered {discovered} new bootstrap server(s)")
+                            except Exception as e:
+                                print_warning(f"Bootstrap discovery failed: {e}")
+                            last_discovery_check = current_time
+
+                        # Queue comprehensive status report for intelligence processing
+                        status_data = {
+                            # Required fields for bootstrap server
+                            'mining_active': True,
+                            'blocks_mined': blocks_mined_session,
+                            'hashrate': 0.5,  # Estimated hashrate (H/s)
+                            'session_start_time': session_start_time,
+                            'wallet_address': miner_wallet,
+                            'hardware_model': 'pi5' if safe_mode else 'pi4',
+                            'location': 'us-east',
+
+                            # Intelligence fields for enhanced processing
+                            'peers_connected': 3,  # TODO: Get actual P2P peer count
+                            'syndicate_membership': None,  # TODO: Get syndicate name if applicable
+                        }
+
+                        # Add system monitoring data for intelligence
+                        if safe_mode and system_monitor:
+                            system_status = system_monitor.check_system_resources()
+                            if system_status.get('resources'):
+                                resources = system_status['resources']
+                                status_data.update({
+                                    'temperature': resources.temperature,
+                                    'memory_usage': resources.memory_percent,
+                                    'system_health': {
+                                        'cpu_usage': resources.cpu_percent,
+                                        'load_average': list(resources.load_average)
+                                    }
+                                })
+
+                        # Queue the comprehensive status report
+                        status_reporter.queue_status_report(status_data)
+
+                    # Check stop flag before sleeping
+                    if mining_stopped:
+                        break
+
+                    # Dynamic delay based on system status
+                    delay = 2.0  # Default delay
+                    if safe_mode and throttle_status:
+                        delay = throttle_status['recommended_delay']
+                        if delay > 2.0:
+                            print_info(f"Throttling active - waiting {delay:.1f}s")
+
+                    # Use shorter sleep intervals to allow signal processing
+                    time.sleep(min(delay, 1.0))  # Max 1 second sleep for responsiveness
+
+                    # Check stop flag after sleep
+                    if mining_stopped:
+                        break
+
+                    # No transactions to mine, wait a bit
+                    if not block:
+                        print_info("No pending transactions, waiting...")
+                        time.sleep(min(5.0, 1.0))  # Shorter sleep for responsiveness
 
             except KeyboardInterrupt:
-                console.print("\n[yellow]⏹️ Mining stopped by user[/yellow]")
+                print_output("\nMining stopped by user")
+            finally:
+                # Cleanup system monitor
+                if system_monitor:
+                    system_monitor.stop_monitoring()
         else:
-            console.print("[green]⛏️ Starting background mining...[/green]")
+            print_success("Starting background mining...")
             if miner_wallet:
-                console.print(f"[dim]Rewards will go to: {miner_wallet}[/dim]")
+                print_output(f"Rewards will go to: {miner_wallet}")
 
-            # For background mining, mine one block at a time
+            # For background mining, mine one block at a time (quietly)
             block = blockchain.mine_pending_transactions(miner_wallet, verbose=False)
             if block:
-                console.print(f"[green]✅ Background mining completed - Block #{block.index} mined[/green]")
+                print_success(f"Background mining completed - Block #{block.index} mined")
                 if miner_wallet:
-                    # Count mining reward transactions in the block
-                    reward_txs = [tx for tx in block.transactions if tx.get('type') == 'mining_reward']
-                    if reward_txs:
-                        reward_amount = reward_txs[0].get('amount', 0)
-                        console.print(f"[green]💰 Mining reward: {reward_amount} tokens credited to {miner_wallet}[/green]")
+                    try:
+                        # Sync wallet balance with blockchain
+                        blockchain_balance = blockchain.get_wallet_balance(miner_wallet)
+                        # Update local wallet balance
+                        try:
+                            from .core.wallet import SignWallet
+                            wallet = SignWallet()
+                            # Find wallet file for this address
+                            import os
+                            wallet_dir = "/var/lib/pisecure/wallets"
+                            if os.path.exists(wallet_dir):
+                                for wallet_file in os.listdir(wallet_dir):
+                                    if wallet_file.endswith('.json'):
+                                        try:
+                                            wallet_path = os.path.join(wallet_dir, wallet_file)
+                                            temp_wallet = SignWallet(wallet_path)
+                                            if temp_wallet.get_address() == miner_wallet:
+                                                # Update balance to match blockchain
+                                                temp_wallet.wallet_data['balance'] = blockchain_balance
+                                                temp_wallet._save_wallet()
+                                                # Count mining reward transactions in the block
+                                                reward_txs = [tx for tx in block.transactions if tx.get('type') == 'mining_reward']
+                                                if reward_txs:
+                                                    reward_amount = reward_txs[0].get('amount', 0)
+                                                    print_success(f"Mining reward: {reward_amount} tokens credited to {miner_wallet}")
+                                                    print_success(f"Updated wallet balance: {blockchain_balance:.2f} tokens")
+                                                break
+                                        except:
+                                            continue
+                        except Exception as e:
+                            print_warning(f"Could not update wallet balance: {e}")
+                    except Exception as e:
+                        print_warning(f"Could not sync wallet balance: {e}")
             else:
-                console.print("[yellow]⚠️ No transactions to mine[/yellow]")
+                print_warning("No transactions to mine")
 
     except KeyboardInterrupt:
-        console.print("\n[yellow]⏹️ Mining stopped by user[/yellow]")
+        print_output("\nMining stopped by user")
     except Exception as e:
-        console.print(f"[red]❌ Mining error: {e}[/red]")
+        print_error(f"Mining error: {e}")
 
 
 @cli.command()
@@ -1163,6 +1475,87 @@ def import_wallet(backup_path, wallet_name):
 
 
 @cli.command()
+@click.option('--wallet', help='Wallet ID to sync (default: all wallets)')
+def sync_wallet(wallet):
+    """Sync wallet balance with blockchain state"""
+    try:
+        from .core import SignChain
+
+        blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
+
+        console.print("[blue]🔄 Syncing wallet balances with blockchain...[/blue]")
+
+        if wallet:
+            # Sync specific wallet
+            try:
+                from .core.wallet import SignWallet
+                wallet_file = f"/var/lib/pisecure/wallets/{wallet}.json"
+                wallet_instance = SignWallet(wallet_file)
+
+                if 'error' in wallet_instance.wallet_data:
+                    console.print(f"[red]❌ Wallet not found: {wallet}[/red]")
+                    return
+
+                address = wallet_instance.get_address()
+                blockchain_balance = blockchain.get_wallet_balance(address)
+
+                # Update wallet balance
+                wallet_instance.wallet_data['balance'] = blockchain_balance
+                wallet_instance._save_wallet()
+
+                console.print(f"[green]✅ Synced wallet {wallet}[/green]")
+                console.print(f"   🏦 Address: {address}")
+                console.print(f"   💰 Balance: {blockchain_balance:.2f} tokens")
+
+            except Exception as e:
+                console.print(f"[red]❌ Failed to sync wallet {wallet}: {e}[/red]")
+        else:
+            # Sync all wallets
+            try:
+                from .core.wallet import SignWallet
+                import os
+
+                wallet_dir = "/var/lib/pisecure/wallets"
+                if not os.path.exists(wallet_dir):
+                    console.print("[yellow]⚠️ No wallet directory found[/yellow]")
+                    return
+
+                synced_count = 0
+                total_balance = 0.0
+
+                for wallet_file in os.listdir(wallet_dir):
+                    if wallet_file.endswith('.json'):
+                        try:
+                            wallet_path = os.path.join(wallet_dir, wallet_file)
+                            temp_wallet = SignWallet(wallet_path)
+
+                            if 'error' not in temp_wallet.wallet_data:
+                                address = temp_wallet.get_address()
+                                blockchain_balance = blockchain.get_wallet_balance(address)
+
+                                # Update balance
+                                temp_wallet.wallet_data['balance'] = blockchain_balance
+                                temp_wallet._save_wallet()
+
+                                synced_count += 1
+                                total_balance += blockchain_balance
+
+                                console.print(f"   ✅ {temp_wallet.get_wallet_id()}: {blockchain_balance:.2f} tokens")
+
+                        except Exception as e:
+                            console.print(f"   ⚠️ Skipped {wallet_file}: {e}")
+
+                console.print(f"\n[green]✅ Synced {synced_count} wallets[/green]")
+                console.print(f"   💰 Total balance across all wallets: {total_balance:.2f} tokens")
+
+            except Exception as e:
+                console.print(f"[red]❌ Failed to sync wallets: {e}[/red]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Wallet sync error: {e}[/red]")
+
+
+@cli.command()
 @click.option('--wallet', help='Wallet ID to show (default: current wallet)')
 def wallet_info(wallet):
     """Show detailed wallet information"""
@@ -1224,6 +1617,10 @@ def wallet_info(wallet):
 
 # Register subcommand groups
 cli.add_command(update)
+
+
+
+
 
 def main():
     """Main entry point for the CLI"""

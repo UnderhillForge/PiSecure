@@ -460,7 +460,7 @@ class NATTraversal:
 
         return sorted_endpoints[0]
 
-    def register_with_bootstrap(self, bootstrap_url: str = "https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/peers.json"):
+    def register_with_bootstrap(self, bootstrap_url: str = "https://bootstrap.pisecure.org"):
         """Register endpoints with bootstrap nodes"""
         if not self.public_endpoints:
             return
@@ -505,6 +505,7 @@ class TorOnionService:
         self.tor_config_path = "/etc/tor/torrc"
         self.onion_service_dir = "/var/lib/tor/pisecure"
         self.hostname_file = f"{self.onion_service_dir}/hostname"
+        self.last_tor_restart = 0  # Track last restart time for rate limiting
 
     def setup_onion_service(self) -> bool:
         """Setup Tor onion service for PiSecure"""
@@ -537,8 +538,23 @@ HiddenServiceVersion 3
                 echo_cmd = f"echo '{tor_config}' | sudo tee -a {self.tor_config_path} > /dev/null"
                 subprocess.run(echo_cmd, shell=True, check=True)
 
+            # Rate limit Tor restarts (prevent systemd rate limiting)
+            current_time = time.time()
+            cooldown_period = 300  # 5 minutes between restarts
+
+            if current_time - self.last_tor_restart < cooldown_period:
+                logger.debug("Tor restart rate limited - skipping restart")
+                # Check if Tor is already running and service exists
+                if self.get_onion_address():
+                    logger.info("Tor onion service already active")
+                    return True
+                else:
+                    logger.warning("Tor restart rate limited but service not available")
+                    return False
+
             # Restart tor
             subprocess.run(['sudo', 'systemctl', 'restart', 'tor'], check=True)
+            self.last_tor_restart = current_time
 
             # Wait for onion address
             logger.info("Waiting for Tor onion address...")
@@ -844,20 +860,24 @@ class NodeDiscoveryService:
             results['success_count'] += 1
             logger.info(f"✅ NAT traversal successful: {len(endpoints)} endpoints")
 
-        # 2. Tor Onion Service
-        logger.info("Setting up Tor onion service...")
-        if self.tor_service.setup_onion_service():
-            onion_addr = self.tor_service.get_onion_address()
-            if onion_addr:
-                tor_endpoint = {
-                    'type': 'tor_onion',
-                    'address': onion_addr,
-                    'priority': 70
-                }
-                results['endpoints'].append(tor_endpoint)
-                results['methods_attempted'].append('tor_onion')
-                results['success_count'] += 1
-                logger.info(f"✅ Tor onion service created: {onion_addr}")
+        # 2. Tor Onion Service (DISABLED BY DEFAULT - optional privacy feature)
+        enable_tor = os.getenv('PISECURE_ENABLE_TOR', 'false').lower() == 'true'
+        if enable_tor:
+            logger.info("Setting up Tor onion service...")
+            if self.tor_service.setup_onion_service():
+                onion_addr = self.tor_service.get_onion_address()
+                if onion_addr:
+                    tor_endpoint = {
+                        'type': 'tor_onion',
+                        'address': onion_addr,
+                        'priority': 70
+                    }
+                    results['endpoints'].append(tor_endpoint)
+                    results['methods_attempted'].append('tor_onion')
+                    results['success_count'] += 1
+                    logger.info(f"✅ Tor onion service created: {onion_addr}")
+        else:
+            logger.info("Tor onion service disabled (set PISECURE_ENABLE_TOR=true to enable)")
 
         # 3. Community Relay Network
         logger.info("Registering with community relays...")

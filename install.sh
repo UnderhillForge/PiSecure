@@ -128,6 +128,9 @@ install_pisecure() {
     # Install PiSecure (must be in the correct directory)
     pip install -e .
 
+    # Install additional web dependencies
+    pip install Flask-Cors Flask-Limiter
+
     # Verify installation
     python -c "import pisecure; print('PiSecure import successful')" || {
         log_error "PiSecure installation failed"

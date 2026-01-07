@@ -156,3 +156,37 @@ class PeerDiscovery:
         """Stop the peer discovery process."""
         # For now, just a placeholder
         pass
+
+    def clear_cache(self):
+        """Clear all cached peers."""
+        with self.lock:
+            self.known_peers.clear()
+            self.connected_peers.clear()
+            # Remove the file if it exists
+            if self.peer_file.exists():
+                try:
+                    self.peer_file.unlink()
+                except Exception:
+                    pass  # Ignore if we can't delete
+
+    def get_peer_count(self) -> int:
+        """Get total number of known peers."""
+        with self.lock:
+            return len(self.known_peers)
+
+    def get_connected_count(self) -> int:
+        """Get number of currently connected peers."""
+        with self.lock:
+            return len(self.connected_peers)
+
+    def get_recent_peers(self, hours: int = 24) -> List[str]:
+        """Get peers seen within the last N hours."""
+        cutoff_time = time.time() - (hours * 60 * 60)
+        recent_peers = []
+
+        with self.lock:
+            for peer_id, peer_info in self.known_peers.items():
+                if peer_info.get('last_seen', 0) > cutoff_time:
+                    recent_peers.append(peer_id)
+
+        return recent_peers
