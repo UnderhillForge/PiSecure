@@ -32,8 +32,6 @@ console = Console()
 # Global configuration
 USE_HYBRID_STORAGE = None  # None = auto-detect, True/False = explicit
 USE_PLAIN_OUTPUT = False   # Global flag for plain text output
-USE_TESTNET = False        # Use testnet data directories
-VALIDATE_ONLY = False      # Validation-only mode (no state changes)
 
 
 def print_output(message, style=None):
@@ -99,68 +97,30 @@ def print_info(message):
         console.print(f"[blue]ℹ️ {message}[/blue]")
 
 
-def get_data_dir():
-    """Get the appropriate data directory based on testnet flag"""
-    if USE_TESTNET:
-        return "/var/lib/pisecure-testnet"
-    return "/var/lib/pisecure"
-
-
-def get_blockchain_path():
-    """Get blockchain file path (testnet or mainnet)"""
-    return f"{get_data_dir()}/blockchain.json"
-
-
-def get_config_path():
-    """Get config file path (testnet or mainnet)"""
-    if USE_TESTNET:
-        return "/etc/pisecure/config-testnet.json"
-    return "/etc/pisecure/config.json"
-
-
-def get_wallet_dir():
-    """Get wallet directory (testnet or mainnet)"""
-    return f"{get_data_dir()}/wallets"
-
-
-def check_validate_only(operation_name: str) -> bool:
-    """Check if operation is allowed in validate-only mode"""
-    if VALIDATE_ONLY:
-        print_warning(f"Skipping {operation_name} - VALIDATE-ONLY mode active")
-        return False
-    return True
-
-
 @click.group()
 @click.option('--hybrid-storage/--no-hybrid-storage', default=None,
               help='Use hybrid storage system (default: auto-detect)')
-@click.option('--test', is_flag=True,
-              help='Use testnet mode (separate data directory for testing)')
-@click.option('--validate-only', is_flag=True,
-              help='Validation-only mode (no state changes, read-only operations)')
+@click.option('--validate-only', is_flag=True, default=False,
+              help='Read-only mode: validate blockchain without mining (bypasses hardware checks)')
 @click.version_option(version="0.1.0")
-def cli(hybrid_storage, test, validate_only):
+def cli(hybrid_storage, validate_only):
     """PiSecure - Decentralized Security Framework for Raspberry Pi"""
-    # Store preferences globally
-    global USE_HYBRID_STORAGE, USE_TESTNET, VALIDATE_ONLY
+    # Store the hybrid storage preference globally
+    global USE_HYBRID_STORAGE
     USE_HYBRID_STORAGE = hybrid_storage
-    USE_TESTNET = test
-    VALIDATE_ONLY = validate_only
     
-    if USE_TESTNET:
-        print_info("Running in TESTNET mode - using /var/lib/pisecure-testnet/")
-    if VALIDATE_ONLY:
-        print_warning("VALIDATE-ONLY mode - no state changes will be made")
+    # Set validate-only mode as environment variable for core modules
+    if validate_only:
+        import os
+        os.environ['PISECURE_VALIDATE_ONLY'] = '1'
+        print_info("Running in VALIDATE-ONLY mode (hardware checks bypassed)")
 
 
 @cli.command()
 def status():
     """Show blockchain and system status"""
     try:
-        blockchain = SignChain(
-            chain_file=get_blockchain_path(),
-            use_hybrid_storage=USE_HYBRID_STORAGE
-        )
+        blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
 
         # Get blockchain info
         info = blockchain.get_chain_info()
@@ -221,10 +181,7 @@ def migrate_storage():
         console.print()
 
         # Enable hybrid storage for migration
-        blockchain = SignChain(
-            chain_file=get_blockchain_path(),
-            use_hybrid_storage=True
-        )
+        blockchain = SignChain(use_hybrid_storage=True)
 
         info = blockchain.get_chain_info()
         console.print(f"✅ Migration complete! {info['blocks']} blocks migrated")
@@ -236,147 +193,13 @@ def migrate_storage():
 
 
 @cli.command()
-@click.option('--mainnet/--no-mainnet', default=True, help='Initialize mainnet genesis block')
-@click.option('--testnet/--no-testnet', default=True, help='Initialize testnet genesis block')
-def init_genesis(mainnet, testnet):
-    """Initialize genesis blocks for mainnet and/or testnet"""
-    import os
-    
-    if not mainnet and not testnet:
-        print_error("Must initialize at least one network (--mainnet or --testnet)")
-        return
-    
-    initialized = []
-    
-    # Initialize mainnet
-    if mainnet:
-        try:
-            data_dir = "/var/lib/pisecure"
-            os.makedirs(data_dir, exist_ok=True)
-            
-            print_info(f"Initializing mainnet genesis block...")
-            blockchain = SignChain(
-                chain_file=f"{data_dir}/blockchain.json",
-                use_hybrid_storage=USE_HYBRID_STORAGE
-            )
-            
-            # Force recreate genesis if blockchain is empty
-            if len(blockchain.chain) == 0:
-                blockchain.chain = [blockchain.create_genesis_block()]
-                blockchain.save_chain()
-            
-            genesis = blockchain.chain[0]
-            print_success(f"Mainnet genesis initialized!")
-            print_output(f"  Block #0")
-            print_output(f"  Hash: {genesis.hash[:16]}...")
-            print_output(f"  Timestamp: {genesis.timestamp}")
-            print_output(f"  Location: {data_dir}/")
-            initialized.append("mainnet")
-            
-        except Exception as e:
-            print_error(f"Failed to initialize mainnet: {e}")
-    
-    # Initialize testnet
-    if testnet:
-        try:
-            data_dir = "/var/lib/pisecure-testnet"
-            os.makedirs(data_dir, exist_ok=True)
-            
-            print_info(f"Initializing testnet genesis block...")
-            blockchain = SignChain(
-                chain_file=f"{data_dir}/blockchain.json",
-                use_hybrid_storage=USE_HYBRID_STORAGE
-            )
-            
-            # Force recreate genesis if blockchain is empty
-            if len(blockchain.chain) == 0:
-                blockchain.chain = [blockchain.create_genesis_block()]
-                blockchain.save_chain()
-            
-            genesis = blockchain.chain[0]
-            print_success(f"Testnet genesis initialized!")
-            print_output(f"  Block #0")
-            print_output(f"  Hash: {genesis.hash[:16]}...")
-            print_output(f"  Timestamp: {genesis.timestamp}")
-            print_output(f"  Location: {data_dir}/")
-            initialized.append("testnet")
-            
-        except Exception as e:
-            print_error(f"Failed to initialize testnet: {e}")
-    
-    if initialized:
-        print()
-        print_success(f"Genesis initialization complete: {', '.join(initialized)}")
-        print_info("Use '--test' flag for testnet operations:")
-        print_output("  pisecure --test mine")
-        print_output("  pisecure --test status")
-
-
-@cli.command()
-def mining_info():
-    """Show PiHash mining algorithm information and hardware performance"""
-    try:
-        from .core.pihash import PiHash
-        
-        pihash = PiHash(mining_mode=True)
-        
-        # Get hardware info
-        hw_fingerprint = pihash._get_hardware_fingerprint()
-        pi_model = hw_fingerprint.get('pi_model', 'Unknown')
-        cpu_serial = hw_fingerprint.get('cpu_serial', 'Unknown')
-        
-        # Get performance factor
-        performance_factor = pihash.get_pi_performance_factor()
-        
-        # Estimate hashrate
-        base_hashrate = 1.0  # H/s on Pi 5
-        estimated_hashrate = base_hashrate * performance_factor
-        
-        console.print("\n[bold cyan]🔐 PiHash Mining Algorithm[/bold cyan]")
-        console.print("=" * 60)
-        console.print("\n[bold]Hardware Information:[/bold]")
-        console.print(f"  Pi Model: [green]{pi_model}[/green]")
-        console.print(f"  CPU Serial: [dim]{cpu_serial[:16]}...[/dim]")
-        console.print(f"  Performance Factor: [yellow]{performance_factor:.1f}x[/yellow]")
-        console.print(f"  Estimated Hashrate: [yellow]{estimated_hashrate:.2f} H/s[/yellow]")
-        
-        console.print("\n[bold]Mining Configuration:[/bold]")
-        console.print(f"  Algorithm: [green]PiHash (Argon2id-inspired)[/green]")
-        console.print(f"  Memory Usage: [yellow]32 MB[/yellow] (validation)")
-        console.print(f"  Mining Memory: [yellow]~1 MB[/yellow] (16K blocks)")
-        console.print(f"  Target Block Time: [yellow]10-30 seconds[/yellow]")
-        console.print(f"  Token: [green]314ST[/green]")
-        
-        console.print("\n[bold]Features:[/bold]")
-        console.print("  ✅ Pi-exclusive mining (hardware verified)")
-        console.print("  ✅ Universal validation (any hardware)")
-        console.print("  ✅ Memory-hard algorithm (ASIC resistant)")
-        console.print("  ✅ ARM NEON optimization patterns")
-        console.print("  ✅ VideoCore GPU integration")
-        console.print("  ✅ TrustZone hardware RNG")
-        
-        console.print("\n[dim]Run 'pisecure mine' to start mining[/dim]")
-        console.print("=" * 60)
-        
-    except Exception as e:
-        print_error(f"Error getting mining info: {e}")
-        print_warning("PiHash requires Raspberry Pi hardware")
-
-
-@cli.command()
 @click.option('--count', default=5, help='Number of test transactions to create')
 def create_tx(count):
     """Create test transactions for mining"""
     try:
-        if not check_validate_only("transaction creation"):
-            return
-            
         import secrets
 
-        blockchain = SignChain(
-            chain_file=get_blockchain_path(),
-            use_hybrid_storage=USE_HYBRID_STORAGE
-        )
+        blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
 
         console.print(f"📦 Creating {count} test transactions...")
 
@@ -407,17 +230,10 @@ def create_tx(count):
 @click.option('--no-sync', is_flag=True, help='Skip network synchronization before mining')
 @click.option('--safe-mode', is_flag=True, help='Enable system monitoring and thermal throttling')
 @click.option('--plain', is_flag=True, help='Disable ANSI colors and formatting for plain text output')
-@click.option('--limit', type=float, default=None, help='Stop mining after wallet reaches this balance (e.g. --limit 300 stops at 300 314ST)')
-@click.option('--testnet', is_flag=True, help='Mine on testnet (uses /var/lib/pisecure/testnet)')
-def mine(interactive, wallet, no_sync, safe_mode, plain, limit, testnet):
+def mine(interactive, wallet, no_sync, safe_mode, plain):
     """Start blockchain mining"""
-    if not check_validate_only("mining"):
-        return
-        
-    global USE_PLAIN_OUTPUT, USE_TESTNET
+    global USE_PLAIN_OUTPUT
     USE_PLAIN_OUTPUT = plain
-    if testnet:
-        USE_TESTNET = True
 
     # Signal handling for graceful shutdown
     import signal
@@ -434,17 +250,7 @@ def mine(interactive, wallet, no_sync, safe_mode, plain, limit, testnet):
     # Register signal handler for SIGINT (Ctrl-C)
     signal.signal(signal.SIGINT, stop_mining_handler)
     try:
-        # Use testnet or mainnet data directory
-        if USE_TESTNET:
-            chain_file = "/var/lib/pisecure/testnet/blockchain.json"
-            print_info("🧪 Using TESTNET data directory")
-        else:
-            chain_file = get_blockchain_path()
-        
-        blockchain = SignChain(
-            chain_file=chain_file,
-            use_hybrid_storage=USE_HYBRID_STORAGE
-        )
+        blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
 
         # Determine miner wallet address
         miner_wallet = wallet
@@ -452,7 +258,7 @@ def mine(interactive, wallet, no_sync, safe_mode, plain, limit, testnet):
             # Try to load from config
             try:
                 import json
-                config_path = get_config_path()
+                config_path = "/etc/pisecure/config.json"
                 with open(config_path, 'r') as f:
                     config = json.load(f)
                 miner_wallet = config.get('mining', {}).get('wallet_address')
@@ -498,19 +304,16 @@ def mine(interactive, wallet, no_sync, safe_mode, plain, limit, testnet):
                 print_warning(f"Could not enable safe mode monitoring: {e}")
                 safe_mode = False
 
-        # Initialize robust bootstrap-based status reporting (non-blocking)
-        status_reporter = None
+        # Initialize robust bootstrap-based status reporting
         try:
             from .core.bootstrap_manager import get_bootstrap_registry, get_status_reporter
             bootstrap_registry = get_bootstrap_registry()
-            # Quick health check - don't block if bootstrap is down
-            if bootstrap_registry.has_healthy_servers(quick_check=True):
-                status_reporter = get_status_reporter(f"miner_{secrets.token_hex(4)}")
-                print_success("Bootstrap-based status reporting enabled")
-            else:
-                print_info("Bootstrap servers unreachable, status reporting disabled")
+            status_reporter = get_status_reporter(f"miner_{secrets.token_hex(4)}")
+            print_success("Bootstrap-based status reporting enabled")
+            print_info("Will report to bootstrap.pisecure.org with automatic failover")
         except Exception as e:
-            print_info(f"Status reporting disabled: {e}")
+            print_warning(f"Could not initialize bootstrap reporting: {e}")
+            status_reporter = None
 
         # Initialize miner variables
         node_id = f"miner_{secrets.token_hex(4)}"  # Generate unique node ID
@@ -523,20 +326,6 @@ def mine(interactive, wallet, no_sync, safe_mode, plain, limit, testnet):
             print_success("Starting PiSecure mining...")
             if miner_wallet:
                 print_output(f"Rewards will go to: {miner_wallet}")
-                # Check if limit is set and display initial balance
-                if limit is not None:
-                    try:
-                        current_balance = blockchain.get_wallet_balance(miner_wallet)
-                        print_output(f"Current balance: {current_balance:.2f} 314ST")
-                        print_output(f"Target balance: {limit:.2f} 314ST")
-                        if current_balance >= limit:
-                            print_success(f"Wallet already at or above target balance!")
-                            print_success(f"Current: {current_balance:.2f} 314ST >= Target: {limit:.2f} 314ST")
-                            return
-                        remaining = limit - current_balance
-                        print_output(f"Mining will stop after {remaining:.2f} more 314ST")
-                    except Exception as e:
-                        print_warning(f"Could not check current balance: {e}")
             if safe_mode:
                 print_output("Safe mode: Thermal throttling and memory cleanup enabled")
             print_output("Press Ctrl-C to stop")
@@ -580,37 +369,24 @@ def mine(interactive, wallet, no_sync, safe_mode, plain, limit, testnet):
                     if mining_stopped:
                         break
 
-                    # Mine a single block with progress output
-                    block = blockchain.mine_pending_transactions(miner_wallet, verbose=True)
+                    # Mine a single block (quietly - no Tor/P2P messages)
+                    block = blockchain.mine_pending_transactions(miner_wallet, verbose=False)
                     if block:
                         blocks_mined_session += 1
                         print_success(f"Block mined! #{block.index}")
-                        
-                        # Adjust bit-counting difficulty based on Pi hardware performance
-                        new_zeros = blockchain.adjust_difficulty_for_pi_hardware()
-                        if new_zeros != blockchain.target_zeros:
-                            blockchain.target_zeros = new_zeros
 
                         # Update wallet balance after mining reward
                         if miner_wallet:
                             try:
                                 # Sync wallet balance with blockchain
                                 blockchain_balance = blockchain.get_wallet_balance(miner_wallet)
-                                
-                                # Check if limit is reached
-                                if limit is not None and blockchain_balance >= limit:
-                                    print_success(f"\n🎯 Mining target reached!")
-                                    print_success(f"Wallet balance: {blockchain_balance:.2f} 314ST")
-                                    print_success(f"Target balance: {limit:.2f} 314ST")
-                                    print_output("Mining stopped automatically.")
-                                    break
                                 # Update local wallet balance
                                 try:
                                     from .core.wallet import SignWallet
                                     wallet = SignWallet()
                                     # Find wallet file for this address
                                     import os
-                                    wallet_dir = get_wallet_dir()
+                                    wallet_dir = "/var/lib/pisecure/wallets"
                                     if os.path.exists(wallet_dir):
                                         for wallet_file in os.listdir(wallet_dir):
                                             if wallet_file.endswith('.json'):
@@ -625,8 +401,8 @@ def mine(interactive, wallet, no_sync, safe_mode, plain, limit, testnet):
                                                         reward_txs = [tx for tx in block.transactions if tx.get('type') == 'mining_reward']
                                                         if reward_txs:
                                                             reward_amount = reward_txs[0].get('amount', 0)
-                                                            print_success(f"Mining reward: {reward_amount} 314ST tokens credited to {miner_wallet}")
-                                                            print_success(f"Updated wallet balance: {blockchain_balance:.2f} 314ST")
+                                                            print_success(f"Mining reward: {reward_amount} tokens credited to {miner_wallet}")
+                                                            print_success(f"Updated wallet balance: {blockchain_balance:.2f} tokens")
                                                         break
                                                 except:
                                                     continue
@@ -734,7 +510,7 @@ def mine(interactive, wallet, no_sync, safe_mode, plain, limit, testnet):
                             wallet = SignWallet()
                             # Find wallet file for this address
                             import os
-                            wallet_dir = get_wallet_dir()
+                            wallet_dir = "/var/lib/pisecure/wallets"
                             if os.path.exists(wallet_dir):
                                 for wallet_file in os.listdir(wallet_dir):
                                     if wallet_file.endswith('.json'):
@@ -749,8 +525,8 @@ def mine(interactive, wallet, no_sync, safe_mode, plain, limit, testnet):
                                                 reward_txs = [tx for tx in block.transactions if tx.get('type') == 'mining_reward']
                                                 if reward_txs:
                                                     reward_amount = reward_txs[0].get('amount', 0)
-                                                    print_success(f"Mining reward: {reward_amount} 314ST tokens credited to {miner_wallet}")
-                                                    print_success(f"Updated wallet balance: {blockchain_balance:.2f} 314ST")
+                                                    print_success(f"Mining reward: {reward_amount} tokens credited to {miner_wallet}")
+                                                    print_success(f"Updated wallet balance: {blockchain_balance:.2f} tokens")
                                                 break
                                         except:
                                             continue
@@ -765,237 +541,6 @@ def mine(interactive, wallet, no_sync, safe_mode, plain, limit, testnet):
         print_output("\nMining stopped by user")
     except Exception as e:
         print_error(f"Mining error: {e}")
-
-
-@cli.command()
-@click.option('--mode', type=click.Choice(['solo', 'syndicate', 'auto'], case_sensitive=False),
-              default='auto', help='Mining mode: solo, syndicate pool, or auto-detect')
-@click.option('--refresh-rate', type=float, default=1.0,
-              help='Dashboard refresh rate in seconds (default: 1.0)')
-@click.option('--member-id', type=str, default=None,
-              help='Syndicate member ID (for pool mode)')
-@click.option('--testnet', is_flag=True, default=False,
-              help='Connect to testnet blockchain')
-@click.option('--wallet', type=str, default=None,
-              help='Start mining with this wallet address (enables auto-mining)')
-@click.option('--limit', type=int, default=None,
-              help='Stop mining after wallet reaches this balance')
-@click.option('--safe-mode', is_flag=True, default=False,
-              help='Enable thermal throttling and memory management during mining')
-def monitor(mode, refresh_rate, member_id, testnet, wallet, limit, safe_mode):
-    """Launch interactive mining dashboard with real-time metrics
-    
-    Examples:
-        pisecure monitor                                    # Dashboard only (watch existing mining)
-        pisecure monitor --wallet pi_test --testnet        # Mine and display dashboard
-        pisecure monitor --wallet pi_test --limit 100      # Mine until 100 314ST balance
-    """
-    import threading
-    import time
-    
-    try:
-        from pisecure.monitor import MiningDashboard
-        from pisecure.core.blockchain import SignChain
-        from pisecure.core.syndicate import MiningSyndicate
-        
-        # Initialize blockchain
-        chain_file = "/var/lib/pisecure/testnet/blockchain.json" if testnet else "/var/lib/pisecure/blockchain.json"
-        blockchain = SignChain(
-            chain_file=chain_file,
-            use_hybrid_storage=USE_HYBRID_STORAGE,
-            mining_algorithm='pihash'
-        )
-        
-        # Initialize syndicate if mode is syndicate
-        syndicate = None
-        if mode == 'syndicate':
-            # TODO: Connect to syndicate coordinator
-            print_warning("Syndicate mode not yet fully implemented - showing dashboard with syndicate fallback")
-            # syndicate = MiningSyndicate(...)  # Implement when syndicate coordination is ready
-        elif mode == 'auto':
-            # Auto-detect: check if syndicate configuration exists
-            mode = 'solo'  # Default to solo for now
-        
-        # Mining thread control
-        mining_active = threading.Event()
-        mining_thread = None
-        
-        # Background mining function
-        def mine_with_dashboard(blockchain, wallet_address, balance_limit, safe_mode_enabled):
-            """Background mining thread"""
-            # Debug: Log that thread started
-            with open('/tmp/pisecure_mining_debug.log', 'w') as f:
-                f.write(f"Mining thread started at {time.time()}\n")
-                f.write(f"Wallet: {wallet_address}\n")
-                f.write(f"Target zeros: {blockchain.target_zeros}\n")
-                f.write(f"Blockchain instance ID: {id(blockchain)}\n")
-                f.write(f"Mining session dict ID: {id(blockchain.mining_session)}\n")
-            
-            try:
-                if safe_mode_enabled:
-                    from pisecure.core.system_monitor import SystemMonitor
-                    system_monitor = SystemMonitor()
-                
-                # Initialize mining session state immediately (no lock needed for dict writes)
-                blockchain.mining_session['active'] = True
-                blockchain.mining_session['start_time'] = time.time()
-                blockchain.mining_session['target_zeros'] = blockchain.target_zeros
-                
-                with open('/tmp/pisecure_mining_debug.log', 'a') as f:
-                    f.write(f"Session initialized: active={blockchain.mining_session['active']}\n")
-                
-                # Small delay to ensure dashboard can read the active state
-                time.sleep(0.5)
-                
-                blocks_mined = 0
-                iteration = 0
-                
-                # Write a heartbeat file every second
-                with open('/tmp/pisecure_mining_heartbeat.txt', 'w') as f:
-                    f.write(f"Mining loop started at {time.time()}\n")
-                
-                while mining_active.is_set():
-                    iteration += 1
-                    
-                    # Update heartbeat
-                    if iteration % 10 == 0:
-                        with open('/tmp/pisecure_mining_heartbeat.txt', 'a') as f:
-                            f.write(f"Iteration {iteration} at {time.time()}\n")
-                    
-                    # Debug: Log iterations
-                    if iteration <= 3:
-                        with open('/tmp/pisecure_mining_debug.log', 'a') as f:
-                            f.write(f"Mining loop iteration {iteration}\n")
-                    
-                    # Check balance limit
-                    if balance_limit:
-                        current_balance = blockchain.get_wallet_balance(wallet_address)
-                        if current_balance >= balance_limit:
-                            print_info(f"\n💰 Balance limit reached: {current_balance:.2f} >= {balance_limit} 314ST")
-                            mining_active.clear()
-                            break
-                    
-                    # Safe mode: Check thermal status
-                    if safe_mode_enabled:
-                        sys_status = system_monitor.get_system_status()
-                        throttle = sys_status.get('throttle_status', 'NORMAL')
-                        
-                        if throttle in ['EMERGENCY_STOP', 'PAUSED']:
-                            # Emergency stop - wait for cooldown
-                            time.sleep(10)
-                            continue
-                        elif throttle == 'HEAVY_THROTTLE':
-                            # Heavy throttle - slow down mining
-                            time.sleep(5)
-                    
-                    # Mine one block (mine_pending_transactions handles empty transaction lists)
-                    try:
-                        # Debug: Log before mining
-                        if iteration <= 3:
-                            with open('/tmp/pisecure_mining_debug.log', 'a') as f:
-                                f.write(f"Calling mine_pending_transactions...\n")
-                        
-                        # Use verbose=False to avoid interfering with dashboard display
-                        block = blockchain.mine_pending_transactions(wallet_address, verbose=False)
-                        
-                        # Debug: Log result
-                        if iteration <= 3:
-                            with open('/tmp/pisecure_mining_debug.log', 'a') as f:
-                                f.write(f"Mining result: {block is not None}\n")
-                        
-                        if block:
-                            blocks_mined += 1
-                            # Adjust difficulty after mining
-                            blockchain.adjust_difficulty_for_pi_hardware()
-                        else:
-                            # Mining failed, wait before retry
-                            time.sleep(1)
-                    except Exception as e:
-                        # Log error to file for debugging
-                        import traceback
-                        with open('/tmp/pisecure_mining_error.log', 'a') as f:
-                            f.write(f"\n{time.time()}: Mining error: {e}\n")
-                            f.write(traceback.format_exc())
-                        time.sleep(2)
-                
-            except Exception as e:
-                print_error(f"Mining thread error: {e}")
-            finally:
-                # Mark mining as inactive
-                with blockchain.lock:
-                    blockchain.mining_session['active'] = False
-                print_info(f"\n⛏️  Mining stopped. Total blocks: {blocks_mined}")
-        
-        # Start mining thread if wallet specified
-        if wallet:
-            mining_active.set()
-            mining_thread = threading.Thread(
-                target=mine_with_dashboard,
-                args=(blockchain, wallet, limit, safe_mode),
-                daemon=True
-            )
-            mining_thread.start()
-            
-            # Wait for mining thread to initialize session state
-            max_wait = 5  # 5 seconds max
-            start_wait = time.time()
-            while time.time() - start_wait < max_wait:
-                with blockchain.lock:
-                    if blockchain.mining_session['active']:
-                        break
-                time.sleep(0.1)
-            
-            # Verify mining started
-            with blockchain.lock:
-                if blockchain.mining_session['active']:
-                    is_active = True
-                else:
-                    is_active = False
-        
-        # Create and run dashboard
-        dashboard = MiningDashboard(
-            blockchain=blockchain,
-            mode=mode,
-            refresh_rate=refresh_rate,
-            syndicate=syndicate,
-            testnet=testnet
-        )
-        
-        if member_id:
-            dashboard.member_id = member_id
-        
-        # Brief status message before launching full-screen dashboard
-        if wallet:
-            if is_active:
-                print(f"⛏️  Mining started with wallet: {wallet}")
-            else:
-                print(f"⚠️  Mining thread may not have initialized properly")
-            if limit:
-                print(f"💰 Target balance: {limit} 314ST")
-        print(f"🚀 Launching dashboard (Ctrl+C to exit)...\n")
-        time.sleep(1)
-        
-        try:
-            dashboard.run()
-        finally:
-            # Stop mining when dashboard exits
-            if mining_active.is_set():
-                mining_active.clear()
-                if mining_thread:
-                    mining_thread.join(timeout=2)
-        
-    except KeyboardInterrupt:
-        print_output("\nDashboard stopped by user")
-        if mining_active.is_set():
-            mining_active.clear()
-    except ImportError as e:
-        print_error(f"Dashboard dependencies missing: {e}")
-        print_info("Install with: pip install 'pisecure[dashboard]'")
-    except Exception as e:
-        print_error(f"Dashboard error: {e}")
-        import traceback
-        if not USE_PLAIN_OUTPUT:
-            traceback.print_exc()
 
 
 @cli.command()
@@ -1058,68 +603,6 @@ def identity():
 
     except Exception as e:
         console.print(f"[red]❌ Error getting identity: {e}[/red]")
-
-
-# Syndicate Mining Commands
-@cli.group()
-def syndicate():
-    """Manage mining syndicate operations"""
-    pass
-
-
-@syndicate.command('create')
-@click.argument('name')
-@click.option('--wallet', required=True, help='Coordinator wallet address')
-@click.option('--fee', default=5.0, help='Coordinator fee percentage (default: 5%)')
-def syndicate_create(name, wallet, fee):
-    """Create a new mining syndicate"""
-    try:
-        from .core.syndicate import MiningSyndicate
-        
-        syndicate_obj = MiningSyndicate(
-            coordinator_wallet=wallet,
-            syndicate_name=name,
-            coordinator_fee_percent=fee
-        )
-        
-        console.print(f"[green]✅ Created mining syndicate: {name}[/green]")
-        console.print(f"   Coordinator: {wallet}")
-        console.print(f"   Fee: {fee}%")
-        console.print("\n[dim]Members can now join with: pisecure syndicate join {name}[/dim]")
-        
-    except Exception as e:
-        print_error(f"Failed to create syndicate: {e}")
-
-
-@syndicate.command('join')
-@click.argument('syndicate_name')
-@click.option('--wallet', required=True, help='Your wallet address')
-@click.option('--model', default='pi4', help='Your Pi model (pi-zero, pi3, pi4, pi5)')
-def syndicate_join(syndicate_name, wallet, model):
-    """Join an existing mining syndicate"""
-    try:
-        console.print(f"[blue]🤝 Joining syndicate: {syndicate_name}[/blue]")
-        console.print(f"   Wallet: {wallet}")
-        console.print(f"   Pi Model: {model}")
-        console.print("\n[yellow]⚠️ Syndicate networking not yet implemented[/yellow]")
-        console.print("[dim]Contact the syndicate coordinator for connection details[/dim]")
-        
-    except Exception as e:
-        print_error(f"Failed to join syndicate: {e}")
-
-
-@syndicate.command('status')
-@click.option('--wallet', help='Show status for specific wallet')
-def syndicate_status(wallet):
-    """Show syndicate mining status"""
-    try:
-        console.print("[blue]📊 Syndicate Mining Status[/blue]")
-        console.print("\n[yellow]⚠️ Not currently mining in a syndicate[/yellow]")
-        console.print("\n[dim]To join a syndicate: pisecure syndicate join <name>[/dim]")
-        console.print("[dim]To create a syndicate: pisecure syndicate create <name> --wallet <address>[/dim]")
-        
-    except Exception as e:
-        print_error(f"Error getting syndicate status: {e}")
 
 
 @cli.command()
@@ -2040,7 +1523,7 @@ def sync_wallet(wallet):
                 from .core.wallet import SignWallet
                 import os
 
-                wallet_dir = get_wallet_dir()
+                wallet_dir = "/var/lib/pisecure/wallets"
                 if not os.path.exists(wallet_dir):
                     console.print("[yellow]⚠️ No wallet directory found[/yellow]")
                     return
