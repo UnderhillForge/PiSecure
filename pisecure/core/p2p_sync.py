@@ -25,6 +25,7 @@ from pathlib import Path
 import logging
 
 from .blockchain import SignChain
+from .pihash import hash_meets_zero_bits, count_zero_bits
 from ..network.discovery import PeerDiscovery
 
 logger = logging.getLogger(__name__)
@@ -276,8 +277,8 @@ class P2PSyncManager:
         if calculated_hash != block_data['hash']:
             return False
 
-        # Validate proof-of-work
-        if not calculated_hash.startswith('0' * self.blockchain.difficulty):
+        # Validate proof-of-work using zero-bit difficulty
+        if not hash_meets_zero_bits(calculated_hash, self.blockchain.difficulty):
             return False
 
         # Validate transactions
@@ -750,7 +751,7 @@ class P2PSyncManager:
         """Fetch peer list from a bootstrap node."""
         try:
             # Add timeout and proper error handling
-            response = requests.get(f"{bootstrap_url}", timeout=90)
+            response = requests.get(f"{bootstrap_url}", timeout=10)
             response.raise_for_status()
 
             data = response.json()

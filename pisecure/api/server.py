@@ -1399,151 +1399,6 @@ class BlockchainAPI:
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
 
-        # Get miner status and intelligence data
-        @self.app.route(f'/api/{self.api_version}/nodes/status', methods=['GET'])
-        def get_miner_status():
-            """Get comprehensive miner status and network intelligence for dashboard"""
-            try:
-                # Get query parameters
-                hours_back = float(request.args.get('hours', 1))  # Default last 1 hour
-                include_intelligence = request.args.get('intelligence', 'true').lower() == 'true'
-
-                current_time = time.time()
-                cutoff_time = current_time - (hours_back * 3600)
-
-                # Aggregate miner status data
-                active_miners = []
-                total_hashrate = 0.0
-                total_blocks_mined = 0
-                miners_by_location = {}
-                miners_by_hardware = {}
-
-                if hasattr(self, 'miner_status_reports'):
-                    for node_id, reports in self.miner_status_reports.items():
-                        # Get most recent report within time window
-                        recent_reports = [r for r in reports if r['reported_at'] >= cutoff_time]
-                        if recent_reports:
-                            latest_report = recent_reports[-1]
-
-                            miner_data = {
-                                'node_id': node_id,
-                                'mining_active': latest_report['mining_active'],
-                                'hashrate': latest_report['hashrate'],
-                                'blocks_mined': latest_report['blocks_mined'],
-                                'temperature': latest_report['temperature'],
-                                'memory_usage': latest_report['memory_usage'],
-                                'location': latest_report['location'],
-                                'hardware_model': latest_report['hardware_model'],
-                                'wallet_address': latest_report['wallet_address'],
-                                'last_report': latest_report['reported_at'],
-                                'network_metrics': latest_report['network_metrics'],
-                                'system_health': latest_report['system_health']
-                            }
-
-                            active_miners.append(miner_data)
-
-                            if latest_report['mining_active']:
-                                total_hashrate += latest_report['hashrate']
-                                total_blocks_mined += latest_report['blocks_mined']
-
-                            # Aggregate by location
-                            location = latest_report['location']
-                            if location not in miners_by_location:
-                                miners_by_location[location] = []
-                            miners_by_location[location].append(miner_data)
-
-                            # Aggregate by hardware
-                            hardware = latest_report['hardware_model']
-                            if hardware not in miners_by_hardware:
-                                miners_by_hardware[hardware] = []
-                            miners_by_hardware[hardware].append(miner_data)
-
-                # Prepare response
-                response_data = {
-                    'time_window_hours': hours_back,
-                    'total_active_miners': len(active_miners),
-                    'mining_miners': len([m for m in active_miners if m['mining_active']]),
-                    'total_network_hashrate': total_hashrate,
-                    'total_blocks_mined_recently': total_blocks_mined,
-                    'miners': active_miners,
-                    'aggregation': {
-                        'by_location': {
-                            location: {
-                                'count': len(miners),
-                                'total_hashrate': sum(m['hashrate'] for m in miners if m['mining_active']),
-                                'avg_temperature': sum(m['temperature'] for m in miners if m['temperature']) / len([m for m in miners if m['temperature']]) if any(m['temperature'] for m in miners) else 0
-                            }
-                            for location, miners in miners_by_location.items()
-                        },
-                        'by_hardware': {
-                            hardware: {
-                                'count': len(miners),
-                                'total_hashrate': sum(m['hashrate'] for m in miners if m['mining_active']),
-                                'models': list(set(m['hardware_model'] for m in miners))
-                            }
-                            for hardware, miners in miners_by_hardware.items()
-                        }
-                    }
-                }
-
-                # Add intelligence data if requested
-                if include_intelligence:
-                    response_data['intelligence'] = self._get_miner_intelligence(hours_back)
-
-                return jsonify(response_data)
-
-            except Exception as e:
-                return jsonify({'error': str(e)}), 500
-
-        # Get registered nodes (dashboard endpoint)
-        @self.app.route(f'/api/{self.api_version}/nodes', methods=['GET'])
-        def get_registered_nodes():
-            """Get list of registered nodes for dashboard"""
-            try:
-                if not hasattr(self, 'registered_nodes'):
-                    return jsonify({'nodes': [], 'total': 0})
-
-                current_time = time.time()
-                active_nodes = []
-                inactive_nodes = []
-
-                for node_id, node_info in self.registered_nodes.items():
-                    last_seen = node_info.get('last_seen', 0)
-                    is_active = current_time - last_seen < 3600  # Active within 1 hour
-
-                    node_data = {
-                        'node_id': node_id,
-                        'address': node_info.get('address'),
-                        'port': node_info.get('port'),
-                        'capabilities': node_info.get('capabilities', []),
-                        'hashrate': node_info.get('hashrate', 0),
-                        'location': node_info.get('location', 'unknown'),
-                        'is_mining': node_info.get('is_mining', False),
-                        'registered_at': node_info.get('registered_at'),
-                        'last_seen': last_seen,
-                        'version': node_info.get('version', 'unknown'),
-                        'status': 'active' if is_active else 'inactive'
-                    }
-
-                    if is_active:
-                        active_nodes.append(node_data)
-                    else:
-                        inactive_nodes.append(node_data)
-
-                # Sort by last seen (most recent first)
-                active_nodes.sort(key=lambda x: x['last_seen'], reverse=True)
-                inactive_nodes.sort(key=lambda x: x['last_seen'], reverse=True)
-
-                return jsonify({
-                    'nodes': active_nodes + inactive_nodes,
-                    'total': len(self.registered_nodes),
-                    'active': len(active_nodes),
-                    'inactive': len(inactive_nodes)
-                })
-
-            except Exception as e:
-                return jsonify({'error': str(e)}), 500
-
     def _process_miner_intelligence(self, status_report: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process miner status reports for network intelligence and analytics
@@ -2011,6 +1866,153 @@ class BlockchainAPI:
             recommendations.append("Low geographic diversity - consider expanding to more regions")
 
         return recommendations
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Get miner status and intelligence data
+        @self.app.route(f'/api/{self.api_version}/nodes/status', methods=['GET'])
+        def get_miner_status():
+            """Get comprehensive miner status and network intelligence for dashboard"""
+            try:
+                # Get query parameters
+                hours_back = float(request.args.get('hours', 1))  # Default last 1 hour
+                include_intelligence = request.args.get('intelligence', 'true').lower() == 'true'
+
+                current_time = time.time()
+                cutoff_time = current_time - (hours_back * 3600)
+
+                # Aggregate miner status data
+                active_miners = []
+                total_hashrate = 0.0
+                total_blocks_mined = 0
+                miners_by_location = {}
+                miners_by_hardware = {}
+
+                if hasattr(self, 'miner_status_reports'):
+                    for node_id, reports in self.miner_status_reports.items():
+                        # Get most recent report within time window
+                        recent_reports = [r for r in reports if r['reported_at'] >= cutoff_time]
+                        if recent_reports:
+                            latest_report = recent_reports[-1]
+
+                            miner_data = {
+                                'node_id': node_id,
+                                'mining_active': latest_report['mining_active'],
+                                'hashrate': latest_report['hashrate'],
+                                'blocks_mined': latest_report['blocks_mined'],
+                                'temperature': latest_report['temperature'],
+                                'memory_usage': latest_report['memory_usage'],
+                                'location': latest_report['location'],
+                                'hardware_model': latest_report['hardware_model'],
+                                'wallet_address': latest_report['wallet_address'],
+                                'last_report': latest_report['reported_at'],
+                                'network_metrics': latest_report['network_metrics'],
+                                'system_health': latest_report['system_health']
+                            }
+
+                            active_miners.append(miner_data)
+
+                            if latest_report['mining_active']:
+                                total_hashrate += latest_report['hashrate']
+                                total_blocks_mined += latest_report['blocks_mined']
+
+                            # Aggregate by location
+                            location = latest_report['location']
+                            if location not in miners_by_location:
+                                miners_by_location[location] = []
+                            miners_by_location[location].append(miner_data)
+
+                            # Aggregate by hardware
+                            hardware = latest_report['hardware_model']
+                            if hardware not in miners_by_hardware:
+                                miners_by_hardware[hardware] = []
+                            miners_by_hardware[hardware].append(miner_data)
+
+                # Prepare response
+                response_data = {
+                    'time_window_hours': hours_back,
+                    'total_active_miners': len(active_miners),
+                    'mining_miners': len([m for m in active_miners if m['mining_active']]),
+                    'total_network_hashrate': total_hashrate,
+                    'total_blocks_mined_recently': total_blocks_mined,
+                    'miners': active_miners,
+                    'aggregation': {
+                        'by_location': {
+                            location: {
+                                'count': len(miners),
+                                'total_hashrate': sum(m['hashrate'] for m in miners if m['mining_active']),
+                                'avg_temperature': sum(m['temperature'] for m in miners if m['temperature']) / len([m for m in miners if m['temperature']]) if any(m['temperature'] for m in miners) else 0
+                            }
+                            for location, miners in miners_by_location.items()
+                        },
+                        'by_hardware': {
+                            hardware: {
+                                'count': len(miners),
+                                'total_hashrate': sum(m['hashrate'] for m in miners if m['mining_active']),
+                                'models': list(set(m['hardware_model'] for m in miners))
+                            }
+                            for hardware, miners in miners_by_hardware.items()
+                        }
+                    }
+                }
+
+                # Add intelligence data if requested
+                if include_intelligence:
+                    response_data['intelligence'] = self._get_miner_intelligence(hours_back)
+
+                return jsonify(response_data)
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Get registered nodes (dashboard endpoint)
+        @self.app.route(f'/api/{self.api_version}/nodes', methods=['GET'])
+        def get_registered_nodes():
+            """Get list of registered nodes for dashboard"""
+            try:
+                if not hasattr(self, 'registered_nodes'):
+                    return jsonify({'nodes': [], 'total': 0})
+
+                current_time = time.time()
+                active_nodes = []
+                inactive_nodes = []
+
+                for node_id, node_info in self.registered_nodes.items():
+                    last_seen = node_info.get('last_seen', 0)
+                    is_active = current_time - last_seen < 3600  # Active within 1 hour
+
+                    node_data = {
+                        'node_id': node_id,
+                        'address': node_info.get('address'),
+                        'port': node_info.get('port'),
+                        'capabilities': node_info.get('capabilities', []),
+                        'hashrate': node_info.get('hashrate', 0),
+                        'location': node_info.get('location', 'unknown'),
+                        'is_mining': node_info.get('is_mining', False),
+                        'registered_at': node_info.get('registered_at'),
+                        'last_seen': last_seen,
+                        'version': node_info.get('version', 'unknown'),
+                        'status': 'active' if is_active else 'inactive'
+                    }
+
+                    if is_active:
+                        active_nodes.append(node_data)
+                    else:
+                        inactive_nodes.append(node_data)
+
+                # Sort active nodes by last seen (most recent first)
+                active_nodes.sort(key=lambda x: x['last_seen'], reverse=True)
+
+                return jsonify({
+                    'nodes': active_nodes + inactive_nodes,
+                    'total': len(self.registered_nodes),
+                    'active': len(active_nodes),
+                    'inactive': len(inactive_nodes)
+                })
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
 
         # === MINING ENDPOINTS ===
 

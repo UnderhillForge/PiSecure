@@ -21,19 +21,8 @@ from cryptography.hazmat.backends import default_backend
 class SignWallet:
     """PiSecure cryptographic wallet for token management"""
 
-    def __init__(self, wallet_file: str = None, wallet_dir: str = None):
-        # Use custom wallet directory if provided, otherwise use default
-        if wallet_dir:
-            base_dir = Path(wallet_dir)
-        else:
-            base_dir = Path("/var/lib/pisecure/wallets")
-        
-        # Use custom file or default
-        if wallet_file:
-            self.wallet_file = Path(wallet_file)
-        else:
-            self.wallet_file = base_dir / "default.json"
-            
+    def __init__(self, wallet_file: str = "/var/lib/pisecure/wallets/default.json"):
+        self.wallet_file = Path(wallet_file)
         self.wallet_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Wallet data structure

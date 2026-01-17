@@ -199,9 +199,9 @@ clear_blockchain_data() {
 
     # Remove system blockchain data (hybrid storage location)
     rm -rf "/var/lib/pisecure/blocks/"* 2>/dev/null || true
-    rm -f "/var/lib/pisecure/pisecure.db" 2>/dev/null || true
-    rm -f "/var/lib/pisecure/pisecure.db-wal" 2>/dev/null || true
-    rm -f "/var/lib/pisecure/pisecure.db-shm" 2>/dev/null || true
+    rm -f "/var/lib/pisecure/index.db" 2>/dev/null || true
+    rm -f "/var/lib/pisecure/index.db-wal" 2>/dev/null || true
+    rm -f "/var/lib/pisecure/index.db-shm" 2>/dev/null || true
     rm -f "/var/lib/pisecure/.migration_complete" 2>/dev/null || true
     rm -f "/var/lib/pisecure/blockchain.json" 2>/dev/null || true
     rm -f "/var/lib/pisecure/pending_transactions.json" 2>/dev/null || true

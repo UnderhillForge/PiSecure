@@ -7,6 +7,7 @@ with hardware-verified mining exclusive to Raspberry Pi devices.
 """
 
 import hashlib
+import math
 import json
 import time
 import threading
@@ -23,7 +24,7 @@ except ImportError:
 
 # Import PiHash for hardware-verified mining
 try:
-    from .pihash import PiHash, compute_pihash
+    from .pihash import PiHash, compute_pihash, hash_meets_zero_bits, count_zero_bits
     PIHASH_AVAILABLE = True
 except ImportError:
     PIHASH_AVAILABLE = False
@@ -318,7 +319,7 @@ class PiHardwareVerifier:
             import hashlib
             import time
 
-            target = "00"  # Difficulty 2
+            target_zero_bits = 136  # Slightly above mean for a quick check
             start_time = time.time()
             hashes = 0
 
@@ -327,7 +328,7 @@ class PiHardwareVerifier:
                 hash_result = hashlib.sha256(test_data.encode()).hexdigest()
                 hashes += 1
 
-                if hash_result.startswith(target):
+                if hash_meets_zero_bits(hash_result, target_zero_bits):
                     break
 
             elapsed = time.time() - start_time
@@ -880,18 +881,18 @@ class SignBlock:
             # Return original data if mixing fails
             return data
 
-    def mine_block_parallel(self, difficulty: int = 4, num_threads: int = 3, verbose: bool = False) -> bool:
-        """Mine the block with proof-of-work using parallel threads"""
+    def mine_block_parallel(self, difficulty: int = 146, num_threads: int = 3, verbose: bool = False) -> bool:
+        """Mine the block with proof-of-work using parallel threads (zero-bit difficulty)."""
         from concurrent.futures import ThreadPoolExecutor, as_completed
         import threading
 
-        target = "0" * difficulty
+        target_zero_bits = difficulty
         start_time = time.time()
         mining_stop = threading.Event()
 
         if verbose:
             print(f"\n🎯 Mining Block #{self.index} (Parallel - {num_threads} threads)")
-            print(f"   Target: {target} (Difficulty: {difficulty})")
+            print(f"   Target: ≥{target_zero_bits} zero bits")
             print(f"   Transactions: {len(self.transactions)}")
             print(f"   Previous Hash: {self.previous_hash[:24]}...")
             print("\n" + "="*60)
@@ -913,9 +914,10 @@ class SignBlock:
 
                 local_block.nonce = nonce
                 local_block.hash = local_block.calculate_hash()
+                local_zero_bits = count_zero_bits(local_block.hash)
                 local_hashes += 1
 
-                if local_block.hash.startswith(target):
+                if local_zero_bits >= target_zero_bits:
                     # Found a valid nonce! Update the original block
                     self.nonce = nonce
                     self.hash = local_block.hash
@@ -926,6 +928,7 @@ class SignBlock:
                         print(f"\r🎉 BLOCK FOUND by thread {thread_id}! 🎉")
                         print(f"   Nonce: {nonce:,}")
                         print(f"   Hash: {self.hash[:48]}...")
+                        print(f"   Zero bits: {local_zero_bits}")
                         print(f"   Thread: {thread_id}")
                         print(f"   Attempts: {local_hashes:,}")
                         print(f"   Time: {elapsed:.2f}s")
@@ -967,19 +970,21 @@ class SignBlock:
                 print(f"   Time: {elapsed:.2f}s")
             return False
 
+    @staticmethod
+    def _zero_bit_success_probability(target_zero_bits: int) -> float:
+        """Approximate probability a random 256-bit hash meets the zero-bit target."""
+        # Normal approximation for Binomial(n=256, p=0.5)
+        z_score = (target_zero_bits - 128) / 8.0
+        prob = 0.5 * math.erfc(z_score / math.sqrt(2))
+        return max(min(prob, 1.0), 1e-12)
+
     def _calculate_mining_timeout(self, difficulty: int) -> int:
-        """Calculate adaptive mining timeout based on difficulty"""
-        # Base timeout for difficulty 1 (reasonable for testing)
-        base_timeout = 100000  # 100K attempts
+        """Adaptive mining timeout based on zero-bit difficulty."""
+        success_prob = self._zero_bit_success_probability(difficulty)
+        expected_attempts = 1.0 / success_prob
 
-        # Scale exponentially with difficulty
-        # Each difficulty level multiplies attempts by ~4
-        # Difficulty 2: 400K, Difficulty 4: 1.6M, Difficulty 6: 6.4M
-        scaled_timeout = int(base_timeout * (4 ** (difficulty - 1)))
-
-        # Cap at reasonable maximum to prevent extremely long waits
-        # 100M attempts should be sufficient even for high difficulty
-        return min(scaled_timeout, 100000000)
+        # Allow generous variance (4x expected attempts) but keep a sane cap
+        return int(min(expected_attempts * 4, 100000000))
 
     def _should_reduce_mining_difficulty(self, start_time: float, attempts: int, difficulty: int) -> bool:
         """Check if mining difficulty should be reduced due to timeout concerns"""
@@ -1008,9 +1013,9 @@ class SignBlock:
         # since SignBlock doesn't have access to the full chain
         return False
 
-    def mine_block(self, difficulty: int = 4, verbose: bool = False) -> bool:
-        """Mine the block with adaptive proof-of-work and smart timeout prevention"""
-        target = "0" * difficulty
+    def mine_block(self, difficulty: int = 146, verbose: bool = False) -> bool:
+        """Mine the block using zero-bit difficulty and adaptive timeouts."""
+        target_zero_bits = difficulty
         start_time = time.time()
         hashes_tried = 0
         last_update = 0
@@ -1020,7 +1025,7 @@ class SignBlock:
 
         if verbose:
             print(f"\n🎯 Mining Block #{self.index}")
-            print(f"   Target: {target} (Difficulty: {difficulty})")
+            print(f"   Target: ≥{target_zero_bits} zero bits")
             print(f"   Transactions: {len(self.transactions)}")
             print(f"   Previous Hash: {self.previous_hash[:24]}...")
             print(f"   Max Attempts: {max_attempts:,}")
@@ -1028,24 +1033,26 @@ class SignBlock:
 
         sample_interval = 5000  # Check progress every 5K attempts
 
-        while self.hash[:difficulty] != target:
+        current_zero_bits = count_zero_bits(self.hash)
+
+        while current_zero_bits < target_zero_bits:
             self.nonce += 1
             self.hash = self.calculate_hash()
             hashes_tried += 1
+            current_zero_bits = count_zero_bits(self.hash)
 
             # Show progress every sample_interval in verbose mode
             if verbose and hashes_tried % sample_interval == 0:
                 elapsed = time.time() - start_time
                 hashrate = hashes_tried / elapsed if elapsed > 0 else 0
-                current_prefix = self.hash[:difficulty]
-                progress = sum(1 for a, b in zip(current_prefix, target) if a == b)
+                progress = min(current_zero_bits, target_zero_bits)
 
                 # Clear line and update in place
-                print(f"\r⛏️  Mining... Nonce: {self.nonce:,} | Progress: {progress}/{difficulty} | Hashrate: {hashrate:.0f} H/s", end="", flush=True)
+                print(f"\r⛏️  Mining... Nonce: {self.nonce:,} | Zero bits: {progress}/{target_zero_bits} | Hashrate: {hashrate:.0f} H/s", end="", flush=True)
 
                 # Check if we should reduce difficulty due to timeout concerns
                 if self._should_reduce_mining_difficulty(start_time, hashes_tried, difficulty):
-                    new_difficulty = max(difficulty - 1, 2)  # Minimum difficulty 2 for security
+                    new_difficulty = max(difficulty - 1, 130)  # Bit-counting floor
                     if new_difficulty != difficulty:
                         print(f"\n⚠️ Mining timeout risk detected, reducing difficulty {difficulty} → {new_difficulty}")
                         # Recursively mine with lower difficulty
@@ -1058,7 +1065,7 @@ class SignBlock:
                     print(f"\n⚠️ Mining timeout after {hashes_tried:,} attempts ({elapsed:.1f}s)")
 
                 # Try with reduced difficulty
-                new_difficulty = max(difficulty - 1, 2)
+                new_difficulty = max(difficulty - 1, 130)
                 if new_difficulty < difficulty:
                     if verbose:
                         print(f"🔄 Retrying with reduced difficulty {difficulty} → {new_difficulty}")
@@ -1082,6 +1089,7 @@ class SignBlock:
             print(f"   Attempts: {hashes_tried:,}")
             print(f"   Time: {elapsed:.2f}s")
             print(f"   Hashrate: {hashrate:.0f} H/s")
+            print(f"   Zero bits: {count_zero_bits(self.hash)}")
             print("="*60)
 
         return True
@@ -1103,7 +1111,7 @@ class SignChain:
     """PiSecure Private Blockchain with Hardware Verification"""
 
     def __init__(self, chain_file: str = "/var/lib/pisecure/blockchain.json",
-                 difficulty: int = 4, use_hybrid_storage: bool = None,
+                 difficulty: int = 146, use_hybrid_storage: bool = None,
                  mining_algorithm: str = 'pihash'):
         # Check for testnet mode
         if os.environ.get('PISECURE_TESTNET') == '1':
@@ -1114,7 +1122,7 @@ class SignChain:
         self.chain_file = Path(chain_file)
         self.pending_file = Path(chain_file).parent / "pending_transactions.json"
         self.names_file = Path(chain_file).parent / "name_registry.json"
-        self.difficulty = difficulty
+        self.difficulty = difficulty  # Target zero bits (bit-counting difficulty)
         self.chain: List[SignBlock] = []
         self.pending_transactions: List[Dict] = []
         self.name_registry: Dict[str, Dict[str, Any]] = {}  # name -> {address, registered_at, tx_hash}
@@ -1126,8 +1134,8 @@ class SignChain:
         self.discovery_backoff_time = 300  # 5 minutes base backoff
         self.consecutive_discovery_failures = 0
 
-        # Mining safety limits
-        self.emergency_difficulty_floor = 2  # Never go below difficulty 2 for security
+        # Mining safety limits (bit-counting difficulty bounds)
+        self.emergency_difficulty_floor = 130  # Minimum target zero bits
 
         # Hardware verification for scaling (bypass if validate-only mode)
         if os.environ.get('PISECURE_VALIDATE_ONLY') == '1':
@@ -1691,8 +1699,8 @@ class SignChain:
                 break
 
             # Check proof-of-work
-            if not current.hash.startswith("0" * self.difficulty):
-                print(f"❌ Block {current.index} has invalid proof-of-work")
+            if not hash_meets_zero_bits(current.hash, self.difficulty):
+                print(f"❌ Block {current.index} has invalid proof-of-work (requires ≥{self.difficulty} zero bits)")
                 is_valid = False
                 break
 
@@ -1747,7 +1755,7 @@ class SignChain:
             # Calculate average safely
             avg_block_time = sum(block_times) / len(block_times) if block_times else 600
         else:
-            avg_block_time = 600  # 10 minutes default
+            avg_block_time = 60  # 1 minute default (bit-counting target)
 
         # Participation score based on transaction volume
         total_txs = sum(len(block.transactions) for block in recent_blocks if block.transactions)
@@ -1755,7 +1763,7 @@ class SignChain:
 
         # Health score combines multiple factors (safe division)
         try:
-            health_score = (participation * 0.6) + ((1 - min(1, avg_block_time / 1200)) * 0.4)
+            health_score = (participation * 0.6) + ((1 - min(1, avg_block_time / 120)) * 0.4)
         except (ZeroDivisionError, TypeError):
             health_score = participation * 0.6  # Fallback to participation only
 
@@ -1766,27 +1774,41 @@ class SignChain:
         }
 
     def adapt_difficulty(self) -> int:
-        """Adapt difficulty based on network health"""
-        health = self._calculate_network_health()
+        """Adapt difficulty (target zero bits) based on recent block times."""
+        adjustment_interval = 100
+        min_zero_bits = self.emergency_difficulty_floor  # 130
+        max_zero_bits = 150
+        target_block_time = 60  # seconds
+
+        # Only adjust at interval boundaries and when we have enough history
+        if len(self.chain) < 2 or len(self.chain) % adjustment_interval != 0:
+            return self.difficulty
+
+        # Use the last `adjustment_interval` blocks to compute average block time
+        recent_blocks = self.chain[-adjustment_interval:]
+        block_times = []
+        for i in range(1, len(recent_blocks)):
+            delta = recent_blocks[i].timestamp - recent_blocks[i-1].timestamp
+            if delta > 0:
+                block_times.append(delta)
+
+        if not block_times:
+            return self.difficulty
+
+        avg_block_time = sum(block_times) / len(block_times)
         current_difficulty = self.difficulty
 
-        # Target: 10 minute average block time
-        target_block_time = 600
-        actual_block_time = health["avg_block_time"]
-
-        if actual_block_time < target_block_time * 0.8:
-            # Blocks too fast - increase difficulty slightly
-            new_difficulty = min(current_difficulty + 1, 8)  # Cap at 8
-        elif actual_block_time > target_block_time * 1.2:
-            # Blocks too slow - decrease difficulty
-            new_difficulty = max(current_difficulty - 1, 2)  # Floor at 2
+        # Adjust smoothly by 1 zero-bit step using 10% tolerance band
+        if avg_block_time < target_block_time * 0.9:
+            new_difficulty = min(current_difficulty + 1, max_zero_bits)
+        elif avg_block_time > target_block_time * 1.1:
+            new_difficulty = max(current_difficulty - 1, min_zero_bits)
         else:
-            # Optimal range - maintain current difficulty
             new_difficulty = current_difficulty
 
         if new_difficulty != current_difficulty:
             self.difficulty = new_difficulty
-            print(f"⚖️ Difficulty adapted: {current_difficulty} → {new_difficulty}")
+            print(f"⚖️ Difficulty adapted: {current_difficulty} → {new_difficulty} (avg block time {avg_block_time:.1f}s)")
 
         return new_difficulty
 

@@ -16,7 +16,6 @@ Features:
 This enables ~85% of home PiSecure nodes to be publicly accessible automatically.
 """
 
-import os
 import socket
 import time
 import threading
@@ -428,6 +427,7 @@ class NATTraversal:
         """Setup Tor onion service"""
         try:
             # Check if tor is running and onion service exists
+            import os
             hostname_file = "/var/lib/tor/pisecure/hostname"
 
             if os.path.exists(hostname_file):

@@ -55,37 +55,12 @@ pisecure server
 
 ### Start Mining
 ```bash
-# Production mining
 pisecure mine --wallet your_wallet_address
-
-# Testnet mining (isolated testing environment)
-pisecure --test mine --wallet test_wallet
 ```
 
 ### Check Status
 ```bash
-# Production status
 pisecure status
-
-# Testnet status
-pisecure --test status
-
-# Validate-only (read-only, no state changes)
-pisecure --validate-only status
-```
-
-### Testing & Development
-```bash
-# Test mode - uses /var/lib/pisecure-testnet/
-pisecure --test create-tx --count 10
-pisecure --test mine --wallet test_address
-
-# Validate-only mode - read-only operations
-pisecure --validate-only mining-info
-pisecure --validate-only wallet
-
-# Combined - safe testing with no persistence
-pisecure --test --validate-only status
 ```
 
 ### API Integration
@@ -95,25 +70,7 @@ client = PiSecureClient("http://localhost:3142")
 balance = await client.get_wallet_balance("address")
 ```
 
-## 📊 Architecture & Technology
-
-**Blockchain Classification: 2.5 (Hybrid Generation)**
-
-PiSecure bridges Blockchain 2.0 (smart contracts, DeFi) and 3.0 (scalability, cross-chain) with unique hardware-verified innovations:
-
-- **7-Layer Architecture**: From hardware foundation to application security
-- **Smart Contract Primitives**: Oracles, custody, compliance contracts
-- **Native DEX**: Automated market maker with liquidity pools
-- **IoT Integration**: Device oracles and edge computing
-- **Hardware-Verified PoW**: PiHash algorithm exclusive to Raspberry Pi
-- **Cross-Chain Bridges**: Ethereum, Bitcoin, Solana interoperability
-
-📖 **Read More:**
-- [Blockchain Architecture](docs/blockchain-architecture.md) - Complete layer breakdown
-- [Architecture Diagrams](docs/architecture-diagrams.md) - Visual representations
-- [File-Layer Mapping](docs/file-layer-mapping.md) - Code structure guide
-
-## 🔐 Security Architecture
+## 📊 Security Architecture
 
 - **Defense in Depth** - Multiple security layers protect against modern threats
 - **Hardware Binding** - Cryptographic security tied to Raspberry Pi hardware

@@ -420,7 +420,6 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
                                     from .core.wallet import SignWallet
                                     wallet = SignWallet()
                                     # Find wallet file for this address
-                                    import os
                                     wallet_dir = "/var/lib/pisecure/wallets"
                                     if os.path.exists(wallet_dir):
                                         for wallet_file in os.listdir(wallet_dir):

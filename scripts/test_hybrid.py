@@ -29,7 +29,7 @@ def test_hybrid_storage():
         if blockchain.use_hybrid_storage:
             import glob
             blk_files = glob.glob(os.path.join(tmpdir, "blocks", "blk*.dat"))
-            db_file = os.path.join(tmpdir, "pisecure.db")
+            db_file = os.path.join(tmpdir, "index.db")
 
             print(f"Block files created: {len(blk_files)}")
             print(f"Database created: {os.path.exists(db_file)}")

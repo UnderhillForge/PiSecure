@@ -163,11 +163,11 @@ class TestP2PSyncManager:
             'transactions': [{'type': 'test', 'data': {}}],
             'previous_hash': 'prev_hash',
             'nonce': 12345,
-            'hash': '00valid_hash'  # Hash that meets difficulty=2 (starts with '00')
+            'hash': '0' * 64  # Valid hex hash that easily meets difficulty=2
         }
 
         # Mock hash calculation to return a hash that meets difficulty
-        with patch.object(sync_manager, '_calculate_block_hash', return_value='00valid_hash'):
+        with patch.object(sync_manager, '_calculate_block_hash', return_value='0' * 64):
             with patch.object(sync_manager, '_validate_transaction', return_value=True):
                 assert sync_manager._validate_block(valid_block)
 
