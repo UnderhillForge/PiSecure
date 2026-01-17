@@ -208,7 +208,7 @@ class BootstrapRegistry:
 
                 response = requests.get(
                     f"{server_url}/api/v1/bootstrap/peers",
-                    timeout=15  # Increased from 10s to 15s
+                    timeout=90  # Increased to handle 60-90s server response times
                 )
 
                 if response.status_code == 200:
@@ -289,7 +289,7 @@ class RobustMinerReporter:
                 response = requests.post(
                     f"{server_url}/api/v1/nodes/register",
                     json=registration_data,
-                    timeout=30  # Increased from 15s to 30s for slow connections
+                    timeout=90  # Increased to handle 60-90s server response times
                 )
 
                 if response.status_code == 200:
@@ -377,7 +377,7 @@ class RobustMinerReporter:
                 response = requests.post(
                     f"{server_url}/api/v1/nodes/status",
                     json=status_payload,
-                    timeout=20  # Increased from 10s to 20s for slow connections
+                    timeout=90  # Increased to handle 60-90s server response times
                 )
 
                 if response.status_code == 200:
