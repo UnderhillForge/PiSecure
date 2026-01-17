@@ -721,7 +721,6 @@ class SignBlock:
         }, sort_keys=True)
 
         # In validate-only mode, allow any algorithm (we're not mining, just validating)
-        import os
         if os.environ.get('PISECURE_VALIDATE_ONLY') == '1':
             # For validation, use simple hash without hardware checks
             return hashlib.sha256(block_string.encode()).hexdigest()
@@ -1101,7 +1100,6 @@ class SignChain:
                  difficulty: int = 4, use_hybrid_storage: bool = None,
                  mining_algorithm: str = 'pihash'):
         # Check for testnet mode
-        import os
         if os.environ.get('PISECURE_TESTNET') == '1':
             # Use testnet directory if not explicitly specified
             if chain_file == "/var/lib/pisecure/blockchain.json":
@@ -1126,7 +1124,6 @@ class SignChain:
         self.emergency_difficulty_floor = 2  # Never go below difficulty 2 for security
 
         # Hardware verification for scaling (bypass if validate-only mode)
-        import os
         if os.environ.get('PISECURE_VALIDATE_ONLY') == '1':
             # Validation-only mode - no hardware verification needed
             self.hardware_verifier = None
@@ -2315,7 +2312,6 @@ class SignChain:
         try:
             from pisecure.core.nat_traversal import node_discovery
             # Check if quiet mode is enabled
-            import os
             quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
 
 
@@ -2361,7 +2357,6 @@ class SignChain:
     def _async_full_discovery(self, block):
         """Perform full discovery asynchronously"""
         try:
-            import os
             quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
             from pisecure.core.nat_traversal import node_discovery
 
