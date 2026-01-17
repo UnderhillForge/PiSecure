@@ -263,24 +263,26 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
     USE_PLAIN_OUTPUT = plain
 
     # CRITICAL: Verify hardware BEFORE allowing mining
-    # This prevents mining on non-Pi systems regardless of flags
-    try:
-        from pisecure.core.pihash import PiHash
-        pihash = PiHash()
-        hw_fingerprint = pihash._get_hardware_fingerprint()
-        
-        # Verify this is actually a Raspberry Pi
-        if not pihash._verify_hardware(hw_fingerprint):
-            print_error("❌ MINING BLOCKED: This system is not a verified Raspberry Pi")
-            print_info("PiSecure mining requires genuine Raspberry Pi hardware")
-            print_info("You can use --validate-only mode for testing/validation on non-Pi systems")
-            return
+    # Skip hardware check only if explicitly in validate-only mode
+    import os
+    if os.environ.get('PISECURE_VALIDATE_ONLY') != '1':
+        try:
+            from pisecure.core.pihash import PiHash
+            pihash = PiHash()
+            hw_fingerprint = pihash._get_hardware_fingerprint()
             
-    except Exception as e:
-        print_error(f"❌ MINING BLOCKED: Hardware verification failed - {e}")
-        print_info("PiSecure mining requires genuine Raspberry Pi hardware")
-        print_info("You can use --validate-only mode for testing/validation on non-Pi systems")
-        return
+            # Verify this is actually a Raspberry Pi
+            if not pihash._verify_hardware(hw_fingerprint):
+                print_error("❌ MINING BLOCKED: This system is not a verified Raspberry Pi")
+                print_info("PiSecure mining requires genuine Raspberry Pi hardware")
+                print_info("Use --validate-only flag for testing/validation on non-Pi systems")
+                return
+                
+        except Exception as e:
+            print_error(f"❌ MINING BLOCKED: Hardware verification failed - {e}")
+            print_info("PiSecure mining requires genuine Raspberry Pi hardware")
+            print_info("Use --validate-only flag for testing/validation on non-Pi systems")
+            return
 
     # Signal handling for graceful shutdown
     import signal
