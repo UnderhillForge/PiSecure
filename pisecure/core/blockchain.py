@@ -2370,6 +2370,7 @@ class SignChain:
     def _async_full_discovery(self, block):
         """Perform full discovery asynchronously"""
         import os  # Ensure os is available in this scope
+        import sys  # Ensure sys is available in thread context
         
         # Evaluate quiet mode outside try to avoid local variable issues
         quiet_mode = os.environ.get('PISECURE_QUIET') == '1'

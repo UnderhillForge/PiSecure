@@ -755,7 +755,7 @@ class P2PSyncManager:
         """Fetch peer list from a bootstrap node."""
         try:
             # Add timeout and proper error handling
-            response = requests.get(f"{bootstrap_url}", timeout=10)
+            response = requests.get(f"{bootstrap_url}", timeout=15)
             response.raise_for_status()
 
             data = response.json()
