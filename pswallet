@@ -48,8 +48,10 @@ except ImportError:
         sys.exit(1)
 
 
-def get_wallet_dir(testnet=False):
+def get_wallet_dir(testnet=False, custom_dir=None):
     """Get wallet directory based on network"""
+    if custom_dir:
+        return custom_dir
     if testnet or os.environ.get('PISECURE_TESTNET') == '1':
         return "/var/lib/pisecure-testnet/wallets"
     return "/var/lib/pisecure/wallets"
@@ -58,12 +60,14 @@ def get_wallet_dir(testnet=False):
 @click.group()
 @click.option('--testnet', is_flag=True, help='Use testnet network')
 @click.option('--json', 'output_json', is_flag=True, help='Output as JSON')
+@click.option('--wallet-dir', help='Custom wallet directory (default: /var/lib/pisecure/wallets)')
 @click.pass_context
-def cli(ctx, testnet, output_json):
+def cli(ctx, testnet, output_json, wallet_dir):
     """pswallet - Simple PiSecure Wallet Manager"""
     ctx.ensure_object(dict)
     ctx.obj['testnet'] = testnet
     ctx.obj['json'] = output_json
+    ctx.obj['wallet_dir'] = wallet_dir
     
     if testnet:
         console.print("[dim]Using testnet wallets[/dim]")
@@ -75,9 +79,10 @@ def list(ctx):
     """List all wallets"""
     testnet = ctx.obj['testnet']
     output_json = ctx.obj['json']
+    custom_dir = ctx.obj.get('wallet_dir')
     
     try:
-        wallet_dir = get_wallet_dir(testnet)
+        wallet_dir = get_wallet_dir(testnet, custom_dir)
         wallet = SignWallet(wallet_dir=wallet_dir)
         wallets = wallet.list_wallets()
         
@@ -124,9 +129,10 @@ def create(ctx, name, display_name):
     """Create a new wallet"""
     testnet = ctx.obj['testnet']
     output_json = ctx.obj['json']
+    custom_dir = ctx.obj.get('wallet_dir')
     
     try:
-        wallet_dir = get_wallet_dir(testnet)
+        wallet_dir = get_wallet_dir(testnet, custom_dir)
         
         # Ensure directory exists
         os.makedirs(wallet_dir, exist_ok=True)
@@ -158,9 +164,10 @@ def show(ctx, name):
     """Show wallet details"""
     testnet = ctx.obj['testnet']
     output_json = ctx.obj['json']
+    custom_dir = ctx.obj.get('wallet_dir')
     
     try:
-        wallet_dir = get_wallet_dir(testnet)
+        wallet_dir = get_wallet_dir(testnet, custom_dir)
         wallet = SignWallet(wallet_dir=wallet_dir)
         wallet_data = wallet.load_wallet(name)
         
@@ -301,9 +308,10 @@ def names(ctx, wallet_name):
 def export(ctx, name, output_file):
     """Export wallet to file (backup)"""
     testnet = ctx.obj['testnet']
+    custom_dir = ctx.obj.get('wallet_dir')
     
     try:
-        wallet_dir = get_wallet_dir(testnet)
+        wallet_dir = get_wallet_dir(testnet, custom_dir)
         wallet = SignWallet(wallet_dir=wallet_dir)
         wallet_data = wallet.load_wallet(name)
         
@@ -343,9 +351,10 @@ def export(ctx, name, output_file):
 def import_wallet(ctx, backup_file):
     """Import wallet from backup file"""
     testnet = ctx.obj['testnet']
+    custom_dir = ctx.obj.get('wallet_dir')
     
     try:
-        wallet_dir = get_wallet_dir(testnet)
+        wallet_dir = get_wallet_dir(testnet, custom_dir)
         
         if not os.path.exists(backup_file):
             console.print(f"[red]❌ File not found: {backup_file}[/red]")
