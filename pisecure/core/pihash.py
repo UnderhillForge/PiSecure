@@ -51,13 +51,13 @@ class PiHash:
     - NPU acceleration hooks
     """
 
-    def __init__(self, rounds: int = 8, memory_mb: int = 256, npu_enabled: bool = False):
+    def __init__(self, rounds: int = 1, memory_mb: int = 8, npu_enabled: bool = False):
         """
         Initialize PiHash with configurable parameters
 
         Args:
             rounds: Number of computational rounds (difficulty factor)
-            memory_mb: Memory usage in MB (default 256MB, Pi-friendly)
+            memory_mb: Memory usage in MB (default 8MB, optimized for Pi mining speed)
             npu_enabled: Enable NPU acceleration when available (Pi 6)
         """
         self.rounds = rounds
@@ -309,35 +309,38 @@ class PiHash:
         """
         Stage 2: Memory-hard computation optimized for Pi RAM
 
-        Uses configurable memory (default 256MB) in a Pi-optimized pattern
+        Uses configurable memory (default 8MB) in a Pi-optimized pattern
         """
         # Initialize memory buffer (only allocate what we need)
-        buffer_size = min(self.memory_bytes, 256 * 1024 * 1024)  # Cap at 256MB
+        buffer_size = min(self.memory_bytes, 8 * 1024 * 1024)  # Cap at 8MB for fast mining
         memory_buffer = bytearray(buffer_size)
 
         # Fill memory buffer with Pi-optimized pattern
-        for i in range(0, len(memory_buffer), 64):
-            # Create 64-byte chunks
+        for i in range(0, len(memory_buffer), 32):
+            # Create 32-byte chunks (SHA256 output size)
             chunk_data = hw_hash + struct.pack('<Q', nonce) + struct.pack('<Q', i)
             chunk_hash = hashlib.sha256(chunk_data).digest()
 
-            # Fill memory with hash data
-            for j in range(min(64, len(memory_buffer) - i)):
+            # Fill memory with hash data (32 bytes at a time)
+            for j in range(min(32, len(memory_buffer) - i)):
                 memory_buffer[i + j] = chunk_hash[j]
 
-        # Mix memory buffer (custom Pi-optimized mixing)
-        for round_num in range(self.rounds):
-            for i in range(len(memory_buffer)):
-                # Pi-specific mixing function
-                prev = memory_buffer[(i - 1) % len(memory_buffer)]
-                curr = memory_buffer[i]
-                next_val = memory_buffer[(i + 1) % len(memory_buffer)]
+        # Mix memory buffer (optimized for performance)
+        # Use fewer passes for larger buffers to keep computation reasonable
+        mix_rounds = max(1, self.rounds // 2)
+        
+        for round_num in range(mix_rounds):
+            # Access memory in larger chunks for better cache locality
+            for i in range(0, len(memory_buffer), 1024):  # Process 1KB chunks
+                # Mix a chunk efficiently
+                for j in range(min(1024, len(memory_buffer) - i)):
+                    idx = i + j
+                    prev = memory_buffer[(idx - 1) % len(memory_buffer)]
+                    curr = memory_buffer[idx]
+                    next_val = memory_buffer[(idx + 1) % len(memory_buffer)]
 
-                # Custom mixing: XOR with bit rotation
-                mixed = (prev ^ curr ^ next_val)
-                mixed = ((mixed << 3) | (mixed >> 5)) & 0xFF  # Rotate left 3 bits
-
-                memory_buffer[i] = mixed
+                    # Simple but effective mixing
+                    memory_buffer[idx] = ((prev ^ curr ^ next_val) + round_num) & 0xFF
 
         # Reduce to 32-byte hash
         reduced_hash = hashlib.sha256(memory_buffer).digest()
