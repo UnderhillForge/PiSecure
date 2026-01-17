@@ -741,16 +741,11 @@ class SignBlock:
                            "PiSecure requires PiHash for all mining operations.")
 
         try:
-            # Get hardware fingerprint for this block
-            hw_fingerprint = None
-            if hasattr(self, '_hardware_fingerprint'):
-                hw_fingerprint = self._hardware_fingerprint
-            else:
-                # Get fresh hardware fingerprint
-                from .pihash import PiHash
-                pihash = PiHash()
-                hw_fingerprint = pihash._get_hardware_fingerprint()
-                self._hardware_fingerprint = hw_fingerprint
+            # ALWAYS get fresh hardware fingerprint - NEVER use cached values
+            # This prevents security bypass by copying blockchain data between systems
+            from .pihash import PiHash
+            pihash = PiHash()
+            hw_fingerprint = pihash._get_hardware_fingerprint()
 
             # Verify hardware compatibility (PiHash will raise error if not Pi)
             if not hw_fingerprint or 'cpu_serial' not in hw_fingerprint:
