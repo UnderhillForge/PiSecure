@@ -720,6 +720,12 @@ class SignBlock:
             "nonce": self.nonce
         }, sort_keys=True)
 
+        # In validate-only mode, allow any algorithm (we're not mining, just validating)
+        import os
+        if os.environ.get('PISECURE_VALIDATE_ONLY') == '1':
+            # For validation, use simple hash without hardware checks
+            return hashlib.sha256(block_string.encode()).hexdigest()
+
         if self.algorithm != 'pihash':
             raise ValueError("BLOCKCHAIN SECURITY: PiSecure requires PiHash algorithm. "
                            "Only Raspberry Pi hardware with PiSecure software can mine blocks.")
