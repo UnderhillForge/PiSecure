@@ -100,14 +100,22 @@ def print_info(message):
 @click.group()
 @click.option('--hybrid-storage/--no-hybrid-storage', default=None,
               help='Use hybrid storage system (default: auto-detect)')
+@click.option('--test', '--testnet', 'use_testnet', is_flag=True, default=False,
+              help='Use testnet blockchain (separate from mainnet)')
 @click.option('--validate-only', is_flag=True, default=False,
               help='Read-only mode: validate blockchain without mining (bypasses hardware checks)')
 @click.version_option(version="0.1.0")
-def cli(hybrid_storage, validate_only):
+def cli(hybrid_storage, use_testnet, validate_only):
     """PiSecure - Decentralized Security Framework for Raspberry Pi"""
     # Store the hybrid storage preference globally
     global USE_HYBRID_STORAGE
     USE_HYBRID_STORAGE = hybrid_storage
+    
+    # Set testnet mode as environment variable
+    if use_testnet:
+        import os
+        os.environ['PISECURE_TESTNET'] = '1'
+        print_info("Running in TESTNET mode - using /var/lib/pisecure-testnet/")
     
     # Set validate-only mode as environment variable for core modules
     if validate_only:

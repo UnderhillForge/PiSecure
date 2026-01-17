@@ -1094,6 +1094,13 @@ class SignChain:
     def __init__(self, chain_file: str = "/var/lib/pisecure/blockchain.json",
                  difficulty: int = 4, use_hybrid_storage: bool = None,
                  mining_algorithm: str = 'pihash'):
+        # Check for testnet mode
+        import os
+        if os.environ.get('PISECURE_TESTNET') == '1':
+            # Use testnet directory if not explicitly specified
+            if chain_file == "/var/lib/pisecure/blockchain.json":
+                chain_file = "/var/lib/pisecure-testnet/blockchain.json"
+        
         self.chain_file = Path(chain_file)
         self.pending_file = Path(chain_file).parent / "pending_transactions.json"
         self.names_file = Path(chain_file).parent / "name_registry.json"
