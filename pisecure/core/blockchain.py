@@ -2317,10 +2317,10 @@ class SignChain:
 
     def _trigger_discovery_on_block(self, block):
         """Trigger network discovery after successful block mining with smart rate limiting"""
+        # Check if quiet mode is enabled (set before try to avoid scope issues)
+        quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
         try:
             from pisecure.core.nat_traversal import node_discovery
-            # Check if quiet mode is enabled
-            quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
 
 
             # Check if we should trigger discovery
@@ -2364,8 +2364,9 @@ class SignChain:
 
     def _async_full_discovery(self, block):
         """Perform full discovery asynchronously"""
+        # Evaluate quiet mode outside try to avoid local variable issues
+        quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
         try:
-            quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
             from pisecure.core.nat_traversal import node_discovery
 
             # Perform the actual discovery
