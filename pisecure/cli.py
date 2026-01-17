@@ -410,6 +410,9 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
                         blocks_mined_session += 1
                         print_success(f"Block mined! #{block.index}")
 
+                        # Adapt difficulty (runs every 100 blocks toward 60s target)
+                        blockchain.adapt_difficulty()
+
                         # Update wallet balance after mining reward
                         if miner_wallet:
                             try:

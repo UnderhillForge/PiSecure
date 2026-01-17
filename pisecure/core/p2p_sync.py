@@ -227,6 +227,10 @@ class P2PSyncManager:
         valid_blocks = self._validate_and_add_blocks(missing_blocks)
         self.sync_stats['blocks_synced'] += len(valid_blocks)
 
+        # Adapt difficulty after receiving blocks from peers
+        if valid_blocks:
+            self.blockchain.adapt_difficulty()
+
         logger.info(f"✅ Successfully synced {len(valid_blocks)} blocks")
 
     def _get_peer_chain_info(self, peer_id: str) -> Optional[Dict]:

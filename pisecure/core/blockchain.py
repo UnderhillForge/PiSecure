@@ -1650,6 +1650,9 @@ class SignChain:
                 reward_info = f" (+{mining_reward} reward)" if miner_wallet_address else ""
                 print(f"✅ Mined new block: #{new_block.index} with {total_txs} transactions{reward_info}")
 
+                # Adapt difficulty (runs every 100 blocks toward 60s target)
+                self.adapt_difficulty()
+
                 # Trigger network discovery after successful block mining
                 try:
                     import threading
