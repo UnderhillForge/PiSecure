@@ -2314,13 +2314,19 @@ class SignChain:
         """Trigger network discovery after successful block mining with smart rate limiting"""
         try:
             from pisecure.core.nat_traversal import node_discovery
+            # Check if quiet mode is enabled
+            import os
+            quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
+
 
             # Check if we should trigger discovery
             if not self._should_trigger_discovery(block):
-                print(f"⏰ Skipping discovery for block #{block.index} (rate limited)")
+                if not quiet_mode:
+                    print(f"⏰ Skipping discovery for block #{block.index} (rate limited)")
                 return
 
-            print(f"🔄 Triggering smart discovery after mining block #{block.index}...")
+            if not quiet_mode:
+                print(f"🔄 Triggering smart discovery after mining block #{block.index}...")
 
             # Critical sync operations (update peer routing)
             self._update_critical_network_state()
@@ -2339,7 +2345,8 @@ class SignChain:
             self.last_discovery_trigger = time.time()
 
         except Exception as e:
-            print(f"⚠️ Failed to trigger discovery after mining: {e}")
+            if not quiet_mode:
+                print(f"⚠️ Failed to trigger discovery after mining: {e}")
 
     def _update_critical_network_state(self):
         """Update critical network state that must happen synchronously"""
@@ -2353,6 +2360,9 @@ class SignChain:
 
     def _async_full_discovery(self, block):
         """Perform full discovery asynchronously"""
+                    import os
+                    quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
+
         try:
             from pisecure.core.nat_traversal import node_discovery
 
@@ -2360,20 +2370,24 @@ class SignChain:
             discovery_results = node_discovery.make_node_discoverable()
 
             if discovery_results['success_count'] > 0:
-                print(f"✅ Async discovery successful: {discovery_results['success_count']} methods")
+                if not quiet_mode:
+                    print(f"✅ Async discovery successful: {discovery_results['success_count']} methods")
                 # Reset failure counter on success
                 self.consecutive_discovery_failures = 0
             else:
-                print("⚠️ Async discovery found no new endpoints")
+                if not quiet_mode:
+                    print("⚠️ Async discovery found no new endpoints")
                 self.consecutive_discovery_failures += 1
 
                 # If too many failures, increase backoff time
                 if self.consecutive_discovery_failures >= 3:
                     self.discovery_backoff_time = min(self.discovery_backoff_time * 2, 3600)  # Max 1 hour
-                    print(f"🔄 Increasing discovery backoff to {self.discovery_backoff_time}s due to failures")
+                    if not quiet_mode:
+                        print(f"🔄 Increasing discovery backoff to {self.discovery_backoff_time}s due to failures")
 
         except Exception as e:
-            print(f"⚠️ Async discovery failed: {e}")
+            if not quiet_mode:
+                print(f"⚠️ Async discovery failed: {e}")
             self.consecutive_discovery_failures += 1
 
     def get_wallet_names(self, wallet_address: str) -> List[str]:

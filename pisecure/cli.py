@@ -104,24 +104,40 @@ def print_info(message):
               help='Use testnet blockchain (separate from mainnet)')
 @click.option('--validate-only', is_flag=True, default=False,
               help='Read-only mode: validate blockchain without mining (bypasses hardware checks)')
+@click.option('--quiet', is_flag=True, default=False,
+              help='Reduce output verbosity (only show essential messages)')
 @click.version_option(version="0.1.0")
-def cli(hybrid_storage, use_testnet, validate_only):
+def cli(hybrid_storage, use_testnet, validate_only, quiet):
     """PiSecure - Decentralized Security Framework for Raspberry Pi"""
+    import logging
+    
     # Store the hybrid storage preference globally
     global USE_HYBRID_STORAGE
     USE_HYBRID_STORAGE = hybrid_storage
+    
+    # Set quiet mode
+    if quiet:
+        import os
+        os.environ['PISECURE_QUIET'] = '1'
+        # Reduce logging noise from submodules
+        logging.getLogger('pisecure.core.p2p_sync').setLevel(logging.WARNING)
+        logging.getLogger('pisecure.core.nat_traversal').setLevel(logging.WARNING)
+        logging.getLogger('pisecure.core.bootstrap_manager').setLevel(logging.ERROR)
+        logging.getLogger('pisecure.network').setLevel(logging.WARNING)
     
     # Set testnet mode as environment variable
     if use_testnet:
         import os
         os.environ['PISECURE_TESTNET'] = '1'
-        print_info("Running in TESTNET mode - using /var/lib/pisecure-testnet/")
+        if not quiet:
+            print_info("Running in TESTNET mode - using /var/lib/pisecure-testnet/")
     
     # Set validate-only mode as environment variable for core modules
     if validate_only:
         import os
         os.environ['PISECURE_VALIDATE_ONLY'] = '1'
-        print_info("Running in VALIDATE-ONLY mode (hardware checks bypassed)")
+        if not quiet:
+            print_info("Running in VALIDATE-ONLY mode (hardware checks bypassed)")
 
 
 @cli.command()
@@ -273,15 +289,19 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
             except (FileNotFoundError, json.JSONDecodeError, KeyError):
                 pass
 
+        quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
+        
         if not miner_wallet:
-            print_warning("No miner wallet configured")
-            print_info("Use --wallet to specify wallet address, or set mining.wallet_address in /etc/pisecure/config.json")
+            if not quiet_mode:
+                print_warning("No miner wallet configured")
+                print_info("Use --wallet to specify wallet address, or set mining.wallet_address in /etc/pisecure/config.json")
             miner_wallet = None
 
         # Sync with network before mining (unless disabled)
         if not no_sync:
             try:
-                print_info("Syncing with network before mining...")
+                if not quiet_mode:
+                    print_info("Syncing with network before mining...")
                 peer_discovery = PeerDiscovery()
                 p2p_sync = P2PSyncManager(blockchain, peer_discovery)
 
@@ -292,12 +312,14 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
 
                 if blocks_synced > 0:
                     print_success(f"Synced {blocks_synced} blocks from network")
-                else:
+                elif not quiet_mode:
                     print_success("Already up-to-date with network")
             except Exception as e:
-                print_warning(f"Network sync failed, proceeding with mining: {e}")
+                if not quiet_mode:
+                    print_warning(f"Network sync failed, proceeding with mining: {e}")
         else:
-            print_warning("Skipping network sync (--no-sync flag used)")
+            if not quiet_mode:
+                print_warning("Skipping network sync (--no-sync flag used)")
 
         # Initialize system monitor if safe mode is enabled
         system_monitor = None
@@ -306,10 +328,12 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
                 from .core.monitoring import get_system_monitor
                 system_monitor = get_system_monitor()
                 system_monitor.start_monitoring()
-                print_success("Safe mode enabled - System monitoring active")
-                print_info("Will monitor temperature, memory, and CPU usage")
+                if not quiet_mode:
+                    print_success("Safe mode enabled - System monitoring active")
+                    print_info("Will monitor temperature, memory, and CPU usage")
             except Exception as e:
-                print_warning(f"Could not enable safe mode monitoring: {e}")
+                if not quiet_mode:
+                    print_warning(f"Could not enable safe mode monitoring: {e}")
                 safe_mode = False
 
         # Initialize robust bootstrap-based status reporting
@@ -317,10 +341,12 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
             from .core.bootstrap_manager import get_bootstrap_registry, get_status_reporter
             bootstrap_registry = get_bootstrap_registry()
             status_reporter = get_status_reporter(f"miner_{secrets.token_hex(4)}")
-            print_success("Bootstrap-based status reporting enabled")
-            print_info("Will report to bootstrap.pisecure.org with automatic failover")
+            if not quiet_mode:
+                print_success("Bootstrap-based status reporting enabled")
+                print_info("Will report to bootstrap.pisecure.org with automatic failover")
         except Exception as e:
-            print_warning(f"Could not initialize bootstrap reporting: {e}")
+            if not quiet_mode:
+                print_warning(f"Could not initialize bootstrap reporting: {e}")
             status_reporter = None
 
         # Initialize miner variables
