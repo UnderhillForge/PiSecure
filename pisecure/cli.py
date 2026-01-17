@@ -104,7 +104,7 @@ def print_info(message):
 @click.option('--test', '--testnet', 'use_testnet', is_flag=True, default=False,
               help='Use testnet blockchain (separate from mainnet)')
 @click.option('--validate-only', is_flag=True, default=False,
-              help='Read-only mode: validate blockchain without mining (bypasses hardware checks)')
+              help='Validation mode: verify blockchain integrity without Pi hardware (status/wallet commands only)')
 @click.option('--quiet', is_flag=True, default=False,
               help='Reduce output verbosity (only show essential messages)')
 @click.version_option(version="0.1.0")
@@ -139,8 +139,8 @@ def cli(hybrid_storage, use_testnet, validate_only, quiet):
         os.environ['PISECURE_VALIDATE_ONLY'] = '1'
         if not quiet:
             print_warning("⚠️  VALIDATE-ONLY MODE: Hardware checks bypassed")
-            print_info("Blocks mined in this mode use SHA256, not PiHash")
-            print_info("These blocks are for TESTING ONLY and will be rejected by the network")
+            print_info("This mode is for blockchain verification only (status, wallet commands)")
+            print_info("Mining is disabled - use a Raspberry Pi for mining operations")
 
 
 @cli.command()
@@ -263,26 +263,25 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
     USE_PLAIN_OUTPUT = plain
 
     # CRITICAL: Verify hardware BEFORE allowing mining
-    # Skip hardware check only if explicitly in validate-only mode
+    # Mining is NEVER allowed on non-Pi systems, regardless of flags
     import os
-    if os.environ.get('PISECURE_VALIDATE_ONLY') != '1':
-        try:
-            from pisecure.core.pihash import PiHash
-            pihash = PiHash()
-            hw_fingerprint = pihash._get_hardware_fingerprint()
-            
-            # Verify this is actually a Raspberry Pi
-            if not pihash._verify_hardware(hw_fingerprint):
-                print_error("❌ MINING BLOCKED: This system is not a verified Raspberry Pi")
-                print_info("PiSecure mining requires genuine Raspberry Pi hardware")
-                print_info("Use --validate-only flag for testing/validation on non-Pi systems")
-                return
-                
-        except Exception as e:
-            print_error(f"❌ MINING BLOCKED: Hardware verification failed - {e}")
+    try:
+        from pisecure.core.pihash import PiHash
+        pihash = PiHash()
+        hw_fingerprint = pihash._get_hardware_fingerprint()
+        
+        # Verify this is actually a Raspberry Pi
+        if not pihash._verify_hardware(hw_fingerprint):
+            print_error("❌ MINING BLOCKED: This system is not a verified Raspberry Pi")
             print_info("PiSecure mining requires genuine Raspberry Pi hardware")
-            print_info("Use --validate-only flag for testing/validation on non-Pi systems")
+            print_info("Use 'pisecure status' or 'pisecure wallet' to interact with the blockchain")
             return
+            
+    except Exception as e:
+        print_error(f"❌ MINING BLOCKED: Hardware verification failed - {e}")
+        print_info("PiSecure mining requires genuine Raspberry Pi hardware")
+        print_info("Use 'pisecure status' or 'pisecure wallet' to interact with the blockchain")
+        return
 
     # Signal handling for graceful shutdown
     import signal
