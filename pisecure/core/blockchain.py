@@ -2320,6 +2320,8 @@ class SignChain:
 
     def _trigger_discovery_on_block(self, block):
         """Trigger network discovery after successful block mining with smart rate limiting"""
+        import os  # Ensure os is available
+        
         # Check if quiet mode is enabled (set before try to avoid scope issues)
         quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
         try:
@@ -2367,6 +2369,8 @@ class SignChain:
 
     def _async_full_discovery(self, block):
         """Perform full discovery asynchronously"""
+        import os  # Ensure os is available in this scope
+        
         # Evaluate quiet mode outside try to avoid local variable issues
         quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
         try:
