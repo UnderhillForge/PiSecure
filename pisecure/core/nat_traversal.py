@@ -333,7 +333,7 @@ class NATTraversal:
         endpoints = []
 
         # 1. Try STUN discovery
-        logger.info("Discovering public endpoints via STUN...")
+        logger.debug("Discovering public endpoints via STUN...")
         nat_info = self.stun_client.discover_nat_type()
 
         if nat_info.get('public_ip'):
@@ -483,7 +483,7 @@ class NATTraversal:
             node_info['signature'] = self._sign_node_info(node_info)
 
             # Send to bootstrap service (placeholder)
-            logger.info(f"Would register node with {len(self.public_endpoints)} endpoints")
+            logger.debug(f"Would register node with {len(self.public_endpoints)} endpoints")
 
         except Exception as e:
             logger.error(f"Bootstrap registration failed: {e}")
@@ -843,7 +843,7 @@ class NodeDiscoveryService:
 
     def make_node_discoverable(self) -> Dict[str, Any]:
         """Make this node discoverable worldwide using all available methods"""
-        logger.info("Making PiSecure node discoverable worldwide...")
+        logger.debug("Making PiSecure node discoverable worldwide...")
 
         results = {
             'node_id': self._get_node_id(),
@@ -853,7 +853,7 @@ class NodeDiscoveryService:
         }
 
         # 1. STUN/TURN NAT Traversal
-        logger.info("Attempting NAT traversal...")
+        logger.debug("Attempting NAT traversal...")
         endpoints = self.nat_traversal.discover_public_endpoints()
         if endpoints:
             results['endpoints'].extend(endpoints)
@@ -878,10 +878,10 @@ class NodeDiscoveryService:
                     results['success_count'] += 1
                     logger.info(f"✅ Tor onion service created: {onion_addr}")
         else:
-            logger.info("Tor onion service disabled (set PISECURE_ENABLE_TOR=true to enable)")
+            logger.debug("Tor onion service disabled (set PISECURE_ENABLE_TOR=true to enable)")
 
         # 3. Community Relay Network
-        logger.info("Registering with community relays...")
+        logger.debug("Registering with community relays...")
         self.relay_network.update_relay_list()
         if self.relay_network.relays:
             relay_info = {
@@ -896,7 +896,7 @@ class NodeDiscoveryService:
 
         # Register with bootstrap nodes
         if results['endpoints']:
-            logger.info("Registering endpoints with bootstrap nodes...")
+            logger.debug("Registering endpoints with bootstrap nodes...")
             self.nat_traversal.register_with_bootstrap()
 
         results['total_endpoints'] = len(results['endpoints'])
