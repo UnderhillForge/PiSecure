@@ -208,7 +208,7 @@ class BootstrapRegistry:
 
                 response = requests.get(
                     f"{server_url}/api/v1/bootstrap/peers",
-                    timeout=10
+                    timeout=15  # Increased from 10s to 15s
                 )
 
                 if response.status_code == 200:
@@ -289,7 +289,7 @@ class RobustMinerReporter:
                 response = requests.post(
                     f"{server_url}/api/v1/nodes/register",
                     json=registration_data,
-                    timeout=15
+                    timeout=30  # Increased from 15s to 30s for slow connections
                 )
 
                 if response.status_code == 200:
@@ -306,7 +306,9 @@ class RobustMinerReporter:
                 logger.debug(f"Registration failed with {server_url}: {e}")
                 self.registry.update_server_health(server_url, success=False)
 
-        logger.warning(f"⚠️ Failed to register with any bootstrap server (attempt {self.registration_attempts})")
+        # Don't log warning on first attempt - registration is async
+        if self.registration_attempts > 2:
+            logger.warning(f"⚠️ Failed to register with bootstrap servers (attempt {self.registration_attempts})")
         return False
 
     def send_status_report(self, status_data: Dict[str, Any]) -> bool:
@@ -375,7 +377,7 @@ class RobustMinerReporter:
                 response = requests.post(
                     f"{server_url}/api/v1/nodes/status",
                     json=status_payload,
-                    timeout=10
+                    timeout=20  # Increased from 10s to 20s for slow connections
                 )
 
                 if response.status_code == 200:
