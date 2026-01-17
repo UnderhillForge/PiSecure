@@ -262,6 +262,26 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
     global USE_PLAIN_OUTPUT
     USE_PLAIN_OUTPUT = plain
 
+    # CRITICAL: Verify hardware BEFORE allowing mining
+    # This prevents mining on non-Pi systems regardless of flags
+    try:
+        from pisecure.core.pihash import PiHash
+        pihash = PiHash()
+        hw_fingerprint = pihash._get_hardware_fingerprint()
+        
+        # Verify this is actually a Raspberry Pi
+        if not pihash._verify_hardware(hw_fingerprint):
+            print_error("❌ MINING BLOCKED: This system is not a verified Raspberry Pi")
+            print_info("PiSecure mining requires genuine Raspberry Pi hardware")
+            print_info("You can use --validate-only mode for testing/validation on non-Pi systems")
+            return
+            
+    except Exception as e:
+        print_error(f"❌ MINING BLOCKED: Hardware verification failed - {e}")
+        print_info("PiSecure mining requires genuine Raspberry Pi hardware")
+        print_info("You can use --validate-only mode for testing/validation on non-Pi systems")
+        return
+
     # Signal handling for graceful shutdown
     import signal
     mining_stopped = False
