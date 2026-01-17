@@ -604,6 +604,81 @@ def verify_hardware():
 
 
 @cli.command()
+@click.option('--wallet', help='Wallet name or address to monitor')
+@click.option('--refresh', default=5, show_default=True, help='Refresh interval in seconds')
+def monitor(wallet, refresh):
+    """Live blockchain/network monitor (non-mining)"""
+    try:
+        quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
+        # Initialize chain and discovery
+        blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
+        peer_discovery = PeerDiscovery()
+        p2p_sync = P2PSyncManager(blockchain, peer_discovery)
+
+        # Resolve wallet name to address if needed
+        wallet_address = None
+        if wallet:
+            try:
+                from .core.wallet import SignWallet
+                # Try treat as name by loading wallet
+                sw = SignWallet()
+                data = sw.load_wallet(wallet)
+                if isinstance(data, dict) and data.get('address'):
+                    wallet_address = data['address']
+                else:
+                    # Fallback to assuming provided is an address
+                    wallet_address = wallet
+            except Exception:
+                wallet_address = wallet
+
+        last_height = -1
+        console.print("[green]✅ Monitor started. Press Ctrl-C to stop[/green]")
+
+        while True:
+            # Perform a lightweight sync
+            try:
+                p2p_sync._perform_sync_cycle()
+            except Exception:
+                pass
+
+            info = blockchain.get_chain_info()
+            height = info.get('blocks', len(blockchain.chain))
+            pending = info.get('pending_transactions', len(blockchain.pending_transactions))
+            difficulty = info.get('difficulty', blockchain.difficulty)
+            latest = info.get('latest_block') or (blockchain.chain[-1] if blockchain.chain else None)
+
+            # Peer count
+            peers = {}
+            try:
+                peers = peer_discovery.get_known_peers()
+            except Exception:
+                peers = {}
+
+            # Wallet balance
+            balance_text = ""
+            if wallet_address:
+                try:
+                    bal = blockchain.get_wallet_balance(wallet_address)
+                    balance_text = f" | Wallet {wallet_address[:8]}… Balance: {bal:.2f}"
+                except Exception:
+                    balance_text = f" | Wallet {wallet_address[:8]}… Balance: n/a"
+
+            # Only print on change or in non-quiet mode
+            if not quiet_mode or height != last_height:
+                latest_desc = f"#{latest['index']}" if isinstance(latest, dict) else (f"#{latest.index}" if latest else "-")
+                print_output(
+                    f"Blocks: {height} | Pending: {pending} | Difficulty: {difficulty} | Peers: {len(peers)} | Latest: {latest_desc}{balance_text}"
+                )
+                last_height = height
+
+            time.sleep(max(1, int(refresh)))
+
+    except KeyboardInterrupt:
+        print_output("\nMonitor stopped")
+    except Exception as e:
+        print_error(f"Monitor error: {e}")
+
+@cli.command()
 def identity():
     """Show device identity and fingerprint"""
     try:
