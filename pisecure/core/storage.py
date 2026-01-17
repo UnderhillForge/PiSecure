@@ -101,7 +101,7 @@ class BlockFileStorage:
 class SQLiteIndex:
     """SQLite database for blockchain indexing and UTXO set"""
 
-    def __init__(self, db_path: str = "/var/lib/pisecure/index.db"):
+    def __init__(self, db_path: str = "/var/lib/pisecure/pisecure.db"):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -424,7 +424,7 @@ class HybridBlockchainStorage:
 
         # Initialize storage components
         self.block_storage = BlockFileStorage(str(self.data_dir))
-        self.index_db = SQLiteIndex(str(self.data_dir / "index.db"))
+        self.index_db = SQLiteIndex(str(self.data_dir / "pisecure.db"))
         self.cache = MemoryCache(max_size=500)
 
         # Migration flag

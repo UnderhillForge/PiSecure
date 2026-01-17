@@ -15,7 +15,7 @@
 # Genesis keys are OPTIONAL - the system works without them for normal operations.
 # Hybrid storage is enabled by default for optimal performance.
 #
-# Usage: curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/scripts/install.sh | bash
 #
 
 set -e
@@ -128,9 +128,6 @@ install_pisecure() {
     # Install PiSecure (must be in the correct directory)
     pip install -e .
 
-    # Install additional web dependencies
-    pip install Flask-Cors Flask-Limiter
-
     # Verify installation
     python -c "import pisecure; print('PiSecure import successful')" || {
         log_error "PiSecure installation failed"
@@ -155,36 +152,50 @@ This wrapper activates the virtual environment and runs the PiSecure CLI.
 
 import sys
 import os
+import subprocess
 
 # Virtual environment activation
 venv_path = "/home/pi/PiSecure/pisecure_env"
-activate_this = os.path.join(venv_path, "bin", "activate_this.py")
-
-if os.path.exists(activate_this):
-    with open(activate_this) as f:
-        exec(f.read(), {"__file__": activate_this})
-else:
-    # Fallback: try to activate manually
-    if os.path.exists(venv_path):
-        sys.path.insert(0, os.path.join(venv_path, "lib", "python3.9", "site-packages"))
-        sys.path.insert(0, venv_path)
 
 # Add PiSecure to Python path
 pisecure_path = "/home/pi/PiSecure"
 if pisecure_path not in sys.path:
     sys.path.insert(0, pisecure_path)
 
+# Set PYTHONPATH environment variable
+os.environ['PYTHONPATH'] = pisecure_path
+
 try:
-    # Import and run the PiSecure CLI
-    from pisecure.cli import main
-    main()
-except ImportError as e:
-    print(f"❌ Import error: {e}")
-    print(f"Virtual environment: {venv_path}")
-    print("Try: source /home/pi/PiSecure/pisecure_env/bin/activate && pisecure --help")
-    sys.exit(1)
+    # Try to run the CLI module first
+    result = subprocess.run([
+        os.path.join(venv_path, "bin", "python"), "-m", "pisecure.cli"
+    ] + sys.argv[1:], capture_output=True, text=True)
+
+    if result.returncode == 0:
+        print(result.stdout, end='')
+        sys.exit(0)
+    else:
+        # Fall back to running scripts directly
+        if len(sys.argv) > 1:
+            script_name = sys.argv[1]
+            script_path = os.path.join(pisecure_path, "scripts", f"{script_name}.py")
+            if os.path.exists(script_path):
+                result = subprocess.run([
+                    os.path.join(venv_path, "bin", "python"), script_path
+                ] + sys.argv[2:], capture_output=True, text=True)
+                print(result.stdout, end='')
+                if result.stderr:
+                    print(result.stderr, file=sys.stderr, end='')
+                sys.exit(result.returncode)
+
+        # If all else fails, print error
+        print(f"❌ CLI error: {result.stderr}")
+        sys.exit(1)
+
 except Exception as e:
-    print(f"❌ CLI error: {e}")
+    print(f"❌ CLI wrapper error: {e}")
+    print(f"Virtual environment: {venv_path}")
+    print("Try: source /home/pi/PiSecure/pisecure_env/bin/activate && python -m pisecure.cli --help")
     sys.exit(1)
 EOF
 
@@ -626,7 +637,6 @@ main() {
     log_warning "Genesis keys are OPTIONAL - system works without them!"
 
     detect_pi
-    configure_tor
     configure_tor
     install_dependencies
     setup_directories

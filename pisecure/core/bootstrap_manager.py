@@ -109,7 +109,7 @@ class BootstrapRegistry:
             try:
                 response = requests.get(
                     f"{server_url}/api/v1/bootstrap/registry",
-                    timeout=10
+                    timeout=90
                 )
 
                 if response.status_code == 200:
@@ -175,6 +175,31 @@ class BootstrapRegistry:
 
         self._save_registry()
 
+    def has_healthy_servers(self, quick_check: bool = False) -> bool:
+        """
+        Check if any healthy bootstrap servers are available.
+        
+        Args:
+            quick_check: If True, only check cached data without network calls
+        
+        Returns:
+            True if at least one healthy server exists
+        """
+        if quick_check:
+            # Fast check using cached data only
+            return len(self.get_healthy_servers()) > 0
+        
+        # Try a quick ping to the primary server
+        try:
+            import requests
+            response = requests.get(
+                "https://bootstrap.pisecure.org/api/v1/health",
+                timeout=90
+            )
+            return response.status_code == 200
+        except:
+            return False
+
     def get_healthy_servers(self) -> List[str]:
         """Get list of healthy bootstrap servers sorted by priority"""
         healthy = [
@@ -208,7 +233,7 @@ class BootstrapRegistry:
 
                 response = requests.get(
                     f"{server_url}/api/v1/bootstrap/peers",
-                    timeout=10
+                    timeout=90
                 )
 
                 if response.status_code == 200:
@@ -289,7 +314,7 @@ class RobustMinerReporter:
                 response = requests.post(
                     f"{server_url}/api/v1/nodes/register",
                     json=registration_data,
-                    timeout=15
+                    timeout=90
                 )
 
                 if response.status_code == 200:
@@ -375,7 +400,7 @@ class RobustMinerReporter:
                 response = requests.post(
                     f"{server_url}/api/v1/nodes/status",
                     json=status_payload,
-                    timeout=10
+                    timeout=90
                 )
 
                 if response.status_code == 200:

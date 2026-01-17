@@ -88,7 +88,7 @@ println("Wallet created: ${wallet.address}")
 ```kotlin
 // Get wallet balance
 val balance = wallet.getBalance()
-println("Balance: ${balance.amount} PSC")
+println("Balance: ${balance.amount} 314ST")
 
 // Listen for balance changes
 wallet.addBalanceListener { newBalance ->
@@ -198,7 +198,7 @@ MiningManager.addProgressListener { progress ->
 class TransactionReceiver : PiSecureBroadcastReceiver() {
     override fun onTransactionReceived(transaction: Transaction) {
         // Handle incoming transaction
-        showNotification("Received ${transaction.amount} PSC")
+        showNotification("Received ${transaction.amount} 314ST")
     }
 
     override fun onTransactionSent(transaction: Transaction) {
@@ -324,7 +324,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val balance = wallet.getBalance()
-                balanceText.text = "${balance.amount} PSC"
+                balanceText.text = "${balance.amount} 314ST"
             } catch (e: Exception) {
                 balanceText.text = "Error loading balance"
             }

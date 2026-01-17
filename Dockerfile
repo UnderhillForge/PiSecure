@@ -30,7 +30,7 @@ COPY . .
 RUN mkdir -p /app/data /var/lib/pisecure
 
 # Set permissions
-RUN chmod +x /app/pisecure.py
+RUN chmod +x /app/scripts/pisecure.py
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash pisecure && \

@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 
 class ConsensusAlgorithm(Enum):
     """Supported consensus algorithms"""
-    PROOF_OF_WORK_SHA256 = "pow_sha256"
-    PROOF_OF_WORK_SHA3 = "pow_sha3"
-    PROOF_OF_WORK_PI_OPTIMIZED = "pow_pi_optimized"
-    PROOF_OF_STAKE = "pos"  # Future implementation
+    PROOF_OF_WORK_PI_HASH = "pow_pi_hash"  # PiHash mining algorithm
+    PROOF_OF_WORK_SHA256 = "pow_sha256"    # Legacy SHA256 support
+    PROOF_OF_WORK_SHA3 = "pow_sha3"        # Legacy SHA3 support
+    PROOF_OF_STAKE = "pos"                 # Future implementation
 
 @dataclass
 class ConsensusVote:
@@ -306,7 +306,7 @@ class PiSecureConsensus:
         self.p2p_sync = p2p_sync
 
         # Consensus configuration
-        self.consensus_algorithm = ConsensusAlgorithm.PROOF_OF_WORK_SHA256
+        self.consensus_algorithm = ConsensusAlgorithm.PROOF_OF_WORK_PI_HASH
         self.min_block_time = 300  # 5 minutes minimum
         self.max_block_time = 1800  # 30 minutes maximum
         self.difficulty_adjustment_interval = 10  # Blocks between adjustments

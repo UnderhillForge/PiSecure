@@ -850,6 +850,47 @@ class PiSecureClient:
             logger.debug(f"Intelligent bootstrap peers request failed: {e}")
         return None
 
+    def get_bootstrap_intelligence(self, intelligence_type: str = "attacks") -> Optional[Dict[str, Any]]:
+        """Get intelligence data from bootstrap server"""
+        for bootstrap_url in self.bootstrap_endpoints:
+            try:
+                response = requests.get(f"{bootstrap_url}/api/v1/intelligence/{intelligence_type}", timeout=10)
+                if response.status_code == 200:
+                    return response.json()
+            except Exception as e:
+                continue
+        return None
+
+    def optimize_routing(self, available_nodes: List[Dict]) -> Optional[Dict[str, Any]]:
+        """Get routing optimization from bootstrap server"""
+        for bootstrap_url in self.bootstrap_endpoints:
+            try:
+                response = requests.post(
+                    f"{bootstrap_url}/api/v1/intelligence/optimize",
+                    json={"available_nodes": available_nodes},
+                    timeout=10
+                )
+                if response.status_code == 200:
+                    return response.json()
+            except Exception as e:
+                continue
+        return None
+
+    def get_bootstrap_node_list(self, filters: Optional[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
+        """Get registered nodes from bootstrap server"""
+        for bootstrap_url in self.bootstrap_endpoints:
+            try:
+                url = f"{bootstrap_url}/api/v1/nodes/list"
+                if filters:
+                    params = '&'.join(f"{k}={v}" for k, v in filters.items())
+                    url += f"?{params}"
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    return response.json()
+            except Exception as e:
+                continue
+        return None
+
 
 # Convenience functions for quick usage
 

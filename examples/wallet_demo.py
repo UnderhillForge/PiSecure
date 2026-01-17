@@ -62,12 +62,13 @@ def demo_wallet_operations():
     balance1 = wallet1.get_balance()
     balance2 = wallet2.get_balance()
 
-    print(f"   Wallet 1 ({wallet1_id}): {balance1:.2f} tokens")
-    print(f"   Wallet 2 ({wallet2_id}): {balance2:.2f} tokens")
+    print(f"   Wallet 1 ({wallet1_id}): {balance1:.2f} 314ST")
+    print(f"   Wallet 2 ({wallet2_id}): {balance2:.2f} 314ST")
 
     # Create a transfer transaction
     print("\n4. Creating token transfer...")
     transfer_amount = 50.0
+    print(f"   Transferring {transfer_amount} 314ST tokens from Wallet 1 to Wallet 2...")
 
     transaction = wallet1.create_transfer_transaction(wallet2_address, transfer_amount, "Demo transfer")
 
@@ -75,7 +76,7 @@ def demo_wallet_operations():
         print(f"   ✗ Failed to create transfer: {transaction['error']}")
         return
 
-    print(f"   ✓ Created transfer: {transfer_amount} tokens")
+    print(f"   ✓ Created transfer: {transfer_amount} 314ST tokens")
     print(f"     From: {wallet1_address[:20]}...")
     print(f"     To: {wallet2_address[:20]}...")
     print(f"     Signature: {transaction['signature'][:20]}...")
@@ -112,8 +113,8 @@ def demo_wallet_operations():
     final_balance1 = wallet1.get_balance()
     final_balance2 = blockchain.get_wallet_balance(wallet2_address)  # Get from blockchain
 
-    print(f"   Wallet 1 ({wallet1_id}): {final_balance1:.2f} tokens")
-    print(f"   Wallet 2 ({wallet2_id}): {final_balance2:.2f} tokens")
+    print(f"   Wallet 1 ({wallet1_id}): {final_balance1:.2f} 314ST")
+    print(f"   Wallet 2 ({wallet2_id}): {final_balance2:.2f} 314ST")
 
     # Show transaction history
     print("\n7. Wallet 1 transaction history:")
@@ -122,7 +123,7 @@ def demo_wallet_operations():
     if history:
         for tx in history[-3:]:  # Show last 3 transactions
             direction = "→ OUT" if tx['direction'] == 'outgoing' else "← IN"
-            print(f"   {direction} {tx['amount']:.2f} tokens (Block #{tx['block_index']})")
+            print(f"   {direction} {tx['amount']:.2f} 314ST (Block #{tx['block_index']})")
     else:
         print("   No transactions found")
 
@@ -141,7 +142,7 @@ def demo_wallet_operations():
         print(f"   ✗ Failed to create batch transfer: {batch_tx['error']}")
         return
 
-    print(f"   ✓ Created batch transfer: {batch_tx['transfer_count']} transfers, {batch_tx['total_amount']} total tokens")
+    print(f"   ✓ Created batch transfer: {batch_tx['transfer_count']} transfers, {batch_tx['total_amount']} total 314ST")
 
     # Submit batch transaction
     try:
@@ -178,7 +179,7 @@ def demo_wallet_cli():
         "# Check balances",
         "pisecure show-wallet",
         "",
-        "# Transfer tokens",
+        "# Transfer 314ST tokens",
         "pisecure transfer-tokens <wallet2_address> 50 --from-wallet 'demo_wallet_1'",
         "",
         "# View history",

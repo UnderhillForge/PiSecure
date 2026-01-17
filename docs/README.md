@@ -21,7 +21,7 @@ PiSecure is a decentralized security framework built on blockchain technology, s
 
 ```bash
 # Install PiSecure automatically
-curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/scripts/install.sh | bash
 
 # Access dashboard
 # Visit: http://pisecure-node-xxxxx.local

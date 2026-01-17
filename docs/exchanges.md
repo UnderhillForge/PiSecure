@@ -11,10 +11,11 @@ PiSecure offers **unparalleled advantages** for cryptocurrency exchanges through
 - **Atomic swaps** eliminate intermediary risk and settlement failures
 - **Hash-locked transactions** provide cryptographic settlement guarantees
 
-### 🏢 **Exchange Mining Rewards Program**
-- **2x mining rewards** for exchanges running infrastructure nodes
-- **Financial incentives** for network participation and security
-- **Automatic detection** and rewarding of exchange infrastructure
+### 🏢 **Validator Rewards Program**
+- **API service fees** from high-volume trading platforms
+- **Staking incentives** for providing network stability
+- **Block validation bonuses** for consensus participation
+- **Governance rewards** for network decision-making
 
 ### 🛡️ **Built-in Regulatory Compliance**
 - **Automated KYC/AML** with configurable risk thresholds
@@ -52,21 +53,28 @@ PiSecure offers **unparalleled advantages** for cryptocurrency exchanges through
 
 ## 🔧 Technical Implementation Details
 
-### Exchange Mining Rewards Integration
+### Validator Rewards Integration
 
 **Automatic Infrastructure Detection:**
 ```python
-from pisecure.core.blockchain import SignChain
+from pisecure.core.validator_rewards import ValidatorRewardsManager, ValidatorTier
 
-# Exchanges automatically detected and rewarded 2x
-blockchain = SignChain()
-blockchain.register_exchange_node("your-exchange-id")
+# Register exchange as premium validator
+rewards_manager = ValidatorRewardsManager()
+profile = rewards_manager.register_validator(
+    node_id="exchange-main-node",
+    wallet_address="exchange_wallet_address",
+    tier=ValidatorTier.PREMIUM,
+    initial_stake=10000.0,
+    services=["api", "validation", "governance"]
+)
 ```
 
 **Reward Calculation:**
-- Base mining reward: 50 314ST per block
-- Exchange infrastructure bonus: +100 314ST per block
-- Total: 150 314ST per block for exchange nodes
+- API service fees: 0.01-0.20 314ST per call (tier-based)
+- Block validation bonuses: 0.5-3.0 314ST per block
+- Staking rewards: 8% base APY with performance bonuses
+- Governance participation: 1-25 314ST for proposals/voting
 
 ### Instant Cross-Exchange Settlements
 

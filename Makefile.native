@@ -1,0 +1,39 @@
+# PiHash Native Extensions Makefile
+# Quick commands for building and testing native acceleration
+
+.PHONY: help build-native clean-native test-native install-native-deps benchmark
+
+help:
+@echo "PiHash Native Extensions"
+@echo "========================"
+@echo ""
+@echo "Commands:"
+@echo "  make install-native-deps  - Install Cython and NumPy"
+@echo "  make build-native         - Build native extensions"
+@echo "  make clean-native         - Remove build artifacts"
+@echo "  make test-native          - Test native extensions"
+@echo "  make benchmark            - Benchmark native vs Python"
+@echo ""
+
+install-native-deps:
+pip install cython numpy
+
+build-native: install-native-deps
+python pisecure/core/build_pihash_native.py
+
+clean-native:
+python pisecure/core/build_pihash_native.py --clean
+rm -f pisecure/core/_pihash_native.c
+rm -f pisecure/core/_pihash_native*.so
+rm -f pisecure/core/_pihash_native*.html
+rm -rf build/
+
+test-native: build-native
+PISECURE_MOCK_HARDWARE=1 python -c "from pisecure.core import pihash; \
+print('Native available:', pihash.NATIVE_AVAILABLE)"
+
+benchmark: build-native
+@echo "Running benchmark..."
+@python -c "from pisecure.core._pihash_native import benchmark_native; \
+import json; print(json.dumps(benchmark_native(), indent=2))"
+

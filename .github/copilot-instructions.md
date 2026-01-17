@@ -56,7 +56,7 @@ blockchain = SignChain(use_hybrid_storage=False)  # Force JSON only
 
 **Storage Components:**
 - **Block Files** (`blk*.dat`): Raw binary blockchain data
-- **SQLite Database** (`index.db`): Block index, UTXO set, metadata
+- **SQLite Database** (`pisecure.db`): Block index, UTXO set, metadata
 - **Memory Cache**: Frequently accessed data
 
 **CLI Usage:**

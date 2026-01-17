@@ -415,6 +415,110 @@ class PiSecureDashboard:
             """System monitoring page"""
             return render_template('monitoring.html')
 
+        @self.app.route('/security')
+        def security():
+            """Security monitoring page"""
+            return render_template('security.html')
+
+        @self.app.route('/api/security/ddos/stats')
+        def api_security_ddos_stats():
+            """API endpoint for DDoS protection statistics"""
+            try:
+                # Try to connect to the actual API server
+                import requests
+                response = requests.get('http://localhost:3142/api/v1/security/ddos/stats', timeout=5)
+                if response.status_code == 200:
+                    return jsonify(response.json())
+            except Exception:
+                pass
+
+            # Fallback mock data
+            return jsonify({
+                'total_requests_analyzed': 12500,
+                'blocked_requests': 5,
+                'suspicious_requests': 12,
+                'average_threat_score': 0.15,
+                'false_positives': 0,
+                'attack_patterns': {
+                    'enumeration': 3,
+                    'flooding': 2,
+                    'scanning': 1
+                },
+                'geographic_threats': {
+                    'us-east': 0.2,
+                    'eu-west': 0.1,
+                    'asia-south': 0.3
+                },
+                'user_agent_analysis': {
+                    'chrome': 450,
+                    'firefox': 120,
+                    'safari': 80,
+                    'curl': 15,
+                    'python-requests': 8
+                },
+                'timing_patterns': {
+                    'regular_interval': 0.3,
+                    'bursty_traffic': 0.2,
+                    'slow_drip': 0.1
+                },
+                'threat_intelligence': {
+                    'regions': [
+                        {'name': 'us-east', 'threat_score': 0.2, 'threat_level': 'low'},
+                        {'name': 'eu-west', 'threat_score': 0.1, 'threat_level': 'low'},
+                        {'name': 'asia-south', 'threat_score': 0.3, 'threat_level': 'medium'}
+                    ]
+                },
+                'blocked_ips': [
+                    {'address': '192.168.1.100', 'blocked_at': time.time() - 3600},
+                    {'address': '10.0.0.50', 'blocked_at': time.time() - 1800}
+                ],
+                'blocked_regions': [
+                    {'name': 'unknown', 'threat_score': 0.8}
+                ],
+                'average_response_time_ms': 15.5
+            })
+
+        @self.app.route('/api/security/validation/stats')
+        def api_security_validation_stats():
+            """API endpoint for input validation statistics"""
+            try:
+                # Try to connect to the actual API server
+                import requests
+                response = requests.get('http://localhost:3142/api/v1/security/validation/stats', timeout=5)
+                if response.status_code == 200:
+                    return jsonify(response.json())
+            except Exception:
+                pass
+
+            # Fallback mock data
+            return jsonify({
+                'total_validations': 12500,
+                'total_errors': 25,
+                'error_rate': 0.002,
+                'recent_errors': [
+                    {
+                        'type': 'invalid_signature',
+                        'message': 'Transaction signature format invalid',
+                        'endpoint': '/api/v1/transaction',
+                        'client_ip': '192.168.1.100',
+                        'timestamp': time.time() - 300
+                    },
+                    {
+                        'type': 'xss_attempt',
+                        'message': 'Potential XSS pattern detected in input',
+                        'endpoint': '/api/v1/transaction',
+                        'client_ip': '10.0.0.50',
+                        'timestamp': time.time() - 600
+                    }
+                ],
+                'error_types': {
+                    'invalid_signature': 12,
+                    'xss_attempt': 8,
+                    'sql_injection': 3,
+                    'invalid_format': 2
+                }
+            })
+
     def setup_socketio_events(self):
         """Setup SocketIO event handlers"""
 

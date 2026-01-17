@@ -1,0 +1,48 @@
+# MANIFEST.in - Include additional files in source distribution
+# This ensures all necessary files are included when building/distributing
+
+# Documentation
+include README.md
+include README_detailed.md
+include LICENSE
+include CHANGELOG.md
+
+# Configuration files
+include pyproject.toml
+include setup.py
+include requirements.txt
+include requirements-dev.txt
+include Makefile
+include Makefile.native
+recursive-include pisecure/blockchain *.json
+recursive-include pisecure/trusted_keys *
+recursive-include config *.json
+
+# Native extension source (Cython)
+include pisecure/core/_pihash_native.pyx
+include pisecure/core/setup_pihash.py
+include pisecure/core/build_pihash_native.py
+
+# Documentation and examples
+recursive-include docs *.md *.rst *.txt
+recursive-include examples *.py *.md
+
+# Scripts
+recursive-include scripts *.py *.sh
+
+# Exclude compiled/generated files
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude *.pyd
+global-exclude __pycache__
+global-exclude *.so
+global-exclude *.dll
+global-exclude *.dylib
+global-exclude .DS_Store
+global-exclude *.egg-info
+
+# Exclude test files from distribution
+prune tests
+prune .git
+prune .github
+prune pisecure_env

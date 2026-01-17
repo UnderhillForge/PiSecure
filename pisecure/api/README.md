@@ -1,6 +1,6 @@
 # PiSecure Developer API
 
-The PiSecure Developer API provides platform-independent access to the PiSecure blockchain network. Developers can integrate blockchain functionality into their applications without running mining nodes or PiSecure servers locally.
+The PiSecure Developer API provides platform-independent access to the PiSecure blockchain network, which uses the custom PiHash mining algorithm exclusive to Raspberry Pi hardware. Developers can integrate blockchain functionality into their applications without running mining nodes or PiSecure servers locally.
 
 ## 🚀 Quick Start
 

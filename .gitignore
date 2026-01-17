@@ -109,6 +109,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+pisecure_env/
 
 # Spyder project settings
 .spyderproject
@@ -200,3 +201,6 @@ Thumbs.db
 *.tmp
 *.temp
 .cache/
+
+# Personal notes
+tests/compile-algorithm.md

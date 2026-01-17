@@ -23,7 +23,10 @@ import time
 import json
 import hashlib
 import threading
-from flask import Flask, request, jsonify
+import re
+import ssl
+import os
+from flask import Flask, request, jsonify, abort
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -43,6 +46,115 @@ from .economics import (
     TokenEconomics, DeveloperTrust, TrustType, TrustVisibility,
     token_economics, fee_distributor, foundation_trust, get_foundation_trust
 )
+from .validation import (
+    validate_request, ValidationError, safe_error_response,
+    log_security_event, validate_wallet_address, validate_transaction_hash,
+    validate_name, validate_amount, sanitize_string
+)
+from .ddos_protection import ddos_protection, request_fingerprinting
+from .audit_logger import AuditLogMiddleware, log_security_event, AuditEventType
+
+# Security Headers Middleware
+class SecurityHeadersMiddleware:
+    """
+    OWASP-compliant security headers middleware for Flask applications.
+
+    Implements comprehensive security headers to protect against common web vulnerabilities:
+    - Content Security Policy (CSP)
+    - HTTP Strict Transport Security (HSTS)
+    - X-Frame-Options (Clickjacking protection)
+    - X-Content-Type-Options (MIME sniffing protection)
+    - Referrer-Policy
+    - Permissions-Policy
+    - Cross-Origin policies
+    """
+
+    def __init__(self, app, csp_policy: str = None, hsts_max_age: int = 31536000):
+        """
+        Initialize security headers middleware.
+
+        Args:
+            app: Flask application instance
+            csp_policy: Custom Content Security Policy string
+            hsts_max_age: HSTS max-age in seconds (default: 1 year)
+        """
+        self.app = app
+        self.csp_policy = csp_policy or self._get_default_csp()
+        self.hsts_max_age = hsts_max_age
+
+        # Register middleware
+        self.app.after_request(self.add_security_headers)
+
+    def _get_default_csp(self) -> str:
+        """
+        Get default Content Security Policy for PiSecure dashboard.
+
+        Returns:
+            CSP policy string
+        """
+        return (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.socket.io; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self' wss: https:; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'; "
+            "upgrade-insecure-requests;"
+        )
+
+    def add_security_headers(self, response):
+        """
+        Add comprehensive security headers to response.
+
+        Args:
+            response: Flask response object
+
+        Returns:
+            Modified response with security headers
+        """
+        # Content Security Policy
+        response.headers['Content-Security-Policy'] = self.csp_policy
+
+        # HTTP Strict Transport Security (HSTS)
+        response.headers['Strict-Transport-Security'] = f'max-age={self.hsts_max_age}; includeSubDomains; preload'
+
+        # Prevent clickjacking
+        response.headers['X-Frame-Options'] = 'DENY'
+
+        # Prevent MIME type sniffing
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+
+        # Referrer Policy
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+
+        # Permissions Policy (formerly Feature Policy)
+        response.headers['Permissions-Policy'] = (
+            'camera=(), microphone=(), geolocation=(), gyroscope=(), '
+            'magnetometer=(), payment=(), usb=()'
+        )
+
+        # Cross-Origin Embedder Policy (COEP)
+        response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
+
+        # Cross-Origin Opener Policy (COOP)
+        response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+
+        # Cross-Origin Resource Policy (CORP)
+        response.headers['Cross-Origin-Resource-Policy'] = 'same-origin'
+
+        # DNS prefetch control
+        response.headers['X-DNS-Prefetch-Control'] = 'off'
+
+        # Prevent caching of sensitive content
+        if response.status_code >= 400:
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+
+        return response
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -82,12 +194,25 @@ class BlockchainAPI:
         if enable_cors:
             CORS(self.app)
 
-        # Initialize rate limiter
+        # Initialize dynamic rate limiter with bootstrap intelligence
         self.limiter = Limiter(
             get_remote_address,
             app=self.app,
             default_limits=[rate_limit]
         )
+
+        # Dynamic rate limiting configuration
+        self.dynamic_rate_limiting = True
+        self.base_rate_limit = rate_limit
+        self.current_rate_limit = rate_limit
+        self.rate_limit_check_interval = 300  # Check every 5 minutes
+        self.last_rate_limit_update = 0
+
+        # Request queuing for high load periods
+        self.request_queue_enabled = True
+        self.max_queued_requests = 100
+        self.request_queue = []
+        self.queue_processing_thread = None
 
         # API metadata (must be set before routes)
         self.api_version = "v1"
@@ -102,6 +227,71 @@ class BlockchainAPI:
 
         # Setup routes
         self._setup_routes()
+
+        # Setup DDoS protection middleware
+        self._setup_ddos_protection()
+
+        # Setup security headers middleware
+        self._setup_security_headers()
+
+        # Setup audit logging middleware
+        self._setup_audit_logging()
+
+    def _setup_security_headers(self):
+        """Setup comprehensive security headers middleware"""
+        # Initialize security headers middleware
+        SecurityHeadersMiddleware(self.app)
+        logger.info("🛡️ Security headers middleware initialized")
+
+    def _setup_audit_logging(self):
+        """Setup comprehensive audit logging middleware"""
+        # Initialize audit logging middleware
+        AuditLogMiddleware(self.app)
+        logger.info("📋 Audit logging middleware initialized")
+
+        # Add DDoS protection before request hook
+        @self.app.before_request
+        def check_ddos_protection():
+            """Check request against DDoS protection before processing"""
+            try:
+                # Skip DDoS checks for health endpoint to prevent false positives
+                if request.endpoint and 'health' in request.endpoint:
+                    return
+
+                # Check request against DDoS protection
+                check_result = ddos_protection.check_request(
+                    ip_address=request.remote_addr,
+                    endpoint=request.path,
+                    user_agent=request.headers.get('User-Agent', ''),
+                    request_data=request.get_json(silent=True) if request.is_json else None
+                )
+
+                if not check_result.get('allowed', True):
+                    # Request blocked by DDoS protection
+                    logger.warning(f"🚫 DDoS protection blocked request from {request.remote_addr}: {check_result.get('reason', 'unknown')}")
+                    abort(429, "Too many requests")
+
+                # Apply delay if specified
+                delay = check_result.get('delay', 0)
+                if delay > 0:
+                    import time
+                    time.sleep(min(delay, 5.0))  # Max 5 second delay
+
+                # Create fingerprint for advanced analysis
+                fingerprint = request_fingerprinting.fingerprint_request(
+                    ip=request.remote_addr,
+                    method=request.method,
+                    endpoint=request.path,
+                    user_agent=request.headers.get('User-Agent', ''),
+                    headers=dict(request.headers)
+                )
+
+                # Store fingerprint in request context for potential logging
+                request.fingerprint = fingerprint
+
+            except Exception as e:
+                logger.error(f"DDoS protection check failed: {e}")
+                # Don't block requests if DDoS check fails - fail open for safety
 
     def _setup_routes(self):
         """Setup all API routes."""
@@ -193,19 +383,39 @@ class BlockchainAPI:
         @self.app.route(f'/api/{self.api_version}/transaction', methods=['POST'])
         def submit_transaction():
             try:
-                tx_data = request.get_json()
+                # Validate request data
+                validated_data = validate_request('transaction')
+                tx_data = validated_data if validated_data else request.get_json()
 
                 if not tx_data:
                     return jsonify({'error': 'No transaction data provided'}), 400
 
-                # Validate transaction structure
-                required_fields = ['type', 'data', 'signature', 'timestamp']
-                for field in required_fields:
-                    if field not in tx_data:
-                        return jsonify({'error': f'Missing required field: {field}'}), 400
+                # Additional validation for transaction data
+                if not isinstance(tx_data.get('data'), dict):
+                    return jsonify({'error': 'Transaction data must be an object'}), 400
+
+                # Validate signature format (should be hex)
+                signature = tx_data.get('signature', '')
+                if not re.match(r'^[a-fA-F0-9]{128,}$', signature):  # At least 128 hex chars
+                    return jsonify({'error': 'Invalid signature format'}), 400
+
+                # Validate timestamp (not too old, not too far in future)
+                timestamp = tx_data.get('timestamp', 0)
+                current_time = time.time()
+                if timestamp < current_time - 3600:  # Older than 1 hour
+                    return jsonify({'error': 'Transaction too old'}), 400
+                if timestamp > current_time + 300:  # More than 5 minutes in future
+                    return jsonify({'error': 'Transaction timestamp too far in future'}), 400
 
                 # Add transaction to blockchain
                 tx_hash = self.blockchain.add_transaction(tx_data)
+
+                # Log successful transaction for security monitoring
+                log_security_event('transaction_submitted', {
+                    'tx_hash': tx_hash,
+                    'tx_type': tx_data.get('type'),
+                    'timestamp': timestamp
+                })
 
                 # Trigger network discovery after transaction submission
                 try:
@@ -221,8 +431,16 @@ class BlockchainAPI:
                     'status': 'submitted'
                 })
 
+            except ValidationError as e:
+                log_security_event('validation_error', {
+                    'endpoint': 'transaction',
+                    'error': str(e),
+                    'client_ip': request.remote_addr
+                }, 'warning')
+                return jsonify(safe_error_response(str(e), 400)), 400
             except Exception as e:
-                return jsonify({'error': str(e)}), 500
+                logger.error(f"Transaction submission error: {e}")
+                return jsonify(safe_error_response('Transaction submission failed', 500)), 500
 
         # Create wallet
         @self.app.route(f'/api/{self.api_version}/wallet', methods=['POST'])
@@ -966,6 +1184,11 @@ class BlockchainAPI:
                 # Get verified active peers for bootstrapping
                 bootstrap_peers = self._get_verified_bootstrap_peers()
 
+                # If no local verified peers, try external bootstrap servers
+                if not bootstrap_peers:
+                    logger.debug("No local verified peers, trying external bootstrap servers...")
+                    bootstrap_peers = self._get_fallback_bootstrap_peers()
+
                 # Add this node as a bootstrap reference
                 bootstrap_info = {
                     'peers': bootstrap_peers,
@@ -982,13 +1205,15 @@ class BlockchainAPI:
                         'genesis_hash': self.blockchain.chain[0].hash if self.blockchain.chain else None
                     },
                     'last_updated': time.time(),
-                    'ttl': 300  # Cache for 5 minutes
+                    'ttl': 300,  # Cache for 5 minutes
+                    'fallback_used': len(bootstrap_peers) == 0  # Indicate if fallbacks were used
                 }
 
                 return jsonify(bootstrap_info)
 
             except Exception as e:
-                return jsonify({'error': str(e)}), 500
+                logger.error(f"Bootstrap peer discovery error: {e}")
+                return jsonify({'error': 'Peer discovery temporarily unavailable'}), 503
 
         # Network statistics (public dashboard)
         @self.app.route(f'/api/{self.api_version}/network/stats', methods=['GET'])
@@ -1169,6 +1394,151 @@ class BlockchainAPI:
                     'status': 'reported',
                     'intelligence_processed': True,
                     'insights': intelligence_insights
+                })
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Get miner status and intelligence data
+        @self.app.route(f'/api/{self.api_version}/nodes/status', methods=['GET'])
+        def get_miner_status():
+            """Get comprehensive miner status and network intelligence for dashboard"""
+            try:
+                # Get query parameters
+                hours_back = float(request.args.get('hours', 1))  # Default last 1 hour
+                include_intelligence = request.args.get('intelligence', 'true').lower() == 'true'
+
+                current_time = time.time()
+                cutoff_time = current_time - (hours_back * 3600)
+
+                # Aggregate miner status data
+                active_miners = []
+                total_hashrate = 0.0
+                total_blocks_mined = 0
+                miners_by_location = {}
+                miners_by_hardware = {}
+
+                if hasattr(self, 'miner_status_reports'):
+                    for node_id, reports in self.miner_status_reports.items():
+                        # Get most recent report within time window
+                        recent_reports = [r for r in reports if r['reported_at'] >= cutoff_time]
+                        if recent_reports:
+                            latest_report = recent_reports[-1]
+
+                            miner_data = {
+                                'node_id': node_id,
+                                'mining_active': latest_report['mining_active'],
+                                'hashrate': latest_report['hashrate'],
+                                'blocks_mined': latest_report['blocks_mined'],
+                                'temperature': latest_report['temperature'],
+                                'memory_usage': latest_report['memory_usage'],
+                                'location': latest_report['location'],
+                                'hardware_model': latest_report['hardware_model'],
+                                'wallet_address': latest_report['wallet_address'],
+                                'last_report': latest_report['reported_at'],
+                                'network_metrics': latest_report['network_metrics'],
+                                'system_health': latest_report['system_health']
+                            }
+
+                            active_miners.append(miner_data)
+
+                            if latest_report['mining_active']:
+                                total_hashrate += latest_report['hashrate']
+                                total_blocks_mined += latest_report['blocks_mined']
+
+                            # Aggregate by location
+                            location = latest_report['location']
+                            if location not in miners_by_location:
+                                miners_by_location[location] = []
+                            miners_by_location[location].append(miner_data)
+
+                            # Aggregate by hardware
+                            hardware = latest_report['hardware_model']
+                            if hardware not in miners_by_hardware:
+                                miners_by_hardware[hardware] = []
+                            miners_by_hardware[hardware].append(miner_data)
+
+                # Prepare response
+                response_data = {
+                    'time_window_hours': hours_back,
+                    'total_active_miners': len(active_miners),
+                    'mining_miners': len([m for m in active_miners if m['mining_active']]),
+                    'total_network_hashrate': total_hashrate,
+                    'total_blocks_mined_recently': total_blocks_mined,
+                    'miners': active_miners,
+                    'aggregation': {
+                        'by_location': {
+                            location: {
+                                'count': len(miners),
+                                'total_hashrate': sum(m['hashrate'] for m in miners if m['mining_active']),
+                                'avg_temperature': sum(m['temperature'] for m in miners if m['temperature']) / len([m for m in miners if m['temperature']]) if any(m['temperature'] for m in miners) else 0
+                            }
+                            for location, miners in miners_by_location.items()
+                        },
+                        'by_hardware': {
+                            hardware: {
+                                'count': len(miners),
+                                'total_hashrate': sum(m['hashrate'] for m in miners if m['mining_active']),
+                                'models': list(set(m['hardware_model'] for m in miners))
+                            }
+                            for hardware, miners in miners_by_hardware.items()
+                        }
+                    }
+                }
+
+                # Add intelligence data if requested
+                if include_intelligence:
+                    response_data['intelligence'] = self._get_miner_intelligence(hours_back)
+
+                return jsonify(response_data)
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        # Get registered nodes (dashboard endpoint)
+        @self.app.route(f'/api/{self.api_version}/nodes', methods=['GET'])
+        def get_registered_nodes():
+            """Get list of registered nodes for dashboard"""
+            try:
+                if not hasattr(self, 'registered_nodes'):
+                    return jsonify({'nodes': [], 'total': 0})
+
+                current_time = time.time()
+                active_nodes = []
+                inactive_nodes = []
+
+                for node_id, node_info in self.registered_nodes.items():
+                    last_seen = node_info.get('last_seen', 0)
+                    is_active = current_time - last_seen < 3600  # Active within 1 hour
+
+                    node_data = {
+                        'node_id': node_id,
+                        'address': node_info.get('address'),
+                        'port': node_info.get('port'),
+                        'capabilities': node_info.get('capabilities', []),
+                        'hashrate': node_info.get('hashrate', 0),
+                        'location': node_info.get('location', 'unknown'),
+                        'is_mining': node_info.get('is_mining', False),
+                        'registered_at': node_info.get('registered_at'),
+                        'last_seen': last_seen,
+                        'version': node_info.get('version', 'unknown'),
+                        'status': 'active' if is_active else 'inactive'
+                    }
+
+                    if is_active:
+                        active_nodes.append(node_data)
+                    else:
+                        inactive_nodes.append(node_data)
+
+                # Sort by last seen (most recent first)
+                active_nodes.sort(key=lambda x: x['last_seen'], reverse=True)
+                inactive_nodes.sort(key=lambda x: x['last_seen'], reverse=True)
+
+                return jsonify({
+                    'nodes': active_nodes + inactive_nodes,
+                    'total': len(self.registered_nodes),
+                    'active': len(active_nodes),
+                    'inactive': len(inactive_nodes)
                 })
 
             except Exception as e:
@@ -1641,153 +2011,6 @@ class BlockchainAPI:
             recommendations.append("Low geographic diversity - consider expanding to more regions")
 
         return recommendations
-
-            except Exception as e:
-                return jsonify({'error': str(e)}), 500
-
-        # Get miner status and intelligence data
-        @self.app.route(f'/api/{self.api_version}/nodes/status', methods=['GET'])
-        def get_miner_status():
-            """Get comprehensive miner status and network intelligence for dashboard"""
-            try:
-                # Get query parameters
-                hours_back = float(request.args.get('hours', 1))  # Default last 1 hour
-                include_intelligence = request.args.get('intelligence', 'true').lower() == 'true'
-
-                current_time = time.time()
-                cutoff_time = current_time - (hours_back * 3600)
-
-                # Aggregate miner status data
-                active_miners = []
-                total_hashrate = 0.0
-                total_blocks_mined = 0
-                miners_by_location = {}
-                miners_by_hardware = {}
-
-                if hasattr(self, 'miner_status_reports'):
-                    for node_id, reports in self.miner_status_reports.items():
-                        # Get most recent report within time window
-                        recent_reports = [r for r in reports if r['reported_at'] >= cutoff_time]
-                        if recent_reports:
-                            latest_report = recent_reports[-1]
-
-                            miner_data = {
-                                'node_id': node_id,
-                                'mining_active': latest_report['mining_active'],
-                                'hashrate': latest_report['hashrate'],
-                                'blocks_mined': latest_report['blocks_mined'],
-                                'temperature': latest_report['temperature'],
-                                'memory_usage': latest_report['memory_usage'],
-                                'location': latest_report['location'],
-                                'hardware_model': latest_report['hardware_model'],
-                                'wallet_address': latest_report['wallet_address'],
-                                'last_report': latest_report['reported_at'],
-                                'network_metrics': latest_report['network_metrics'],
-                                'system_health': latest_report['system_health']
-                            }
-
-                            active_miners.append(miner_data)
-
-                            if latest_report['mining_active']:
-                                total_hashrate += latest_report['hashrate']
-                                total_blocks_mined += latest_report['blocks_mined']
-
-                            # Aggregate by location
-                            location = latest_report['location']
-                            if location not in miners_by_location:
-                                miners_by_location[location] = []
-                            miners_by_location[location].append(miner_data)
-
-                            # Aggregate by hardware
-                            hardware = latest_report['hardware_model']
-                            if hardware not in miners_by_hardware:
-                                miners_by_hardware[hardware] = []
-                            miners_by_hardware[hardware].append(miner_data)
-
-                # Prepare response
-                response_data = {
-                    'time_window_hours': hours_back,
-                    'total_active_miners': len(active_miners),
-                    'mining_miners': len([m for m in active_miners if m['mining_active']]),
-                    'total_network_hashrate': total_hashrate,
-                    'total_blocks_mined_recently': total_blocks_mined,
-                    'miners': active_miners,
-                    'aggregation': {
-                        'by_location': {
-                            location: {
-                                'count': len(miners),
-                                'total_hashrate': sum(m['hashrate'] for m in miners if m['mining_active']),
-                                'avg_temperature': sum(m['temperature'] for m in miners if m['temperature']) / len([m for m in miners if m['temperature']]) if any(m['temperature'] for m in miners) else 0
-                            }
-                            for location, miners in miners_by_location.items()
-                        },
-                        'by_hardware': {
-                            hardware: {
-                                'count': len(miners),
-                                'total_hashrate': sum(m['hashrate'] for m in miners if m['mining_active']),
-                                'models': list(set(m['hardware_model'] for m in miners))
-                            }
-                            for hardware, miners in miners_by_hardware.items()
-                        }
-                    }
-                }
-
-                # Add intelligence data if requested
-                if include_intelligence:
-                    response_data['intelligence'] = self._get_miner_intelligence(hours_back)
-
-                return jsonify(response_data)
-
-            except Exception as e:
-                return jsonify({'error': str(e)}), 500
-
-        # Get registered nodes (dashboard endpoint)
-        @self.app.route(f'/api/{self.api_version}/nodes', methods=['GET'])
-        def get_registered_nodes():
-            """Get list of registered nodes for dashboard"""
-            try:
-                if not hasattr(self, 'registered_nodes'):
-                    return jsonify({'nodes': [], 'total': 0})
-
-                current_time = time.time()
-                active_nodes = []
-                inactive_nodes = []
-
-                for node_id, node_info in self.registered_nodes.items():
-                    last_seen = node_info.get('last_seen', 0)
-                    is_active = current_time - last_seen < 3600  # Active within 1 hour
-
-                    node_data = {
-                        'node_id': node_id,
-                        'address': node_info.get('address'),
-                        'port': node_info.get('port'),
-                        'capabilities': node_info.get('capabilities', []),
-                        'hashrate': node_info.get('hashrate', 0),
-                        'location': node_info.get('location', 'unknown'),
-                        'is_mining': node_info.get('is_mining', False),
-                        'registered_at': node_info.get('registered_at'),
-                        'last_seen': last_seen,
-                        'version': node_info.get('version', 'unknown'),
-                        'status': 'active' if is_active else 'inactive'
-                    }
-
-                    if is_active:
-                        active_nodes.append(node_data)
-                    else:
-                        inactive_nodes.append(node_data)
-
-                # Sort active nodes by last seen (most recent first)
-                active_nodes.sort(key=lambda x: x['last_seen'], reverse=True)
-
-                return jsonify({
-                    'nodes': active_nodes + inactive_nodes,
-                    'total': len(self.registered_nodes),
-                    'active': len(active_nodes),
-                    'inactive': len(inactive_nodes)
-                })
-
-            except Exception as e:
-                return jsonify({'error': str(e)}), 500
 
         # === MINING ENDPOINTS ===
 
@@ -2317,6 +2540,34 @@ class BlockchainAPI:
             logger.error(f"Failed to get verified bootstrap peers: {e}")
             return []
 
+    def _get_fallback_bootstrap_peers(self) -> List[Dict[str, Any]]:
+        """Get fallback peers from external bootstrap servers"""
+        fallback_peers = []
+
+        # Try external bootstrap servers
+        bootstrap_urls = [
+            "https://bootstrap.pisecure.org/api/v1/bootstrap/peers",
+            "https://pisecure-bootstrap-production.up.railway.app/api/v1/bootstrap/peers"
+        ]
+
+        for url in bootstrap_urls:
+            try:
+                import requests
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    peers = data.get('peers', [])
+                    if peers:
+                        fallback_peers.extend(peers[:10])  # Limit to 10 peers per server
+                        logger.debug(f"Got {len(peers)} peers from {url}")
+                        break  # Found working peers
+            except Exception as e:
+                logger.debug(f"Failed to get peers from {url}: {e}")
+                continue
+
+        logger.info(f"Retrieved {len(fallback_peers)} fallback bootstrap peers")
+        return fallback_peers
+
     def _calculate_network_stats(self) -> Dict[str, Any]:
         """Calculate comprehensive network statistics"""
         try:
@@ -2468,15 +2719,43 @@ class BlockchainAPI:
                 'distribution': {}
             }
 
-    def run(self, debug: bool = False):
+    def run(self, debug: bool = False, ssl_enabled: str = "auto", ssl_cert: str = None, ssl_key: str = None):
         """
         Start the API server with automatic network discovery and P2P sync.
 
         Args:
             debug: Enable debug mode
+            ssl_enabled: SSL mode - "auto", "force", "disable", or "optional"
+            ssl_cert: Path to SSL certificate file
+            ssl_key: Path to SSL private key file
         """
-        logger.info(f"🚀 Starting PiSecure API Server on {self.host}:{self.port}")
-        logger.info(f"📚 API Documentation: http://{self.host}:{self.port}/api/{self.api_version}/docs")
+        # Determine SSL requirement based on configuration and environment
+        ssl_required, ssl_reason = self._determine_ssl_requirement(ssl_enabled)
+
+        # Setup SSL/TLS encryption
+        ssl_context = None
+        protocol = "http"
+
+        if ssl_required:
+            try:
+                ssl_context = self._setup_ssl_context(ssl_cert, ssl_key)
+                protocol = "https"
+                logger.info(f"🔒 SSL/TLS encryption enabled - {ssl_reason}")
+            except Exception as e:
+                if ssl_enabled == "force":
+                    logger.error(f"❌ SSL is required but setup failed: {e}")
+                    logger.error("Cannot start server without SSL in force mode")
+                    return
+                else:
+                    logger.warning(f"⚠️ SSL setup failed: {e}")
+                    logger.warning("🔓 Falling back to HTTP - not recommended for public access")
+                    ssl_context = None
+                    protocol = "http"
+        else:
+            logger.info(f"🔓 HTTP mode enabled - {ssl_reason}")
+
+        logger.info(f"🚀 Starting PiSecure API Server on {protocol}://{self.host}:{self.port}")
+        logger.info(f"📚 API Documentation: {protocol}://{self.host}:{self.port}/api/{self.api_version}/docs")
 
         # Register this node with bootstrap service
         import os
@@ -2500,12 +2779,16 @@ class BlockchainAPI:
         # Start heartbeat reporting
         self._start_heartbeat_reporting()
 
+        # Start dynamic rate limiting
+        self._start_dynamic_rate_limiting()
+
         try:
             self.app.run(
                 host=self.host,
                 port=self.port,
                 debug=debug,
-                threaded=True
+                threaded=True,
+                ssl_context=ssl_context
             )
         finally:
             # Clean up on shutdown
@@ -2513,6 +2796,153 @@ class BlockchainAPI:
             self.p2p_sync.stop_sync()
             if hasattr(self, '_heartbeat_thread'):
                 self._heartbeat_thread.join(timeout=5)
+            if hasattr(self, '_rate_limit_thread'):
+                self._rate_limit_thread.join(timeout=5)
+            if hasattr(self, '_queue_thread'):
+                self._queue_thread.join(timeout=5)
+
+    def _setup_ssl_context(self, cert_path: str = None, key_path: str = None) -> ssl.SSLContext:
+        """
+        Setup SSL/TLS context for HTTPS encryption.
+
+        Args:
+            cert_path: Path to SSL certificate file
+            key_path: Path to SSL private key file
+
+        Returns:
+            SSL context configured for TLS 1.3
+        """
+        # Create SSL context with TLS 1.3 (maximum security)
+        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        context.protocol = ssl.PROTOCOL_TLS
+        context.minimum_version = ssl.TLSVersion.TLSv1_2  # TLS 1.2 minimum for compatibility
+        context.maximum_version = ssl.TLSVersion.TLSv1_3  # TLS 1.3 maximum for security
+
+        # Disable insecure cipher suites
+        context.set_ciphers('ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20')
+
+        # Prefer server cipher order
+        context.options |= ssl.OP_CIPHER_SERVER_PREFERENCE
+
+        # Disable compression (CRIME attack prevention)
+        context.options |= ssl.OP_NO_COMPRESSION
+
+        # Enable session resumption
+        context.options |= ssl.OP_NO_TICKET
+
+        # Load certificate and key
+        if cert_path and key_path:
+            if os.path.exists(cert_path) and os.path.exists(key_path):
+                context.load_cert_chain(cert_path, key_path)
+                logger.info(f"✅ Loaded SSL certificate: {cert_path}")
+            else:
+                raise FileNotFoundError(f"SSL certificate or key file not found: {cert_path}, {key_path}")
+        else:
+            # Generate self-signed certificate for development
+            logger.warning("⚠️ No SSL certificate provided - generating self-signed certificate")
+            context = self._generate_self_signed_cert(context)
+
+        # Verify SSL context is properly configured
+        if not context.certfile:
+            raise ValueError("SSL context not properly configured - no certificate loaded")
+
+        return context
+
+    def _generate_self_signed_cert(self, context: ssl.SSLContext) -> ssl.SSLContext:
+        """
+        Generate a self-signed certificate for development/testing.
+
+        Args:
+            context: SSL context to configure
+
+        Returns:
+            SSL context with self-signed certificate
+        """
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.backends import default_backend
+        import tempfile
+
+        try:
+            # Generate private key
+            private_key = rsa.generate_private_key(
+                public_exponent=65537,
+                key_size=2048,
+                backend=default_backend()
+            )
+
+            # Generate public key
+            public_key = private_key.public_key()
+
+            # Create certificate
+            subject = issuer = x509.Name([
+                x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),
+                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Development"),
+                x509.NameAttribute(NameOID.LOCALITY_NAME, "PiSecure"),
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "PiSecure Foundation"),
+                x509.NameAttribute(NameOID.COMMON_NAME, "pisecure.local"),
+            ])
+
+            cert = x509.CertificateBuilder().subject_name(
+                subject
+            ).issuer_name(
+                issuer
+            ).public_key(
+                public_key
+            ).serial_number(
+                x509.random_serial_number()
+            ).not_valid_before(
+                datetime.utcnow()
+            ).not_valid_after(
+                datetime.utcnow() + timedelta(days=365)
+            ).add_extension(
+                x509.SubjectAlternativeName([
+                    x509.DNSName("localhost"),
+                    x509.DNSName("127.0.0.1"),
+                    x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+                ]),
+                critical=False,
+            ).sign(private_key, hashes.SHA256(), default_backend())
+
+            # Save to temporary files
+            with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pem') as cert_file:
+                cert_pem = cert.public_bytes(serialization.Encoding.PEM)
+                cert_file.write(cert_pem)
+                cert_path = cert_file.name
+
+            with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.key') as key_file:
+                key_pem = private_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption()
+                )
+                key_file.write(key_pem)
+                key_path = key_file.name
+
+            # Load certificate into SSL context
+            context.load_cert_chain(cert_path, key_path)
+
+            # Store paths for cleanup
+            self._ssl_temp_files = [cert_path, key_path]
+
+            logger.warning("🔐 Using self-signed certificate - not suitable for production!")
+            logger.warning("   Consider obtaining a proper certificate from Let's Encrypt or similar")
+
+            return context
+
+        except ImportError:
+            raise ImportError("cryptography library required for SSL certificate generation. Install with: pip install cryptography")
+
+    def _cleanup_ssl_temp_files(self):
+        """Clean up temporary SSL certificate files"""
+        if hasattr(self, '_ssl_temp_files'):
+            for temp_file in self._ssl_temp_files:
+                try:
+                    os.unlink(temp_file)
+                except Exception:
+                    pass
 
     def _register_with_bootstrap(self):
         """Register this node with the bootstrap service on startup"""
@@ -2619,6 +3049,227 @@ class BlockchainAPI:
         except Exception as e:
             logger.error(f"❌ Failed to start heartbeat reporting: {e}")
 
+    def _start_dynamic_rate_limiting(self):
+        """Start dynamic rate limiting based on bootstrap intelligence"""
+        try:
+            if not self.dynamic_rate_limiting:
+                logger.debug("Dynamic rate limiting disabled")
+                return
+
+            # Start rate limiting thread
+            self._rate_limit_thread = threading.Thread(
+                target=self._rate_limit_worker,
+                daemon=True,
+                name="DynamicRateLimiting"
+            )
+            self._rate_limit_thread.start()
+            logger.info("🎛️ Started dynamic rate limiting with bootstrap intelligence")
+
+            # Start request queue processor if enabled
+            if self.request_queue_enabled:
+                self._queue_thread = threading.Thread(
+                    target=self._queue_processor,
+                    daemon=True,
+                    name="RequestQueue"
+                )
+                self._queue_thread.start()
+                logger.info("📋 Started request queue processor")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to start dynamic rate limiting: {e}")
+
+    def _rate_limit_worker(self):
+        """Background worker for dynamic rate limit adjustments"""
+        import time
+
+        while True:
+            try:
+                # Update rate limits based on network intelligence
+                self._update_rate_limits()
+
+                # Sleep until next check
+                time.sleep(self.rate_limit_check_interval)
+
+            except Exception as e:
+                logger.error(f"Rate limit worker error: {e}")
+                time.sleep(60)  # Wait before retry
+
+    def _update_rate_limits(self):
+        """Update rate limits based on bootstrap intelligence"""
+        try:
+            current_time = time.time()
+
+            # Don't update too frequently
+            if current_time - self.last_rate_limit_update < 60:  # Minimum 1 minute between updates
+                return
+
+            # Get network load prediction from bootstrap server
+            load_prediction = self._get_network_load_prediction()
+
+            if load_prediction:
+                # Calculate new rate limit based on prediction
+                new_limit = self._calculate_dynamic_rate_limit(load_prediction)
+                self._apply_rate_limit(new_limit)
+
+                self.last_rate_limit_update = current_time
+                logger.debug(f"🎛️ Updated rate limit to {new_limit} based on network prediction")
+
+            else:
+                # Fallback: adjust based on local metrics
+                self._adjust_rate_limit_locally()
+
+        except Exception as e:
+            logger.error(f"Failed to update rate limits: {e}")
+
+    def _get_network_load_prediction(self) -> Optional[Dict[str, Any]]:
+        """Get network load prediction from bootstrap server"""
+        try:
+            # Try bootstrap servers for load prediction
+            bootstrap_urls = [
+                "https://bootstrap.pisecure.org/api/v1/intelligence/predict",
+                "https://pisecure-bootstrap-production.up.railway.app/api/v1/intelligence/predict"
+            ]
+
+            for url in bootstrap_urls:
+                try:
+                    import requests
+                    response = requests.get(url, timeout=5)
+                    if response.status_code == 200:
+                        prediction = response.json()
+                        logger.debug(f"Got load prediction from {url}")
+                        return prediction
+                except Exception as e:
+                    logger.debug(f"Failed to get prediction from {url}: {e}")
+                    continue
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Network load prediction error: {e}")
+            return None
+
+    def _calculate_dynamic_rate_limit(self, prediction: Dict[str, Any]) -> str:
+        """Calculate dynamic rate limit based on network prediction"""
+        try:
+            # Extract prediction data
+            predicted_connections = prediction.get('predictions', {}).get('predicted_connections', 1000)
+            confidence = prediction.get('confidence', 'medium')
+
+            # Base calculation on predicted connections
+            base_limit = self.base_rate_limit
+
+            # Adjust based on predicted load
+            if predicted_connections > 2000:  # High load
+                adjustment_factor = 0.5  # Reduce to 50% of base
+            elif predicted_connections > 1500:  # Medium-high load
+                adjustment_factor = 0.7  # Reduce to 70% of base
+            elif predicted_connections > 1000:  # Medium load
+                adjustment_factor = 0.9  # Reduce to 90% of base
+            elif predicted_connections < 500:  # Low load
+                adjustment_factor = 1.5  # Increase to 150% of base
+            else:  # Normal load
+                adjustment_factor = 1.0  # Keep at base
+
+            # Adjust based on confidence
+            if confidence == 'high':
+                # More aggressive adjustments with high confidence
+                adjustment_factor *= 1.2 if adjustment_factor < 1.0 else 0.9
+            elif confidence == 'low':
+                # Conservative adjustments with low confidence
+                adjustment_factor = (adjustment_factor + 1.0) / 2  # Move toward 1.0
+
+            # Calculate new limit
+            new_limit = max(10, int(base_limit * adjustment_factor))  # Minimum 10 requests per minute
+
+            return f"{new_limit} per minute"
+
+        except Exception as e:
+            logger.error(f"Failed to calculate dynamic rate limit: {e}")
+            return self.base_rate_limit
+
+    def _adjust_rate_limit_locally(self):
+        """Adjust rate limits based on local server metrics"""
+        try:
+            # Get local system metrics
+            import psutil
+            cpu_percent = psutil.cpu_percent(interval=1)
+            memory_percent = psutil.virtual_memory().percent
+
+            # Calculate adjustment based on local load
+            if cpu_percent > 80 or memory_percent > 85:  # High local load
+                adjustment_factor = 0.6
+            elif cpu_percent > 60 or memory_percent > 70:  # Medium local load
+                adjustment_factor = 0.8
+            elif cpu_percent < 20 and memory_percent < 50:  # Low local load
+                adjustment_factor = 1.3
+            else:  # Normal load
+                adjustment_factor = 1.0
+
+            new_limit = max(10, int(float(self.base_rate_limit.split()[0]) * adjustment_factor))
+            new_limit_str = f"{new_limit} per minute"
+
+            if new_limit_str != self.current_rate_limit:
+                self._apply_rate_limit(new_limit_str)
+                logger.debug(f"🎛️ Updated rate limit to {new_limit_str} based on local metrics")
+
+        except Exception as e:
+            logger.error(f"Failed to adjust rate limit locally: {e}")
+
+    def _apply_rate_limit(self, new_limit: str):
+        """Apply new rate limit to the limiter"""
+        try:
+            # Update the limiter's default limits
+            self.limiter.default_limits = [new_limit]
+            self.current_rate_limit = new_limit
+
+            logger.info(f"🎛️ Applied new rate limit: {new_limit}")
+
+        except Exception as e:
+            logger.error(f"Failed to apply rate limit {new_limit}: {e}")
+
+    def _queue_processor(self):
+        """Process queued requests during high load periods"""
+        import time
+
+        while True:
+            try:
+                # Process queued requests if we have capacity
+                current_load = self._assess_current_load()
+
+                if current_load < 0.8:  # Less than 80% load
+                    requests_to_process = min(len(self.request_queue), 5)  # Process up to 5 at a time
+
+                    for _ in range(requests_to_process):
+                        if self.request_queue:
+                            queued_request = self.request_queue.pop(0)
+                            # In a full implementation, you'd replay the request
+                            logger.debug(f"📋 Processing queued request: {queued_request.get('endpoint', 'unknown')}")
+
+                # Sleep before next check
+                time.sleep(10)  # Check every 10 seconds
+
+            except Exception as e:
+                logger.error(f"Queue processor error: {e}")
+                time.sleep(30)
+
+    def _assess_current_load(self) -> float:
+        """Assess current server load (0.0 to 1.0)"""
+        try:
+            import psutil
+
+            # Get system metrics
+            cpu_percent = psutil.cpu_percent(interval=0.1) / 100.0
+            memory_percent = psutil.virtual_memory().percent / 100.0
+
+            # Calculate combined load
+            load = (cpu_percent * 0.6) + (memory_percent * 0.4)  # Weight CPU more heavily
+
+            return min(1.0, load)
+
+        except Exception as e:
+            logger.debug(f"Load assessment error: {e}")
+            return 0.5  # Assume medium load on error
+
     def _heartbeat_worker(self):
         """Background worker for sending periodic heartbeats to bootstrap"""
         import time
@@ -2658,6 +3309,56 @@ class BlockchainAPI:
                 logger.debug(f"Heartbeat error: {e}")
 
             time.sleep(heartbeat_interval)
+
+    def _determine_ssl_requirement(self, ssl_enabled: str) -> tuple[bool, str]:
+        """
+        Determine if SSL is required based on configuration and environment.
+
+        Args:
+            ssl_enabled: SSL mode from command line/env
+
+        Returns:
+            Tuple of (ssl_required, reason)
+        """
+        # Force SSL mode
+        if ssl_enabled == "force":
+            return True, "SSL explicitly forced by configuration"
+
+        # Disable SSL mode
+        if ssl_enabled == "disable":
+            return False, "SSL explicitly disabled by configuration"
+
+        # Check environment variables
+        if os.getenv('PISECURE_REQUIRE_SSL', '').lower() in ('true', '1', 'yes'):
+            return True, "SSL required by environment variable"
+
+        # Check if server is bound to public interfaces
+        if self.host not in ['localhost', '127.0.0.1', '::1']:
+            try:
+                # Try to detect if we have public IP access
+                import socket
+                import urllib.request
+
+                # Check if we can reach external services (indicating internet access)
+                try:
+                    with urllib.request.urlopen('https://httpbin.org/ip', timeout=5) as response:
+                        data = json.loads(response.read().decode())
+                        public_ip = data.get('origin', '').split(',')[0].strip()
+
+                        # If we have a public IP, SSL is recommended
+                        if public_ip and not public_ip.startswith(('127.', '192.168.', '10.', '172.')):
+                            return True, f"Public IP detected ({public_ip}) - SSL recommended for security"
+
+                except Exception:
+                    # Can't determine public IP, be conservative
+                    if self.host in ['0.0.0.0', '*', '::']:
+                        return True, "Server bound to all interfaces - SSL recommended for security"
+
+            except Exception:
+                pass
+
+        # Default: SSL optional for local development
+        return False, "Local development - SSL optional"
 
 
 # Standalone server runner

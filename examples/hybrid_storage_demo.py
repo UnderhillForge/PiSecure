@@ -56,14 +56,14 @@ def demo_hybrid_storage():
             print(f"   📁 Block files: {len(blk_files)} files")
 
         # Check database
-        db_file = f"{demo_dir}/index.db"
+        db_file = f"{demo_dir}/pisecure.db"
         if os.path.exists(db_file):
             db_size = os.path.getsize(db_file)
             print(f"   🗄️ Database: {db_size} bytes")
 
         print("\n5. Testing balance queries...")
         balance = blockchain.get_wallet_balance("demo_wallet")
-        print(f"   💰 Demo wallet balance: {balance} tokens")
+        print(f"   💰 Demo wallet balance: {balance} 314ST")
 
         print("\n6. Blockchain info...")
         info = blockchain.get_chain_info()

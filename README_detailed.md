@@ -14,7 +14,7 @@
 
 ```bash
 # For fresh Raspberry Pi setup (installs everything automatically)
-curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/scripts/install.sh | bash
 
 # After installation, access your node at:
 # http://pisecure-node-[serial].local
@@ -25,30 +25,43 @@ curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/instal
 
 ## Features
 
-### Core Security
-- **Hardware-Verified Mining**: Proof-of-work mining exclusive to Raspberry Pi hardware
-- **Device Authentication**: Unique device IDs tied to hardware fingerprints
-- **Mutual TLS**: Secure device-to-device and device-to-server communication
-- **Revocable Certificates**: Blockchain-stored certificates and keys
+### 🔐 Enterprise Security (2026 Implementation)
+- **OWASP-Compliant Protection**: XSS, CSRF, injection prevention, rate limiting
+- **Smart SSL Detection**: HTTP for local use, HTTPS for public deployments
+- **HMAC-Verified Audit Logging**: Tamper-proof security event tracking with GDPR compliance
+- **ML-Powered DDoS Defense**: Real-time attack detection and mitigation using machine learning
+- **Input Validation & Sanitization**: Comprehensive data security with type-specific validation
+- **Security Headers**: Complete OWASP header implementation (CSP, HSTS, X-Frame-Options)
 
-### Exchange-Focused Features
-- **Exchange Mining Rewards Program**: Exchanges earn 2x mining rewards for running infrastructure nodes
-- **Instant Cross-Exchange Settlements**: Atomic swaps between exchanges without intermediaries
-- **Regulatory Compliance Automation**: Built-in KYC/AML checks with automated compliance reporting
-- **Decentralized Exchange (DEX) Integration**: Native DEX with automated market making and liquidity pools
-- **Institutional-Grade Custody**: Multi-signature wallets with enterprise audit trails
-- **Real-Time Market Data & Analytics**: Advanced market analytics with price feeds and sentiment analysis
-- **IoT Device Integration**: Enhanced security through device trust scores and hardware verification
+### 🏗️ Technical Architecture
+- **PiHash Mining Algorithm**: Custom hardware-verified proof-of-work exclusive to Raspberry Pi
+- **Hybrid Storage System**: Block files + SQLite indexing for 90%+ performance gains
+- **Multi-Language SDKs**: Python, JavaScript/TypeScript, Go, Rust, C/C++, Android
+- **Real-Time Monitoring**: Live dashboards with health checks and performance metrics
+- **REST API + WebSockets**: Full-featured API with real-time streaming
+- **Plugin Architecture**: Extensible system for custom functionality
+
+### 💰 Token Economics & Incentives
+- **Developer Trust Funds**: Subscription-based access with automated micropayments
+- **Mining Rewards**: Token incentives for network participation and security
+- **Exchange Integration**: 2x mining rewards for infrastructure nodes
+- **Automated Governance**: Decentralized decision-making and fund allocation
+
+### 🔄 Network & Consensus
+- **Decentralized Discovery**: Peer-to-peer network bootstrapping
+- **Proof-of-Work Consensus**: Hardware-verified block validation
+- **Real-Time Synchronization**: Efficient P2P blockchain sync
+- **Fault Tolerance**: Automatic failover and network resilience
 
 ## 🚀 Killer Features for Exchanges
 
 PiSecure includes cutting-edge features specifically designed to make 314ST the most attractive blockchain platform for cryptocurrency exchanges:
 
-### 🏢 **Exchange Mining Rewards Program**
-- **2x Mining Rewards**: Exchanges running infrastructure nodes earn double mining rewards
-- **Infrastructure Incentives**: Financial rewards for contributing to network health
-- **Automatic Detection**: Smart contracts automatically identify and reward exchange nodes
-- **Sustainable Economics**: Creates symbiotic relationship between exchanges and network
+### 🏢 **Exchange Infrastructure Incentives**
+- **Service Operation Bonuses**: Extra rewards for running bootstrap/relay nodes and network infrastructure
+- **Liquidity Provision Rewards**: Incentives for providing exchange liquidity through DEX pools
+- **Validator Bonuses**: Additional rewards for operating validation and consensus nodes
+- **Performance-Based Incentives**: Rewards scaled by actual network contribution and uptime
 
 ### ⚡ **Instant Cross-Exchange Settlements**
 - **Atomic Swaps**: Instant settlement between exchanges without intermediaries
@@ -94,7 +107,7 @@ Mining in PiSecure serves multiple critical purposes that benefit both individua
 Mining provides the computational power that secures the blockchain through proof-of-work consensus. Each mined block strengthens the network's resistance to attacks and ensures transaction immutability.
 
 ### 💰 **Token Rewards**
-Miners receive newly minted PSC tokens as block rewards, providing an incentive to contribute computational resources to network security. This creates a sustainable token economy.
+Miners receive newly minted 314ST tokens as block rewards, providing an incentive to contribute computational resources to network security. This creates a sustainable token economy.
 
 ### ⚡ **Transaction Processing**
 Mining validates pending transactions and bundles them into blocks, enabling fast and reliable transaction processing across the distributed network.
@@ -106,7 +119,7 @@ By mining, participants contribute to the decentralized nature of PiSecure, ensu
 Mining requires genuine Raspberry Pi hardware verification, creating a unique hardware-bound trust anchor that software alone cannot compromise.
 
 ### 📊 **Earning Potential**
-- **Block Rewards**: Earn newly minted PSC tokens for each block mined
+- **Block Rewards**: Earn newly minted 314ST tokens for each block mined
 - **Transaction Fees**: Collect fees from processed transactions
 - **Staking Opportunities**: Use earned tokens for additional rewards through staking
 - **Network Incentives**: Participate in developer grants and community rewards
@@ -153,38 +166,66 @@ Mining helps build a robust, decentralized network that:
 - **SPV Client**: Minimal trust assumptions, mobile/IoT optimized
 - **Bootstrapping**: Easy setup from trusted peers
 
-## Architecture
+## Architecture (2026 Implementation)
 
 ```
 PiSecure/
 ├── core/                    # Core blockchain engine
 │   ├── blockchain.py       # SignChain implementation
 │   ├── hardware.py         # Hardware verification & mining
-│   └── wallet.py           # SignWallet implementation
+│   ├── wallet.py           # SignWallet implementation
+│   ├── monitoring.py       # System monitoring & health checks
+│   └── nat_traversal.py    # Network address translation
+├── api/                    # REST API server (2026 Security)
+│   ├── server.py           # Flask API server with SSL & security
+│   ├── client.py           # Async API client
+│   ├── validation.py       # Input validation & sanitization
+│   ├── ddos_protection.py  # ML-powered DDoS defense
+│   ├── audit_logger.py     # HMAC-verified security logging
+│   └── economics.py        # Token economics & trust funds
 ├── identity/               # Device identity management
 │   ├── certificates.py     # X.509 certificate handling
 │   ├── fingerprint.py      # Hardware fingerprinting
 │   └── authentication.py   # Mutual auth protocols
-├── updates/                # OTA update system
+├── updates/                # Secure OTA update system
 │   ├── verifier.py         # Cryptographic verification
 │   ├── fetcher.py          # Decentralized distribution
-│   └── rollback.py         # Recovery mechanisms
+│   ├── rollback.py         # Recovery mechanisms
+│   └── auth.py             # Update authorization
+├── network/                # P2P networking
+│   ├── discovery.py        # Peer discovery & bootstrap
+│   ├── p2p_sync.py         # Blockchain synchronization
+│   ├── p2p_protocol.py     # P2P communication protocol
+│   └── bootstrap.sh        # Network bootstrap script
 ├── payments/               # Token economy
 │   ├── wallet.py           # SignWallet implementation
 │   ├── micropayments.py    # Low-fee transfers
 │   └── staking.py          # Reward distribution
-├── access/                 # Access control
+├── access/                 # Access control & licensing
 │   ├── licensing.py        # Token-based licensing
 │   ├── permissions.py      # Role-based access
 │   └── metering.py         # Usage tracking
-├── audit/                  # Logging & monitoring
+├── audit/                  # Security audit & monitoring
 │   ├── tamper.py           # Integrity monitoring
 │   ├── logging.py          # Immutable audit logs
 │   └── alerts.py           # Anomaly detection
-└── nodes/                  # Client modes
-    ├── full_node.py        # Complete node
-    ├── light_client.py     # Header-only client
-    └── spv_client.py       # Minimal client
+├── nodes/                  # Node types & client modes
+│   ├── full_node.py        # Complete validation node
+│   ├── light_client.py     # Header-only client
+│   └── spv_client.py       # Minimal client
+├── dashboard/              # Web monitoring interface
+│   ├── web/
+│   │   ├── app.py          # Flask dashboard server
+│   │   ├── templates/      # HTML templates
+│   │   └── static/         # CSS/JS assets
+│   └── docs/               # Setup documentation
+└── clients/                # Multi-language SDKs
+    ├── python/             # Python SDK
+    ├── javascript/         # JavaScript/TypeScript SDK
+    ├── go/                 # Go SDK
+    ├── rust/               # Rust SDK
+    ├── android/            # Android SDK
+    └── c/                  # C/C++ libraries
 ```
 
 ## Quick Start
@@ -274,7 +315,7 @@ pisecure export-wallet backup.json
 PiSecure works on **any modern hardware** for security features like device identity, certificate management, and OTA updates. Hardware verification using exclusive Raspberry Pi features is **only required for mining**:
 
 - **All Platforms**: Identity management, certificates, OTA updates, blockchain validation
-- **Raspberry Pi Only**: Hardware-verified proof-of-work mining using exclusive features:
+- **Raspberry Pi Only**: PiHash hardware-verified proof-of-work mining using exclusive features:
   - CPU serial number verification
   - Hardware RNG access
   - VideoCore GPU detection
@@ -1974,9 +2015,20 @@ class MainActivity : AppCompatActivity() {
 
 ## 📋 Changelog
 
-### Version 0.1.1 (Current)
+### Version 0.1.2 (Current - 2026 Security Update)
+- **Enterprise Security Overhaul**: Complete security hardening with OWASP compliance
+  - Smart SSL detection (HTTP for local, HTTPS for public deployments)
+  - HMAC-verified audit logging with GDPR compliance
+  - ML-powered DDoS defense and real-time attack detection
+  - Input validation & sanitization system
+  - OWASP security headers (CSP, HSTS, X-Frame-Options, etc.)
+- **Advanced API Server**: Production-ready REST API with security middleware
+- **Security Dashboard**: Real-time monitoring and threat visualization
+- **CLI SSL Support**: Automatic SSL configuration for development and production
+
+### Version 0.1.1 (Previous)
 - **Hybrid Storage System**: Complete overhaul with block files + SQLite indexing
-- **Enterprise Security**: Comprehensive input validation and rate limiting
+- **Enterprise Security**: Basic input validation and rate limiting
 - **Multi-Language SDKs**: Production-ready clients for Python, JS/TS, Go, Rust, C/C++, Android
 - **Advanced Mining Console**: Textual TUI with real-time monitoring and controls
 - **REST API**: Full-featured API with WebSocket streaming
