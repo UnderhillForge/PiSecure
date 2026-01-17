@@ -138,7 +138,9 @@ def cli(hybrid_storage, use_testnet, validate_only, quiet):
         import os
         os.environ['PISECURE_VALIDATE_ONLY'] = '1'
         if not quiet:
-            print_info("Running in VALIDATE-ONLY mode (hardware checks bypassed)")
+            print_warning("⚠️  VALIDATE-ONLY MODE: Hardware checks bypassed")
+            print_info("Blocks mined in this mode use SHA256, not PiHash")
+            print_info("These blocks are for TESTING ONLY and will be rejected by the network")
 
 
 @cli.command()
