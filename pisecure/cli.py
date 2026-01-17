@@ -615,7 +615,8 @@ def identity():
 
 @cli.command()
 @click.argument('wallet_name', required=False)
-def wallet(wallet_name):
+@click.option('--testnet', is_flag=True, help='Use testnet network')
+def wallet(wallet_name, testnet):
     """Show wallet information and balance"""
     try:
         try:
@@ -625,9 +626,16 @@ def wallet(wallet_name):
             # Fall back to absolute import
             from core.wallet import SignWallet
 
+        # Adjust wallet directory for testnet
+        import os
+        if testnet or os.environ.get('PISECURE_TESTNET') == '1':
+            wallet_dir = "/var/lib/pisecure-testnet/wallets"
+        else:
+            wallet_dir = "/var/lib/pisecure/wallets"
+
         if wallet_name:
             # Show specific wallet
-            wallet = SignWallet()
+            wallet = SignWallet(wallet_dir=wallet_dir)
             wallet_data = wallet.load_wallet(wallet_name)
 
             if 'error' in wallet_data:
@@ -647,7 +655,7 @@ def wallet(wallet_name):
             console.print(table)
         else:
             # List all wallets
-            wallet = SignWallet()
+            wallet = SignWallet(wallet_dir=wallet_dir)
             wallets = wallet.list_wallets()
 
             if not wallets:
