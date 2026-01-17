@@ -72,13 +72,13 @@ hardware = [
     "gpiozero>=2.0"
 ]
 ipfs = [
-    "ipfshttpclient>=0.8.0"
+    "ipfshttpclient>=0.7.0"
 ]
 tpm = [
     "tpm2-pytss>=1.2.0"
 ]
 full = [
-    "ipfshttpclient>=0.8.0",
+    "ipfshttpclient>=0.7.0",
     "RPi.GPIO>=0.7.0",
     "gpiozero>=2.0",
     "tpm2-pytss>=1.2.0",
