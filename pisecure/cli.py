@@ -610,6 +610,8 @@ def monitor(wallet, refresh):
     """Live blockchain/network monitor (non-mining)"""
     try:
         quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
+        # Force read-only validation to avoid PiHash requirement during load
+        os.environ['PISECURE_VALIDATE_ONLY'] = '1'
         # Initialize chain and discovery
         blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
         peer_discovery = PeerDiscovery()
