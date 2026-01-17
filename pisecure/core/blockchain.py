@@ -2360,10 +2360,9 @@ class SignChain:
 
     def _async_full_discovery(self, block):
         """Perform full discovery asynchronously"""
-                    import os
-                    quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
-
         try:
+            import os
+            quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
             from pisecure.core.nat_traversal import node_discovery
 
             # Perform the actual discovery
