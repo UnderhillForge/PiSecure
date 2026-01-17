@@ -701,14 +701,19 @@ class SignBlock:
     """Individual block in the PiSecure blockchain"""
 
     def __init__(self, index: int, transactions: List[Dict], timestamp: float,
-                 previous_hash: str, nonce: int = 0, algorithm: str = 'sha256'):
+                 previous_hash: str, nonce: int = 0, algorithm: str = 'pihash',
+                 precomputed_hash: str = None):
         self.index = index
         self.transactions = transactions
         self.timestamp = timestamp
         self.previous_hash = previous_hash
         self.nonce = nonce
-        self.algorithm = algorithm  # Mining algorithm: 'sha256' or 'sha3'
-        self.hash = self.calculate_hash()
+        self.algorithm = algorithm  # Mining algorithm identifier (default: 'pihash')
+        if precomputed_hash is not None:
+            # Loading from storage: trust stored hash
+            self.hash = precomputed_hash
+        else:
+            self.hash = self.calculate_hash()
 
     def calculate_hash(self) -> str:
         """Calculate hash of the block using PiHash algorithm (PiSecure standard)"""
@@ -1089,6 +1094,7 @@ class SignBlock:
             "timestamp": self.timestamp,
             "previous_hash": self.previous_hash,
             "nonce": self.nonce,
+            "algorithm": self.algorithm,
             "hash": self.hash
         }
 
@@ -1200,9 +1206,10 @@ class SignChain:
                         transactions=block_data["transactions"],
                         timestamp=block_data["timestamp"],
                         previous_hash=block_data["previous_hash"],
-                        nonce=block_data["nonce"]
+                        nonce=block_data["nonce"],
+                        algorithm=block_data.get("algorithm", "pihash"),
+                        precomputed_hash=block_data.get("hash")
                     )
-                    block.hash = block_data["hash"]
                     self.chain.append(block)
 
                 print(f"✅ Loaded blockchain with {len(self.chain)} blocks from JSON")
@@ -1241,9 +1248,10 @@ class SignChain:
                             transactions=block_data["transactions"],
                             timestamp=block_data["timestamp"],
                             previous_hash=block_data["previous_hash"],
-                            nonce=block_data["nonce"]
+                            nonce=block_data["nonce"],
+                            algorithm=block_data.get("algorithm", "pihash"),
+                            precomputed_hash=block_data.get("hash")
                         )
-                        block.hash = block_data["hash"]
                         self.chain.append(block)
 
             print(f"✅ Loaded blockchain with {len(self.chain)} blocks from hybrid storage")
