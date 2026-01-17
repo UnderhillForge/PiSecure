@@ -1879,18 +1879,10 @@ class SignChain:
         except (TypeError, ValueError):
             p2p_bonus = 0.0
 
-        # === EXCHANGE MINING REWARDS PROGRAM ===
-        # Exchanges get 1.5x mining rewards for running infrastructure nodes
-        exchange_bonus = 0
-        miner_wallet = miner_stats.get('wallet_address', '')
-        if miner_wallet and self._is_exchange_node(miner_wallet):
-            exchange_bonus = base_reward * 0.5  # Additional 50% of base reward (1.5x total)
-            print(f"🏢 Exchange mining bonus: +{exchange_bonus} tokens for infrastructure contribution")
-
         # Safe total calculation - ensure all components are numeric
         try:
             total_reward = (base_reward + tx_bonus + security_bonus +
-                          participation_bonus + uptime_bonus + p2p_bonus + exchange_bonus)
+                          participation_bonus + uptime_bonus + p2p_bonus)
 
             # Ensure result is valid number
             if not isinstance(total_reward, (int, float)) or total_reward < 0:
@@ -1901,21 +1893,7 @@ class SignChain:
             total_reward = base_reward
 
         # Cap reward to prevent inflation
-        return min(int(total_reward), 50)  # Increased cap for exchange rewards
-
-    def _is_exchange_node(self, wallet_address: str) -> bool:
-        """Check if a wallet belongs to a registered exchange node"""
-        if not wallet_address:
-            return False
-
-        # Check exchange registry (loaded from configuration or blockchain state)
-        exchange_registry = getattr(self, 'exchange_registry', set())
-
-        # Also check for exchange-specific transaction patterns in recent blocks
-        if self._has_exchange_transaction_pattern(wallet_address):
-            return True
-
-        return wallet_address in exchange_registry
+        return min(int(total_reward), 50)
 
     def _has_exchange_transaction_pattern(self, wallet_address: str) -> bool:
         """Check if wallet shows exchange-like transaction patterns"""
