@@ -1820,15 +1820,15 @@ class SignChain:
         if miner_stats is None:
             miner_stats = {}
 
-        base_reward = 10  # Stable base reward
+        base_reward = 6  # Base reward targets 9k-13k tokens/day at 1440 blocks/day
 
-        # Transaction volume bonus (0.5 tokens per tx)
+        # Transaction volume bonus (0.3 tokens per tx)
         if block is not None:
-            tx_bonus = len(block.transactions) * 0.5
+            tx_bonus = len(block.transactions) * 0.3
         else:
             # If no block provided, use pending transactions count (safe check)
             pending_count = len(self.pending_transactions) if self.pending_transactions else 0
-            tx_bonus = pending_count * 0.5
+            tx_bonus = pending_count * 0.3
 
         # Security work bonus (safe iteration)
         security_bonus = 0
@@ -1840,9 +1840,9 @@ class SignChain:
                 if tx and isinstance(tx, dict):  # Ensure tx is valid dict
                     tx_type = tx.get('type', '')
                     if tx_type in ['security_alert', 'threat_detected', 'system_compromise']:
-                        security_bonus += 3  # High value security work
+                        security_bonus += 1.0  # High value security work
                     elif tx_type in ['device_auth', 'bundle_verify', 'token_validate']:
-                        security_bonus += 1  # Standard security work
+                        security_bonus += 0.3  # Standard security work
 
         # Participation bonus based on network health (safe arithmetic)
         try:
@@ -1850,7 +1850,7 @@ class SignChain:
             if health and isinstance(health, dict):
                 participation = health.get("participation", 0.0)
                 if participation is not None and isinstance(participation, (int, float)):
-                    participation_bonus = base_reward * (1 - participation) * 0.5
+                    participation_bonus = base_reward * (1 - participation) * 0.15
                 else:
                     participation_bonus = 0.0
             else:
@@ -1863,11 +1863,11 @@ class SignChain:
         try:
             uptime_pct = miner_stats.get('uptime_percentage', 100)
             if uptime_pct is not None and isinstance(uptime_pct, (int, float)):
-                uptime_bonus = uptime_pct / 100 * 2
+                uptime_bonus = uptime_pct / 100 * 1.2
             else:
-                uptime_bonus = 2.0  # Default 100% uptime
+                uptime_bonus = 1.2  # Default 100% uptime
         except (TypeError, ZeroDivisionError):
-            uptime_bonus = 2.0
+            uptime_bonus = 1.2
 
         # P2P contribution bonus (safe arithmetic)
         try:
@@ -1880,11 +1880,11 @@ class SignChain:
             p2p_bonus = 0.0
 
         # === EXCHANGE MINING REWARDS PROGRAM ===
-        # Exchanges get 2x mining rewards for running infrastructure nodes
+        # Exchanges get 1.5x mining rewards for running infrastructure nodes
         exchange_bonus = 0
         miner_wallet = miner_stats.get('wallet_address', '')
         if miner_wallet and self._is_exchange_node(miner_wallet):
-            exchange_bonus = base_reward  # Additional full base reward (2x total)
+            exchange_bonus = base_reward * 0.5  # Additional 50% of base reward (1.5x total)
             print(f"🏢 Exchange mining bonus: +{exchange_bonus} tokens for infrastructure contribution")
 
         # Safe total calculation - ensure all components are numeric
