@@ -52,9 +52,26 @@ def get_wallet_dir(testnet=False, custom_dir=None):
     """Get wallet directory based on network"""
     if custom_dir:
         return custom_dir
+    
+    # Try system directories first (on Raspberry Pi)
     if testnet or os.environ.get('PISECURE_TESTNET') == '1':
-        return "/var/lib/pisecure-testnet/wallets"
-    return "/var/lib/pisecure/wallets"
+        system_dir = "/var/lib/pisecure-testnet/wallets"
+    else:
+        system_dir = "/var/lib/pisecure/wallets"
+    
+    # If system directory is accessible, use it
+    try:
+        if os.path.exists(os.path.dirname(system_dir)):
+            return system_dir
+    except (OSError, PermissionError):
+        pass
+    
+    # Fallback to local directory for development/testing
+    local_dir = os.path.expanduser("~/.pisecure/wallets")
+    if testnet or os.environ.get('PISECURE_TESTNET') == '1':
+        local_dir = os.path.expanduser("~/.pisecure-testnet/wallets")
+    
+    return local_dir
 
 
 @click.group()
