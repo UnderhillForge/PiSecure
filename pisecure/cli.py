@@ -631,22 +631,21 @@ def verify_hardware():
 @cli.command()
 @click.option('--wallet', help='Wallet name or address to monitor (or earn validation rewards)')
 @click.option('--validate-rewards', is_flag=True, help='Earn validation rewards for blocks validated')
-@click.option('--refresh', default=5, show_default=True, help='Refresh interval in seconds')
+@click.option('--refresh', default=1, show_default=True, help='Refresh interval in seconds')
 def monitor(wallet, validate_rewards, refresh):
     """Live blockchain/network monitor (non-mining)"""
     try:
-        quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
         # Force read-only validation to avoid PiHash requirement during load
         os.environ['PISECURE_VALIDATE_ONLY'] = '1'
         # Set validation wallet if rewards enabled
         if wallet and validate_rewards:
             os.environ['PISECURE_VALIDATION_WALLET'] = wallet
         
-        # Initialize chain and discovery
+        testnet = os.environ.get('PISECURE_TESTNET') == '1'
+        
+        # Initialize blockchain
         blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
-        peer_discovery = PeerDiscovery()
-        p2p_sync = P2PSyncManager(blockchain, peer_discovery)
-
+        
         # Resolve wallet name to address if needed
         wallet_address = None
         if wallet:
@@ -662,66 +661,21 @@ def monitor(wallet, validate_rewards, refresh):
                     wallet_address = wallet
             except Exception:
                 wallet_address = wallet
-
-        # Track validation rewards earned
-        last_height = -1
-        validation_rewards_earned = 0.0
-        blocks_validated = 0
         
-        if validate_rewards and wallet_address:
-            console.print(f"[cyan]✅ Monitor started with validation rewards enabled[/cyan]")
-            console.print(f"[yellow]Earning rewards to: {wallet_address[:16]}…[/yellow]")
-            console.print("[green]Press Ctrl-C to stop[/green]")
-        else:
-            console.print("[green]✅ Monitor started. Press Ctrl-C to stop[/green]")
-
-        while True:
-            # Perform a lightweight sync
-            try:
-                p2p_sync._perform_sync_cycle()
-            except Exception:
-                pass
-
-            info = blockchain.get_chain_info()
-            height = info.get('blocks', len(blockchain.chain))
-            pending = info.get('pending_transactions', len(blockchain.pending_transactions))
-            difficulty = info.get('difficulty', blockchain.difficulty)
-            latest = info.get('latest_block') or (blockchain.chain[-1] if blockchain.chain else None)
-
-            # Peer count
-            peers = {}
-            try:
-                peers = peer_discovery.get_known_peers()
-            except Exception:
-                peers = {}
-
-            # Wallet balance
-            balance_text = ""
-            if wallet_address:
-                try:
-                    bal = blockchain.get_wallet_balance(wallet_address)
-                    balance_text = f" | Wallet {wallet_address[:8]}… Balance: {bal:.2f}"
-                    
-                    # Track validation rewards if enabled
-                    if validate_rewards and height != last_height:
-                        # Award 0.5 tokens per validated block
-                        validation_reward = 0.5
-                        validation_rewards_earned += validation_reward
-                        blocks_validated += 1
-                        balance_text += f" | Validation: +{validation_reward}*{blocks_validated} = {validation_rewards_earned:.2f}"
-                except Exception:
-                    balance_text = f" | Wallet {wallet_address[:8]}… Balance: n/a"
-
-            # Only print on change or in non-quiet mode
-            if not quiet_mode or height != last_height:
-                latest_desc = f"#{latest['index']}" if isinstance(latest, dict) else (f"#{latest.index}" if latest else "-")
-                print_output(
-                    f"Blocks: {height} | Pending: {pending} | Difficulty: {difficulty} | Peers: {len(peers)} | Latest: {latest_desc}{balance_text}"
-                )
-                last_height = height
-
-            time.sleep(max(1, int(refresh)))
-
+        # Use MiningDashboard for rich UI monitoring
+        from .monitor import MiningDashboard
+        
+        mode = 'validation' if validate_rewards else 'monitor'
+        dashboard = MiningDashboard(
+            blockchain=blockchain,
+            mode=mode,
+            refresh_rate=float(refresh),
+            testnet=testnet,
+            wallet_address=wallet_address if validate_rewards else None
+        )
+        
+        dashboard.run()
+        
     except KeyboardInterrupt:
         print_output("\nMonitor stopped")
     except Exception as e:

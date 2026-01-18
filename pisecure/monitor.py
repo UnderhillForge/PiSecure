@@ -51,13 +51,15 @@ class MiningDashboard:
         mode: str = "solo",
         refresh_rate: float = 1.0,
         syndicate: Optional[MiningSyndicate] = None,
-        testnet: bool = False
+        testnet: bool = False,
+        wallet_address: Optional[str] = None
     ):
         self.blockchain = blockchain
         self.mode = mode
         self.refresh_rate = refresh_rate
         self.syndicate = syndicate
         self.testnet = testnet
+        self.wallet_address = wallet_address
         self.console = Console()
         self.state = DashboardState(mode=mode, refresh_rate=refresh_rate)
         self.system_monitor = SystemMonitor()
@@ -435,6 +437,17 @@ class MiningDashboard:
         if stats.get("session_blocks_found", 0) > self.state.session_blocks:
             self.state.session_blocks = stats["session_blocks_found"]
             self.state.last_block_time = time.time()
+        
+        # Add wallet info if monitoring with validation rewards
+        if self.wallet_address and self.mode == 'validation':
+            try:
+                balance = self.blockchain.get_wallet_balance(self.wallet_address)
+                validation_rewards = self.blockchain.get_validation_rewards(self.wallet_address)
+                stats['wallet_address'] = self.wallet_address
+                stats['wallet_balance'] = balance
+                stats['validation_rewards'] = validation_rewards
+            except Exception:
+                pass
         
         return stats
     
