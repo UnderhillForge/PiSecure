@@ -100,7 +100,8 @@ def list(ctx):
     
     try:
         wallet_dir = get_wallet_dir(testnet, custom_dir)
-        wallet = SignWallet()
+        wallet_metadata = os.path.join(wallet_dir, 'wallets.json')
+        wallet = SignWallet(wallet_metadata)
         wallets = wallet.list_wallets()
         
         if output_json:
@@ -154,7 +155,8 @@ def create(ctx, name, display_name):
         # Ensure directory exists
         os.makedirs(wallet_dir, exist_ok=True)
         
-        wallet = SignWallet()
+        wallet_metadata = os.path.join(wallet_dir, 'wallets.json')
+        wallet = SignWallet(wallet_metadata)
         result = wallet.create_wallet(name, display_name or name)
         
         if output_json:
@@ -185,7 +187,8 @@ def show(ctx, name):
     
     try:
         wallet_dir = get_wallet_dir(testnet, custom_dir)
-        wallet = SignWallet()
+        wallet_metadata = os.path.join(wallet_dir, 'wallets.json')
+        wallet = SignWallet(wallet_metadata)
         wallet_data = wallet.load_wallet(name)
         
         if 'error' in wallet_data:
@@ -329,7 +332,8 @@ def export(ctx, name, output_file):
     
     try:
         wallet_dir = get_wallet_dir(testnet, custom_dir)
-        wallet = SignWallet()
+        wallet_metadata = os.path.join(wallet_dir, 'wallets.json')
+        wallet = SignWallet(wallet_metadata)
         wallet_data = wallet.load_wallet(name)
         
         if 'error' in wallet_data:
