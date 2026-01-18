@@ -788,7 +788,7 @@ def wallet(wallet_name, testnet):
 
             if not wallets:
                 console.print("[yellow]📭 No wallets found[/yellow]")
-                console.print("[dim]Create your first wallet with: pisecure create-wallet <name>[/dim]")
+                console.print("[dim]Wallets are automatically created when you mine or receive tokens[/dim]")
                 return
 
             table = Table(title="🏦 Available Wallets")
