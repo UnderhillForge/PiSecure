@@ -415,7 +415,7 @@ class MiningDashboard:
                     stats['best_zeros'] = int(best_zeros)
                     stats['target_zeros'] = int(target)
                     # Calculate hashrate from file data
-                    if self.blockchain.mining_session.get('start_time'):
+                    if hasattr(self.blockchain, 'mining_session') and self.blockchain.mining_session.get('start_time'):
                         elapsed = time.time() - self.blockchain.mining_session['start_time']
                         if elapsed > 0:
                             stats['hashrate'] = int(hashes) / elapsed
@@ -425,13 +425,21 @@ class MiningDashboard:
         
         # Fallback to dict reads if file method fails
         if not stats:
-            # Get mining stats from blockchain
-            mining_stats = self.blockchain.get_live_mining_stats()
-            stats.update(mining_stats)
+            # Get mining stats from blockchain (only if mining_session exists)
+            if hasattr(self.blockchain, 'get_live_mining_stats'):
+                try:
+                    mining_stats = self.blockchain.get_live_mining_stats()
+                    stats.update(mining_stats)
+                except:
+                    pass
         
-        # Get session state
-        session_state = self.blockchain.get_mining_session_state()
-        stats.update(session_state)
+        # Get session state if available
+        if hasattr(self.blockchain, 'get_mining_session_state'):
+            try:
+                session_state = self.blockchain.get_mining_session_state()
+                stats.update(session_state)
+            except:
+                pass
         
         # Update session tracking
         if stats.get("session_blocks_found", 0) > self.state.session_blocks:
