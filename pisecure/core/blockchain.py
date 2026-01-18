@@ -1047,6 +1047,14 @@ class SignBlock:
             self.hash = self.calculate_hash()
             hashes_tried += 1
             current_zero_bits = count_zero_bits(self.hash)
+            
+            # Update status file for dashboard (every 100 hashes)
+            if hashes_tried % 100 == 0:
+                try:
+                    with open('/tmp/pisecure_mining_status.txt', 'w') as f:
+                        f.write(f"{self.nonce},{hashes_tried},{current_zero_bits},{target_zero_bits}")
+                except Exception:
+                    pass
 
             # Show progress every sample_interval in verbose mode
             if verbose and hashes_tried % sample_interval == 0:
