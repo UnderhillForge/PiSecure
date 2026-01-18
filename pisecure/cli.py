@@ -763,7 +763,7 @@ def wallet(wallet_name, testnet):
 
         if wallet_name:
             # Show specific wallet
-            wallet = SignWallet(wallet_dir=wallet_dir)
+            wallet = SignWallet()
             wallet_data = wallet.load_wallet(wallet_name)
 
             if 'error' in wallet_data:
@@ -783,7 +783,7 @@ def wallet(wallet_name, testnet):
             console.print(table)
         else:
             # List all wallets
-            wallet = SignWallet(wallet_dir=wallet_dir)
+            wallet = SignWallet()
             wallets = wallet.list_wallets()
 
             if not wallets:
