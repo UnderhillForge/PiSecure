@@ -405,6 +405,11 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
             import threading
             def mine_loop():
                 blocks_mined_session = 0
+                # Suppress console output during dashboard mode
+                import sys
+                import os
+                os.environ['PISECURE_QUIET'] = '1'
+                
                 while not mining_stopped:
                     try:
                         block = blockchain.mine_pending_transactions(miner_wallet, verbose=False)
@@ -413,7 +418,9 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
                             blockchain.adapt_difficulty()
                         time.sleep(0.1)
                     except Exception as e:
-                        print(f"Mining error: {e}")
+                        # Log to file instead of console
+                        with open('/tmp/pisecure_mining_errors.log', 'a') as f:
+                            f.write(f"{time.time()}: {e}\n")
                         time.sleep(1)
             
             mining_thread = threading.Thread(target=mine_loop, daemon=True)
