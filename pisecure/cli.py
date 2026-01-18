@@ -403,16 +403,24 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
             
             # Start mining in background thread
             import threading
+            import logging
+            
             def mine_loop():
                 blocks_mined_session = 0
-                # Suppress console output during dashboard mode
-                import sys
+                # Suppress ALL console logging during dashboard mode
                 import os
                 os.environ['PISECURE_QUIET'] = '1'
                 
+                # Disable all loggers that print to console
+                for logger_name in ['pisecure', 'pisecure.core.nat_traversal', 
+                                   'pisecure.network.discovery', 'pisecure.core.p2p_sync',
+                                   'pisecure.core.blockchain']:
+                    logger = logging.getLogger(logger_name)
+                    logger.setLevel(logging.CRITICAL)  # Only show critical errors
+                
                 while not mining_stopped:
                     try:
-                        block = blockchain.mine_pending_transactions(miner_wallet, verbose=False)
+                        block = blockchain.mine_pending_transactions(miner_wallet, verbose=True)
                         if block:
                             blocks_mined_session += 1
                             blockchain.adapt_difficulty()
