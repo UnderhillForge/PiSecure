@@ -64,10 +64,16 @@ class MiningDashboard:
         self.state = DashboardState(mode=mode, refresh_rate=refresh_rate)
         self.system_monitor = SystemMonitor()
         
-        # Debug: Log blockchain instance ID
-        with open('/tmp/pisecure_dashboard_instance.log', 'w') as f:
-            f.write(f"Dashboard blockchain ID: {id(blockchain)}\n")
-            f.write(f"Mining session dict ID: {id(blockchain.mining_session)}\n")
+        # Debug: Log blockchain instance ID (guard against missing attributes in validation mode)
+        try:
+            with open('/tmp/pisecure_dashboard_instance.log', 'w') as f:
+                f.write(f"Dashboard blockchain ID: {id(blockchain)}\n")
+                if hasattr(blockchain, 'mining_session'):
+                    f.write(f"Mining session dict ID: {id(blockchain.mining_session)}\n")
+                else:
+                    f.write(f"Mining session: not available (validation mode)\n")
+        except Exception:
+            pass
         
     def create_sparkline(self, data: deque, max_value: Optional[float] = None) -> str:
         """Create Unicode sparkline chart from data"""
