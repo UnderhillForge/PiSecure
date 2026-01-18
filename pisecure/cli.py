@@ -381,13 +381,52 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
         discovery_interval = 600  # Check for new bootstrap servers every 10 minutes
 
         if interactive:
-            print_success("Starting PiSecure mining...")
+            # Launch MiningDashboard for interactive mining
+            print_success("Starting PiSecure mining with dashboard...")
             if miner_wallet:
                 print_output(f"Rewards will go to: {miner_wallet}")
             if safe_mode:
                 print_output("Safe mode: Thermal throttling and memory cleanup enabled")
             print_output("Press Ctrl-C to stop")
-            print()
+            
+            # Use MiningDashboard for rich UI
+            from .monitor import MiningDashboard
+            testnet = os.environ.get('PISECURE_TESTNET') == '1'
+            
+            dashboard = MiningDashboard(
+                blockchain=blockchain,
+                mode='solo',
+                refresh_rate=1.0,
+                testnet=testnet,
+                wallet_address=miner_wallet
+            )
+            
+            # Start mining in background thread
+            import threading
+            def mine_loop():
+                blocks_mined_session = 0
+                while not mining_stopped:
+                    try:
+                        block = blockchain.mine_pending_transactions(miner_wallet, verbose=False)
+                        if block:
+                            blocks_mined_session += 1
+                            blockchain.adapt_difficulty()
+                        time.sleep(0.1)
+                    except Exception as e:
+                        print(f"Mining error: {e}")
+                        time.sleep(1)
+            
+            mining_thread = threading.Thread(target=mine_loop, daemon=True)
+            mining_thread.start()
+            
+            # Run dashboard (blocking)
+            try:
+                dashboard.run()
+            except KeyboardInterrupt:
+                print_output("\nMining stopped by user")
+                return
+
+        elif not interactive:
 
             try:
                 while not mining_stopped:
