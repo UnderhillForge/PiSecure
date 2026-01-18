@@ -1132,6 +1132,10 @@ class SignChain:
         # Mining safety limits (bit-counting difficulty bounds)
         self.emergency_difficulty_floor = 130  # Minimum target zero bits
 
+        # Validation reward tracking
+        self.validation_rewards_awarded = {}  # wallet_address -> amount
+        self.last_validated_block_height = 0
+
         # Hardware verification for scaling (bypass if validate-only mode)
         if os.environ.get('PISECURE_VALIDATE_ONLY') == '1':
             # Validation-only mode - no hardware verification needed
@@ -1565,7 +1569,7 @@ class SignChain:
 
         for block in self.chain:
             for tx in block.transactions:
-                if tx.get('type') in ['token_transfer', 'batch_transfer', 'mining_reward']:
+                if tx.get('type') in ['token_transfer', 'batch_transfer', 'mining_reward', 'validation_reward']:
                     if (tx.get('sender_address') == wallet_address or
                         tx.get('recipient_address') == wallet_address):
                         wallet_transactions.append({
@@ -1580,6 +1584,28 @@ class SignChain:
                         })
 
         return wallet_transactions
+
+    def award_validation_reward(self, wallet_address: str):
+        """Award validation reward for a validated block (0.5 tokens)"""
+        validation_reward = 0.5
+        current_height = len(self.chain)
+        
+        # Only award if we've validated a new block since last time
+        if current_height > self.last_validated_block_height:
+            # Track the reward earned
+            if wallet_address not in self.validation_rewards_awarded:
+                self.validation_rewards_awarded[wallet_address] = 0.0
+            
+            self.validation_rewards_awarded[wallet_address] += validation_reward
+            self.last_validated_block_height = current_height
+            
+            return validation_reward
+        
+        return 0.0
+
+    def get_validation_rewards(self, wallet_address: str) -> float:
+        """Get total validation rewards earned by a wallet"""
+        return self.validation_rewards_awarded.get(wallet_address, 0.0)
 
     def mine_pending_transactions(self, miner_wallet_address: str = None, verbose: bool = False, allow_empty: bool = False) -> Optional[SignBlock]:
         """Mine a new block with pending transactions and distribute mining rewards"""

@@ -629,14 +629,19 @@ def verify_hardware():
 
 
 @cli.command()
-@click.option('--wallet', help='Wallet name or address to monitor')
+@click.option('--wallet', help='Wallet name or address to monitor (or earn validation rewards)')
+@click.option('--validate-rewards', is_flag=True, help='Earn validation rewards for blocks validated')
 @click.option('--refresh', default=5, show_default=True, help='Refresh interval in seconds')
-def monitor(wallet, refresh):
+def monitor(wallet, validate_rewards, refresh):
     """Live blockchain/network monitor (non-mining)"""
     try:
         quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
         # Force read-only validation to avoid PiHash requirement during load
         os.environ['PISECURE_VALIDATE_ONLY'] = '1'
+        # Set validation wallet if rewards enabled
+        if wallet and validate_rewards:
+            os.environ['PISECURE_VALIDATION_WALLET'] = wallet
+        
         # Initialize chain and discovery
         blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
         peer_discovery = PeerDiscovery()
@@ -658,8 +663,17 @@ def monitor(wallet, refresh):
             except Exception:
                 wallet_address = wallet
 
+        # Track validation rewards earned
         last_height = -1
-        console.print("[green]✅ Monitor started. Press Ctrl-C to stop[/green]")
+        validation_rewards_earned = 0.0
+        blocks_validated = 0
+        
+        if validate_rewards and wallet_address:
+            console.print(f"[cyan]✅ Monitor started with validation rewards enabled[/cyan]")
+            console.print(f"[yellow]Earning rewards to: {wallet_address[:16]}…[/yellow]")
+            console.print("[green]Press Ctrl-C to stop[/green]")
+        else:
+            console.print("[green]✅ Monitor started. Press Ctrl-C to stop[/green]")
 
         while True:
             # Perform a lightweight sync
@@ -687,6 +701,14 @@ def monitor(wallet, refresh):
                 try:
                     bal = blockchain.get_wallet_balance(wallet_address)
                     balance_text = f" | Wallet {wallet_address[:8]}… Balance: {bal:.2f}"
+                    
+                    # Track validation rewards if enabled
+                    if validate_rewards and height != last_height:
+                        # Award 0.5 tokens per validated block
+                        validation_reward = 0.5
+                        validation_rewards_earned += validation_reward
+                        blocks_validated += 1
+                        balance_text += f" | Validation: +{validation_reward}*{blocks_validated} = {validation_rewards_earned:.2f}"
                 except Exception:
                     balance_text = f" | Wallet {wallet_address[:8]}… Balance: n/a"
 
