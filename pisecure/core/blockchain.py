@@ -710,6 +710,16 @@ class SignBlock:
         self.previous_hash = previous_hash
         self.nonce = nonce
         self.algorithm = algorithm  # Mining algorithm identifier (default: 'pihash')
+        
+        # Cache PiHash instance to avoid re-initialization on every hash calculation
+        self._pihash_instance = None
+        if not os.environ.get('PISECURE_VALIDATE_ONLY') == '1' and algorithm == 'pihash':
+            try:
+                from .pihash import PiHash
+                self._pihash_instance = PiHash()
+            except Exception:
+                pass
+        
         if precomputed_hash is not None:
             # Loading from storage: trust stored hash
             self.hash = precomputed_hash
@@ -741,10 +751,12 @@ class SignBlock:
                            "PiSecure requires PiHash for all mining operations.")
 
         try:
-            # ALWAYS get fresh hardware fingerprint - NEVER use cached values
-            # This prevents security bypass by copying blockchain data between systems
-            from .pihash import PiHash
-            pihash = PiHash()
+            # Use cached PiHash instance to avoid re-initialization
+            if self._pihash_instance is None:
+                from .pihash import PiHash
+                self._pihash_instance = PiHash()
+            
+            pihash = self._pihash_instance
             hw_fingerprint = pihash._get_hardware_fingerprint()
 
             # Verify hardware compatibility (PiHash will raise error if not Pi)
