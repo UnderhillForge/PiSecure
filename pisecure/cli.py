@@ -391,6 +391,9 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
             
             # Use MiningDashboard for rich UI
             from .monitor import MiningDashboard
+            import threading
+            import logging
+            
             testnet = os.environ.get('PISECURE_TESTNET') == '1'
             
             # Event to signal when dashboard is ready to start mining
@@ -406,9 +409,6 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
             )
             
             # Start mining in background thread
-            import threading
-            import logging
-            
             def mine_loop():
                 # Wait for dashboard to signal ready before starting mining
                 mining_ready.wait()
