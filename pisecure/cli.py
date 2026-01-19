@@ -728,6 +728,23 @@ def monitor(wallet, validate_rewards, refresh, peer):
             if peer:
                 print_output(f"   Adding peer: {peer}")
                 peer_discovery.add_peer(f"manual_{peer}", peer, 3142)
+
+            # Pull peers from bootstrap registry to seed discovery
+            try:
+                from .core.bootstrap_manager import get_bootstrap_registry
+                registry = get_bootstrap_registry()
+                bootstrap_peers = registry.get_peer_list(limit=50)
+                if bootstrap_peers:
+                    print_output(f"   Seeding {len(bootstrap_peers)} peer(s) from bootstrap")
+                    for p in bootstrap_peers:
+                        addr = p.get('address')
+                        port = int(p.get('port', 3142))
+                        if addr:
+                            peer_discovery.add_peer(f"bootstrap_{addr}:{port}", addr, port)
+                else:
+                    print_output("   No peers available from bootstrap (peer cache empty)")
+            except Exception as e:
+                print_output(f"   Bootstrap peer fetch failed: {e}")
             
             p2p_sync = P2PSyncManager(blockchain, peer_discovery)
             
