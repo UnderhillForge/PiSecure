@@ -317,9 +317,9 @@ class MiningDashboard:
             # Chain info (uses cached validation, no lock needed)
             chain_info = self.blockchain.get_chain_info()
             
-            total_blocks = chain_info.get("total_blocks", 0)
+            total_blocks = chain_info.get("blocks") or chain_info.get("total_blocks", 0)
             pending_txs = chain_info.get("pending_transactions", 0)
-            is_valid = chain_info.get("is_valid_chain", False)
+            is_valid = chain_info.get("is_valid") if "is_valid" in chain_info else chain_info.get("is_valid_chain", False)
             
             table.add_row("⛓️  Total Blocks", f"{total_blocks:,}")
             table.add_row("📨 Pending TXs", f"{pending_txs}")
