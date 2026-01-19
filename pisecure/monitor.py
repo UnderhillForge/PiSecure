@@ -30,6 +30,7 @@ class DashboardState:
     mode: str = "solo"  # solo or syndicate
     refresh_rate: float = 1.0
     start_time: float = field(default_factory=time.time)
+    start_blocks: int = 0
     
     # Historical data for sparklines (last 60 samples)
     hashrate_history: deque = field(default_factory=lambda: deque(maxlen=60))
@@ -40,6 +41,8 @@ class DashboardState:
     session_blocks: int = 0
     session_rewards: float = 0.0
     last_block_time: Optional[float] = None
+    last_hashes: int = 0
+    last_hash_time: Optional[float] = None
 
 
 class MiningDashboard:
@@ -62,6 +65,7 @@ class MiningDashboard:
         self.wallet_address = wallet_address
         self.console = Console()
         self.state = DashboardState(mode=mode, refresh_rate=refresh_rate)
+        self.state.start_blocks = len(getattr(blockchain, 'chain', []))
         self.system_monitor = SystemMonitor()
         
         # Debug: Log blockchain instance ID (guard against missing attributes in validation mode)
@@ -241,7 +245,7 @@ class MiningDashboard:
         table.add_row("📦 Blocks (Session)", f"[bold green]{blocks_found}[/bold green]")
         
         # Rewards earned
-        rewards = blocks_found * 50  # 50 314ST per block
+        rewards = stats.get("session_rewards", self.state.session_rewards if self.state.session_rewards else blocks_found * 50)
         table.add_row("💰 Rewards", f"[bold yellow]{rewards:.2f} 314ST[/bold yellow]")
         
         # Average block time
@@ -337,6 +341,16 @@ class MiningDashboard:
             except (IndexError, AttributeError):
                 # Chain modified during read, skip this update
                 pass
+            
+            # Mining wallet and balance
+            if self.wallet_address:
+                wallet_short = self.wallet_address[:8] + "..." if len(self.wallet_address) > 8 else self.wallet_address
+                table.add_row("👛 Wallet", f"[cyan]{wallet_short}[/cyan]")
+                try:
+                    balance = self.blockchain.get_wallet_balance(self.wallet_address)
+                    table.add_row("💵 Balance", f"[bold yellow]{balance:.2f} 314ST[/bold yellow]")
+                except Exception:
+                    table.add_row("💵 Balance", "[dim]—[/dim]")
                 
         except Exception as e:
             # Graceful error handling
@@ -410,6 +424,15 @@ class MiningDashboard:
         """Gather current mining and blockchain stats"""
         stats = {}
         
+        # Always get current chain info first (real source of truth for blocks)
+        try:
+            current_chain_length = len(self.blockchain.chain)
+            session_blocks_actual = max(0, current_chain_length - self.state.start_blocks)
+            stats['session_blocks_found'] = session_blocks_actual
+            stats['total_blocks'] = current_chain_length
+        except Exception:
+            pass
+        
         # Try reading from status file first (faster, no dict access)
         try:
             with open('/tmp/pisecure_mining_status.txt', 'r') as f:
@@ -422,16 +445,23 @@ class MiningDashboard:
                         stats['hashes_tried'] = int(hashes)
                         stats['best_zeros'] = int(best_zeros)
                         stats['target_zeros'] = int(target)
-                        # Calculate hashrate from status file and dashboard start time
-                        elapsed = max(time.time() - self.state.start_time, 1)
-                        stats['hashrate'] = int(hashes) / elapsed
+                        # Calculate hashrate from status file (instant delta when available)
+                        now = time.time()
+                        if self.state.last_hash_time is not None:
+                            delta_hashes = max(int(hashes) - self.state.last_hashes, 0)
+                            delta_time = max(now - self.state.last_hash_time, 1e-3)
+                            stats['hashrate'] = delta_hashes / delta_time
+                        else:
+                            elapsed = max(now - self.state.start_time, 1)
+                            stats['hashrate'] = int(hashes) / elapsed
+                        self.state.last_hashes = int(hashes)
+                        self.state.last_hash_time = now
                         stats['mining_active'] = True
                     if len(parts) >= 6:
-                        block_index = int(parts[4])
                         reward = float(parts[5])
-                        stats['total_blocks'] = max(stats.get('total_blocks', 0), block_index)
-                        stats['last_reward'] = reward
-                        stats['last_block_index'] = block_index
+                        # Use actual session blocks to compute rewards
+                        session_blocks = stats.get('session_blocks_found', 0)
+                        stats['session_rewards'] = session_blocks * reward if reward > 0 else 0
         except Exception:
             pass
         
@@ -457,10 +487,11 @@ class MiningDashboard:
         if stats.get("session_blocks_found", 0) > self.state.session_blocks:
             self.state.session_blocks = stats["session_blocks_found"]
             self.state.last_block_time = time.time()
+        if stats.get("session_rewards", 0) > self.state.session_rewards:
+            self.state.session_rewards = stats["session_rewards"]
 
         # Always include basic chain info from blockchain so dashboard is never empty
         try:
-            stats['total_blocks'] = len(self.blockchain.chain)
             stats['pending_transactions'] = len(getattr(self.blockchain, 'pending_transactions', []))
             stats['difficulty'] = getattr(self.blockchain, 'difficulty', 0)
             if self.blockchain.chain:
