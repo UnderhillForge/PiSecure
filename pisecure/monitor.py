@@ -529,6 +529,9 @@ class MiningDashboard:
                 refresh_per_second=1/self.refresh_rate,
                 screen=True
             ) as live:
+                # Delay before starting monitor to allow TUI to fully render
+                time.sleep(1.5)
+                
                 iteration = 0
                 while True:
                     iteration += 1
