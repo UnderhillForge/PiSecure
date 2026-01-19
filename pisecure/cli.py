@@ -733,7 +733,8 @@ def monitor(wallet, validate_rewards, refresh, peer):
             try:
                 from .core.bootstrap_manager import get_bootstrap_registry
                 registry = get_bootstrap_registry()
-                bootstrap_peers = registry.get_peer_list(limit=50)
+                network = 'testnet' if testnet else None
+                bootstrap_peers = registry.get_peer_list(limit=50, network=network)
                 if bootstrap_peers:
                     print_output(f"   Seeding {len(bootstrap_peers)} peer(s) from bootstrap")
                     for p in bootstrap_peers:

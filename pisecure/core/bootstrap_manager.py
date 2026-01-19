@@ -190,7 +190,7 @@ class BootstrapRegistry:
 
         return healthy
 
-    def get_peer_list(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_peer_list(self, limit: int = 50, network: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Get peer list from healthy bootstrap servers.
 
@@ -201,22 +201,23 @@ class BootstrapRegistry:
         for server_url in self.get_healthy_servers():
             try:
                 # Check cache first
-                cached = self.peer_cache.get(server_url)
+                cache_key = (server_url, network or 'default')
+                cached = self.peer_cache.get(cache_key)
                 if cached and time.time() - cached['timestamp'] < self.cache_timeout:
                     peers.extend(cached['peers'])
                     continue
 
-                response = requests.get(
-                    f"{server_url}/api/v1/bootstrap/peers",
-                    timeout=90  # Increased to handle 60-90s server response times
-                )
+                url = f"{server_url}/api/v1/bootstrap/peers"
+                if network:
+                    url = f"{url}?network={network}"
+                response = requests.get(url, timeout=90)
 
                 if response.status_code == 200:
                     data = response.json()
                     server_peers = data.get('peers', [])
 
-                    # Cache the result
-                    self.peer_cache[server_url] = {
+                    # Cache the result (network-aware)
+                    self.peer_cache[cache_key] = {
                         'peers': server_peers,
                         'timestamp': time.time()
                     }
@@ -336,6 +337,7 @@ class RobustMinerReporter:
         # Syndicate membership (would be configurable)
         syndicate_membership = status_data.get('syndicate_membership')
 
+        is_testnet = os.environ.get('PISECURE_TESTNET') == '1'
         status_payload = {
             # Required fields
             "node_id": self.node_id,
@@ -363,7 +365,8 @@ class RobustMinerReporter:
 
             # Metadata
             "reported_at": time.time(),
-            "intelligence_enabled": True  # Indicate this report includes intelligence data
+            "intelligence_enabled": True,  # Indicate this report includes intelligence data
+            "network": "testnet" if is_testnet else "mainnet"
         }
 
         # Remove None values to keep payload clean
