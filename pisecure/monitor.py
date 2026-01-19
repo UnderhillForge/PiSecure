@@ -55,7 +55,8 @@ class MiningDashboard:
         refresh_rate: float = 1.0,
         syndicate: Optional[MiningSyndicate] = None,
         testnet: bool = False,
-        wallet_address: Optional[str] = None
+        wallet_address: Optional[str] = None,
+        mining_ready_callback=None
     ):
         self.blockchain = blockchain
         self.mode = mode
@@ -63,6 +64,7 @@ class MiningDashboard:
         self.syndicate = syndicate
         self.testnet = testnet
         self.wallet_address = wallet_address
+        self.mining_ready_callback = mining_ready_callback
         self.console = Console()
         self.state = DashboardState(mode=mode, refresh_rate=refresh_rate)
         self.state.start_blocks = len(getattr(blockchain, 'chain', []))
@@ -531,6 +533,10 @@ class MiningDashboard:
             ) as live:
                 # Delay before starting monitor to allow TUI to fully render
                 time.sleep(1.5)
+                
+                # Signal mining thread to start (if callback provided)
+                if self.mining_ready_callback:
+                    self.mining_ready_callback()
                 
                 iteration = 0
                 while True:

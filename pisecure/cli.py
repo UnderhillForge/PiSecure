@@ -393,12 +393,16 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
             from .monitor import MiningDashboard
             testnet = os.environ.get('PISECURE_TESTNET') == '1'
             
+            # Event to signal when dashboard is ready to start mining
+            mining_ready = threading.Event()
+            
             dashboard = MiningDashboard(
                 blockchain=blockchain,
                 mode='solo',
                 refresh_rate=1.0,
                 testnet=testnet,
-                wallet_address=miner_wallet
+                wallet_address=miner_wallet,
+                mining_ready_callback=lambda: mining_ready.set()
             )
             
             # Start mining in background thread
@@ -406,6 +410,9 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
             import logging
             
             def mine_loop():
+                # Wait for dashboard to signal ready before starting mining
+                mining_ready.wait()
+                
                 blocks_mined_session = 0
                 # Suppress ALL console logging during dashboard mode
                 import os
