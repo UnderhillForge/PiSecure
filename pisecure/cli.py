@@ -704,7 +704,8 @@ def verify_hardware():
 @click.option('--wallet', help='Wallet name or address to monitor (or earn validation rewards)')
 @click.option('--validate-rewards', is_flag=True, help='Earn validation rewards for blocks validated')
 @click.option('--refresh', default=1, show_default=True, help='Refresh interval in seconds')
-def monitor(wallet, validate_rewards, refresh):
+@click.option('--peer', help='Peer address to sync from (e.g., 192.168.1.100 or pi.local)')
+def monitor(wallet, validate_rewards, refresh, peer):
     """Live blockchain/network monitor (non-mining)"""
     try:
         # Force read-only validation to avoid PiHash requirement during load
@@ -722,6 +723,12 @@ def monitor(wallet, validate_rewards, refresh):
         print_output("🔄 Syncing with network for latest blocks...")
         try:
             peer_discovery = PeerDiscovery()
+            
+            # If peer address specified, add it to known peers
+            if peer:
+                print_output(f"   Adding peer: {peer}")
+                peer_discovery.add_peer(f"manual_{peer}", peer, 3142)
+            
             p2p_sync = P2PSyncManager(blockchain, peer_discovery)
             
             initial_height = len(blockchain.chain)
