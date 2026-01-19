@@ -721,9 +721,6 @@ def monitor(wallet, validate_rewards, refresh):
         # Sync with network to get latest blocks before monitoring
         print_output("🔄 Syncing with network for latest blocks...")
         try:
-            from .core.network import PeerDiscovery
-            from .core.p2p_sync import P2PSyncManager
-            
             peer_discovery = PeerDiscovery()
             p2p_sync = P2PSyncManager(blockchain, peer_discovery)
             
