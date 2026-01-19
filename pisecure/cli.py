@@ -721,7 +721,21 @@ def monitor(wallet, validate_rewards, refresh):
         # Sync with network to get latest blocks before monitoring
         print_output("🔄 Syncing with network for latest blocks...")
         try:
-            blockchain.sync_with_peers()
+            from .core.network import PeerDiscovery
+            from .core.p2p_sync import P2PSyncManager
+            
+            peer_discovery = PeerDiscovery()
+            p2p_sync = P2PSyncManager(blockchain, peer_discovery)
+            
+            initial_height = len(blockchain.chain)
+            p2p_sync._perform_sync_cycle()
+            final_height = len(blockchain.chain)
+            blocks_synced = final_height - initial_height
+            
+            if blocks_synced > 0:
+                print_output(f"✅ Synced {blocks_synced} blocks from network (height: {initial_height} → {final_height})")
+            else:
+                print_output(f"✅ Already up-to-date with network ({final_height} blocks)")
         except Exception as e:
             print_output(f"⚠️  Network sync had issues: {e}")
             print_output("   Continuing with local blockchain...")
