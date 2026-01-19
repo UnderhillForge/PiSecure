@@ -1042,6 +1042,13 @@ class SignBlock:
 
         current_zero_bits = count_zero_bits(self.hash)
 
+        # Initial status write so dashboard shows progress from the start
+        try:
+            with open('/tmp/pisecure_mining_status.txt', 'w') as f:
+                f.write(f"{self.nonce},{hashes_tried},{current_zero_bits},{target_zero_bits},0,0")
+        except Exception:
+            pass
+
         while current_zero_bits < target_zero_bits:
             self.nonce += 1
             self.hash = self.calculate_hash()
@@ -1050,12 +1057,11 @@ class SignBlock:
             
             # Update status file for dashboard (every 100 hashes)
             if hashes_tried % 100 == 0:
-                    # Final status update for dashboard
-                    try:
-                        with open('/tmp/pisecure_mining_status.txt', 'w') as f:
-                            f.write(f"{self.nonce},{hashes_tried},{current_zero_bits},{target_zero_bits}")
-                    except Exception:
-                        pass
+                try:
+                    with open('/tmp/pisecure_mining_status.txt', 'w') as f:
+                        f.write(f"{self.nonce},{hashes_tried},{current_zero_bits},{target_zero_bits},0,0")
+                except Exception:
+                    pass
 
             # Show progress every sample_interval in verbose mode
             if verbose and hashes_tried % sample_interval == 0:
@@ -1099,7 +1105,13 @@ class SignBlock:
         # Final status update for dashboard when block is found
         try:
             with open('/tmp/pisecure_mining_status.txt', 'w') as f:
-                f.write(f"{self.nonce},{hashes_tried},{current_zero_bits},{target_zero_bits}")
+                # Include block index and mining reward (if present) for dashboard
+                reward = 0
+                for tx in self.transactions:
+                    if tx.get('type') == 'mining_reward':
+                        reward = tx.get('amount', 0)
+                        break
+                f.write(f"{self.nonce},{hashes_tried},{current_zero_bits},{target_zero_bits},{self.index},{reward}")
         except Exception:
             pass
 

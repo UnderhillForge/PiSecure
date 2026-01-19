@@ -415,15 +415,23 @@ class MiningDashboard:
             with open('/tmp/pisecure_mining_status.txt', 'r') as f:
                 content = f.read().strip()
                 if content:
-                    nonce, hashes, best_zeros, target = content.split(',')
-                    stats['current_nonce'] = int(nonce)
-                    stats['hashes_tried'] = int(hashes)
-                    stats['best_zeros'] = int(best_zeros)
-                    stats['target_zeros'] = int(target)
-                    # Calculate hashrate from status file and dashboard start time
-                    elapsed = max(time.time() - self.state.start_time, 1)
-                    stats['hashrate'] = int(hashes) / elapsed
-                    stats['mining_active'] = True
+                    parts = content.split(',')
+                    if len(parts) >= 4:
+                        nonce, hashes, best_zeros, target = parts[:4]
+                        stats['current_nonce'] = int(nonce)
+                        stats['hashes_tried'] = int(hashes)
+                        stats['best_zeros'] = int(best_zeros)
+                        stats['target_zeros'] = int(target)
+                        # Calculate hashrate from status file and dashboard start time
+                        elapsed = max(time.time() - self.state.start_time, 1)
+                        stats['hashrate'] = int(hashes) / elapsed
+                        stats['mining_active'] = True
+                    if len(parts) >= 6:
+                        block_index = int(parts[4])
+                        reward = float(parts[5])
+                        stats['total_blocks'] = max(stats.get('total_blocks', 0), block_index)
+                        stats['last_reward'] = reward
+                        stats['last_block_index'] = block_index
         except Exception:
             pass
         
