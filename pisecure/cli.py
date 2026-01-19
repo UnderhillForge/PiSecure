@@ -718,6 +718,14 @@ def monitor(wallet, validate_rewards, refresh):
         # Initialize blockchain
         blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
         
+        # Sync with network to get latest blocks before monitoring
+        print_output("🔄 Syncing with network for latest blocks...")
+        try:
+            blockchain.sync_with_peers()
+        except Exception as e:
+            print_output(f"⚠️  Network sync had issues: {e}")
+            print_output("   Continuing with local blockchain...")
+        
         # Resolve wallet name to address if needed
         wallet_address = None
         if wallet:
