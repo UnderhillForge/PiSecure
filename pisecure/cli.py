@@ -413,29 +413,48 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
                 # Wait for dashboard to signal ready before starting mining
                 mining_ready.wait()
                 
-                blocks_mined_session = 0
-                # Suppress ALL console logging during dashboard mode
+                import sys
                 import os
+                
+                blocks_mined_session = 0
+                
+                # Redirect stdout/stderr to file to eliminate TUI flicker
+                # This prevents ANY output from interfering with the Rich Live display
+                try:
+                    devnull = open('/tmp/pisecure_mining.log', 'w')
+                    sys.stdout = devnull
+                    sys.stderr = devnull
+                except Exception:
+                    pass
+                
+                # Set environment flag
                 os.environ['PISECURE_QUIET'] = '1'
                 
-                # Disable all loggers that print to console
+                # Disable ALL loggers (root and specific)
+                logging.getLogger().setLevel(logging.CRITICAL)
                 for logger_name in ['pisecure', 'pisecure.core.nat_traversal', 
                                    'pisecure.network.discovery', 'pisecure.core.p2p_sync',
-                                   'pisecure.core.blockchain']:
+                                   'pisecure.core.blockchain', 'urllib3', 'requests',
+                                   'aiohttp', 'asyncio', 'dns', 'pip']:
                     logger = logging.getLogger(logger_name)
-                    logger.setLevel(logging.CRITICAL)  # Only show critical errors
+                    logger.setLevel(logging.CRITICAL)
+                    # Remove all handlers to prevent any output
+                    logger.handlers.clear()
                 
                 while not mining_stopped:
                     try:
-                        block = blockchain.mine_pending_transactions(miner_wallet, verbose=True)
+                        block = blockchain.mine_pending_transactions(miner_wallet, verbose=False)
                         if block:
                             blocks_mined_session += 1
                             blockchain.adapt_difficulty()
                         time.sleep(0.1)
                     except Exception as e:
-                        # Log to file instead of console
-                        with open('/tmp/pisecure_mining_errors.log', 'a') as f:
-                            f.write(f"{time.time()}: {e}\n")
+                        # Log to file instead of stdout
+                        try:
+                            with open('/tmp/pisecure_mining_errors.log', 'a') as f:
+                                f.write(f"{time.time()}: {e}\n")
+                        except Exception:
+                            pass
                         time.sleep(1)
             
             mining_thread = threading.Thread(target=mine_loop, daemon=True)
