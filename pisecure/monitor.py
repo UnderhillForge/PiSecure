@@ -420,13 +420,11 @@ class MiningDashboard:
                     stats['hashes_tried'] = int(hashes)
                     stats['best_zeros'] = int(best_zeros)
                     stats['target_zeros'] = int(target)
-                    # Calculate hashrate from file data
-                    if hasattr(self.blockchain, 'mining_session') and self.blockchain.mining_session.get('start_time'):
-                        elapsed = time.time() - self.blockchain.mining_session['start_time']
-                        if elapsed > 0:
-                            stats['hashrate'] = int(hashes) / elapsed
+                    # Calculate hashrate from status file and dashboard start time
+                    elapsed = max(time.time() - self.state.start_time, 1)
+                    stats['hashrate'] = int(hashes) / elapsed
                     stats['mining_active'] = True
-        except:
+        except Exception:
             pass
         
         # Fallback to dict reads if file method fails
@@ -451,6 +449,16 @@ class MiningDashboard:
         if stats.get("session_blocks_found", 0) > self.state.session_blocks:
             self.state.session_blocks = stats["session_blocks_found"]
             self.state.last_block_time = time.time()
+
+        # Always include basic chain info from blockchain so dashboard is never empty
+        try:
+            stats['total_blocks'] = len(self.blockchain.chain)
+            stats['pending_transactions'] = len(getattr(self.blockchain, 'pending_transactions', []))
+            stats['difficulty'] = getattr(self.blockchain, 'difficulty', 0)
+            if self.blockchain.chain:
+                stats['latest_block_time'] = self.blockchain.chain[-1].timestamp
+        except Exception:
+            pass
         
         # Add wallet info if monitoring with validation rewards
         if self.wallet_address and self.mode == 'validation':
