@@ -2753,7 +2753,10 @@ class BlockchainAPI:
         else:
             logger.info(f"🔓 HTTP mode enabled - {ssl_reason}")
 
+        # Determine node mode based on host binding
+        node_mode = "Full Node" if self.host == '0.0.0.0' else "Outbound-Only"
         logger.info(f"🚀 Starting PiSecure API Server on {protocol}://{self.host}:{self.port}")
+        logger.info(f"📡 Node Mode: {node_mode} (incoming connections {'enabled' if self.host == '0.0.0.0' else 'disabled'})")
         logger.info(f"📚 API Documentation: {protocol}://{self.host}:{self.port}/api/{self.api_version}/docs")
 
         # Register this node with bootstrap service
@@ -3000,8 +3003,9 @@ class BlockchainAPI:
             # Final fallback to local address
             if not host:
                 host = self.host if self.host != '0.0.0.0' else 'localhost'
-                logger.warning(f"⚠️ Using local address {host} - node may not be reachable from internet")
-                logger.warning(f"   Consider: 1) Enabling UPnP on router, 2) Port forwarding 3142, or 3) Using relay")
+                logger.info(f"ℹ️  Running in outbound-only mode (local address: {host})")
+                logger.info(f"   Mining/validation works normally - incoming connections disabled")
+                logger.info(f"   To help seed the network: Enable UPnP on router or forward port 3142")
 
             # Get system information
             import platform

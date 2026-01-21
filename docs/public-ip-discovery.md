@@ -1,5 +1,36 @@
 # Public IP Discovery for Internet-Wide P2P
 
+## Do I Need Port Forwarding?
+
+**Short answer: NO for basic mining/validation!**
+
+Just like Bitcoin, Ethereum, and other networks, PiSecure works in multiple modes:
+
+### ✅ Outbound-Only Mode (No Port Forwarding Needed)
+- **Mining**: Submit blocks via outbound connections ✅
+- **Validation**: Fetch blocks from peers via outbound ✅
+- **Transaction Broadcasting**: Send transactions to network ✅
+- **Syncing**: Download blockchain from other nodes ✅
+
+You can mine and validate without any router configuration!
+
+### 🌟 Full Node Mode (Port Forwarding Recommended)
+- Everything above, PLUS:
+- **Help others sync**: Seed blockchain to new nodes
+- **Accept incoming connections**: Be discoverable by other peers
+- **Improve network health**: Increase decentralization
+
+**Auto-enabled on ~60% of routers via UPnP** - no manual config needed!
+
+## How PiSecure Handles This
+
+### Automatic Configuration Attempts (No User Action)
+1. **UPnP**: Tries to auto-configure port forwarding
+2. **Relay Network**: Routes through community relay nodes
+3. **Outbound-Only**: Falls back to client mode (still fully functional)
+
+Your node will automatically use the best available method.
+
 ## Problem
 Peers behind home routers need to report their **public IP** (router's external address) to bootstrap servers and other nodes. Reporting local LAN addresses (192.168.x.x) only works within the same network.
 
