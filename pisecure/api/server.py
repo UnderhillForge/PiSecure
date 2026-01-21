@@ -228,8 +228,8 @@ class BlockchainAPI:
         # Setup routes
         self._setup_routes()
 
-        # Setup DDoS protection middleware
-        self._setup_ddos_protection()
+        # Setup DDoS protection middleware (TODO: implement)
+        # self._setup_ddos_protection()
 
         # Setup security headers middleware
         self._setup_security_headers()
