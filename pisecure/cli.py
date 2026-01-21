@@ -792,11 +792,25 @@ def monitor(wallet, validate_rewards, refresh, peer):
         
         # Start background sync thread for continuous block fetching
         import threading
+        import logging as bg_logging
         sync_stop_event = threading.Event()
+        sync_debug_log = None
+        
+        # Open debug log for background sync
+        try:
+            sync_debug_log = open('/tmp/pisecure_bg_sync.log', 'w')
+            sync_debug_log.write(f"Background sync started at {time.time()}\n")
+            sync_debug_log.write(f"Initial block height: {len(blockchain.chain)}\n")
+            sync_debug_log.flush()
+        except:
+            pass
         
         def background_sync_loop():
             """Periodically sync new blocks from the network"""
             sync_interval = 30  # Sync every 30 seconds
+            discovery_interval = 90  # Re-discover peers every 90 seconds
+            last_discovery = time.time()
+            
             while not sync_stop_event.is_set():
                 try:
                     # Perform a sync cycle every N seconds
@@ -805,12 +819,53 @@ def monitor(wallet, validate_rewards, refresh, peer):
                             return
                         time.sleep(2)
                     
+                    current_height = len(blockchain.chain)
+                    
+                    # Re-discover peers periodically
+                    if time.time() - last_discovery > discovery_interval:
+                        try:
+                            if sync_debug_log:
+                                sync_debug_log.write(f"[{time.time()}] Re-discovering peers from bootstrap\n")
+                                sync_debug_log.flush()
+                            
+                            from .core.bootstrap_manager import get_bootstrap_registry
+                            registry = get_bootstrap_registry()
+                            network = 'testnet' if testnet else None
+                            new_peers = registry.get_peer_list(limit=50, network=network)
+                            
+                            if new_peers:
+                                for p in new_peers:
+                                    addr = p.get('address')
+                                    port = int(p.get('port', 3142))
+                                    if addr:
+                                        peer_discovery.add_peer(f"bootstrap_{addr}:{port}", addr, port)
+                                if sync_debug_log:
+                                    sync_debug_log.write(f"[{time.time()}] Added {len(new_peers)} peers\n")
+                                    sync_debug_log.flush()
+                            
+                            last_discovery = time.time()
+                        except Exception as e:
+                            if sync_debug_log:
+                                sync_debug_log.write(f"[{time.time()}] Peer discovery error: {e}\n")
+                                sync_debug_log.flush()
+                    
                     # Only sync if we have peers
                     if hasattr(p2p_sync, '_perform_sync_cycle'):
+                        if sync_debug_log:
+                            sync_debug_log.write(f"[{time.time()}] Attempting sync from height {current_height}\n")
+                            sync_debug_log.flush()
+                        
                         p2p_sync._perform_sync_cycle()
+                        
+                        new_height = len(blockchain.chain)
+                        if new_height > current_height and sync_debug_log:
+                            sync_debug_log.write(f"[{time.time()}] ✅ Synced {new_height - current_height} blocks ({current_height} → {new_height})\n")
+                            sync_debug_log.flush()
                 except Exception as e:
-                    # Silently ignore sync errors to avoid dashboard flicker
-                    pass
+                    # Log errors for debugging
+                    if sync_debug_log:
+                        sync_debug_log.write(f"[{time.time()}] Sync error: {str(e)}\n")
+                        sync_debug_log.flush()
         
         # Start the background sync thread
         sync_thread = threading.Thread(target=background_sync_loop, daemon=True)
