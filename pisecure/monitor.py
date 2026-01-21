@@ -37,12 +37,18 @@ class DashboardState:
     temp_history: deque = field(default_factory=lambda: deque(maxlen=60))
     zeros_history: deque = field(default_factory=lambda: deque(maxlen=60))
     
-    # Session tracking
+    # Session tracking (mining mode)
     session_blocks: int = 0
     session_rewards: float = 0.0
     last_block_time: Optional[float] = None
     last_hashes: int = 0
     last_hash_time: Optional[float] = None
+    
+    # Validation tracking (validation mode)
+    validated_blocks_count: int = 0
+    validation_rewards_earned: float = 0.0
+    last_validated_block_height: int = 0
+    wallet_balance_start: float = 0.0
 
 
 class MiningDashboard:
@@ -250,7 +256,7 @@ class MiningDashboard:
         return Panel(table, title="🖥️  Hardware Health", border_style="blue", box=box.ROUNDED)
     
     def build_session_panel(self, stats: Dict[str, Any]) -> Panel:
-        """Build session statistics panel"""
+        """Build session statistics panel (mining or validation mode)"""
         table = Table(show_header=False, box=None, padding=(0, 2))
         table.add_column("Metric", style="cyan")
         table.add_column("Value", style="white")
@@ -259,22 +265,46 @@ class MiningDashboard:
         uptime = time.time() - self.state.start_time
         table.add_row("⏰ Uptime", self.format_uptime(uptime))
         
-        # Blocks found this session (since dashboard started)
-        blocks_found = stats.get("session_blocks_found", self.state.session_blocks)
-        table.add_row("📦 Blocks (Session)", f"[bold green]{blocks_found}[/bold green]")
-        
-        # Rewards earned
-        rewards = stats.get("session_rewards", self.state.session_rewards if self.state.session_rewards else blocks_found * 50)
-        table.add_row("💰 Rewards", f"[bold yellow]{rewards:.2f} 314ST[/bold yellow]")
-        
-        # Average block time
-        if blocks_found > 0 and self.state.last_block_time:
-            avg_block_time = uptime / blocks_found
-            table.add_row("⏱️  Avg Block", self.format_uptime(avg_block_time))
-        
-        # Network difficulty (use target_zeros for PiHash)
-        difficulty = stats.get("target_zeros", stats.get("difficulty", 0))
-        table.add_row("🎯 Difficulty", f"{difficulty} zeros")
+        if self.mode == "validation":
+            # Validation mode: track validated blocks and rewards
+            current_blocks = stats.get("total_blocks", 0)
+            blocks_since_start = max(0, current_blocks - self.state.start_blocks)
+            
+            # Update validated blocks count
+            if blocks_since_start > self.state.last_validated_block_height:
+                self.state.validated_blocks_count = blocks_since_start
+                self.state.last_validated_block_height = blocks_since_start
+            
+            table.add_row("✅ Blocks Validated", f"[bold green]{self.state.validated_blocks_count}[/bold green]")
+            
+            # Validation rewards (0.5 per validated block)
+            validation_rewards = self.state.validated_blocks_count * 0.5
+            table.add_row("💰 Validation Rewards", f"[bold yellow]{validation_rewards:.2f} 314ST[/bold yellow]")
+            
+            # Pending transactions being processed
+            pending_txs = stats.get("pending_transactions", 0)
+            table.add_row("📨 Pending TX", f"{pending_txs}")
+            
+            # Wallet balance
+            wallet_balance = stats.get("wallet_balance", 0.0)
+            table.add_row("💵 Wallet Balance", f"[bold cyan]{wallet_balance:.2f} 314ST[/bold cyan]")
+        else:
+            # Mining/Monitor mode: original mining stats
+            blocks_found = stats.get("session_blocks_found", self.state.session_blocks)
+            table.add_row("📦 Blocks (Session)", f"[bold green]{blocks_found}[/bold green]")
+            
+            # Rewards earned
+            rewards = stats.get("session_rewards", self.state.session_rewards if self.state.session_rewards else blocks_found * 50)
+            table.add_row("💰 Rewards", f"[bold yellow]{rewards:.2f} 314ST[/bold yellow]")
+            
+            # Average block time
+            if blocks_found > 0 and self.state.last_block_time:
+                avg_block_time = uptime / blocks_found
+                table.add_row("⏱️  Avg Block", self.format_uptime(avg_block_time))
+            
+            # Network difficulty (use target_zeros for PiHash)
+            difficulty = stats.get("target_zeros", stats.get("difficulty", 0))
+            table.add_row("🎯 Difficulty", f"{difficulty} zeros")
         
         return Panel(table, title="📊 Session Stats", border_style="yellow", box=box.ROUNDED)
     
