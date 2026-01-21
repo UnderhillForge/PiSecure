@@ -350,6 +350,83 @@ class PiSecureDashboard:
             except Exception as e:
                 return jsonify({'error': str(e)})
 
+        @self.app.route('/api/wallets/metamask/link', methods=['POST'])
+        def api_wallet_metamask_link():
+            """API endpoint for linking MetaMask wallet"""
+            try:
+                data = request.get_json()
+                
+                # Extract MetaMask wallet data
+                metamask_address = data.get('address')
+                chain_id = data.get('chain_id')
+                signature = data.get('signature')
+                message = data.get('message')
+                timestamp = data.get('timestamp')
+                
+                if not metamask_address:
+                    return jsonify({'error': 'MetaMask address is required'})
+                
+                # Validate address format (Ethereum addresses are 42 chars with 0x prefix)
+                if not metamask_address.startswith('0x') or len(metamask_address) != 42:
+                    return jsonify({'error': 'Invalid MetaMask address format'})
+                
+                # Store MetaMask wallet link in wallet system
+                wallet = SignWallet()
+                
+                # Create a new wallet entry for this MetaMask wallet
+                wallet_id = f"metamask_{metamask_address[-8:]}"  # Use last 8 chars of address
+                wallet_name = f"MetaMask {metamask_address[:6]}...{metamask_address[-4:]}"
+                
+                # Check if this MetaMask wallet is already linked
+                existing_wallets = wallet.list_wallets()
+                for w in existing_wallets:
+                    if w.get('metamask_address') == metamask_address:
+                        return jsonify({
+                            'success': True,
+                            'already_linked': True,
+                            'wallet_id': w['id'],
+                            'address': metamask_address,
+                            'chain_id': chain_id,
+                            'message': 'MetaMask wallet already linked'
+                        })
+                
+                # Create wallet link record
+                # For now, we'll store MetaMask address as a special type of wallet
+                # that doesn't have PiSecure keys but can be tracked
+                wallet_data = {
+                    'wallet_id': wallet_id,
+                    'name': wallet_name,
+                    'metamask_address': metamask_address,
+                    'chain_id': chain_id,
+                    'linked_at': timestamp,
+                    'signature': signature,
+                    'message': message,
+                    'wallet_type': 'metamask'
+                }
+                
+                # Save MetaMask wallet link
+                import json
+                from pathlib import Path
+                metamask_dir = Path('/var/lib/pisecure/wallets/metamask')
+                metamask_dir.mkdir(parents=True, exist_ok=True)
+                
+                metamask_wallet_file = metamask_dir / f"{wallet_id}.json"
+                with open(metamask_wallet_file, 'w') as f:
+                    json.dump(wallet_data, f, indent=2)
+                
+                return jsonify({
+                    'success': True,
+                    'wallet_id': wallet_id,
+                    'address': metamask_address,
+                    'chain_id': chain_id,
+                    'message': 'MetaMask wallet linked successfully'
+                })
+                
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return jsonify({'error': str(e)})
+
         @self.app.route('/api/blockchain/blocks')
         def api_blocks():
             """API endpoint for recent blocks"""

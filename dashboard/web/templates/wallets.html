@@ -6,6 +6,7 @@
     <title>PiSecure Wallets</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='js/metamask.js') }}"></script>
 </head>
 <body>
     <div class="container">
@@ -49,6 +50,27 @@
                         <input type="file" id="import-file" accept=".dat" style="margin-bottom: 10px;">
                         <button onclick="importWallet()" style="padding: 10px 20px; background: #17a2b8; color: white; border: none; border-radius: 4px;">Import Wallet</button>
                     </div>
+                </div>
+            </section>
+
+            <!-- MetaMask Integration -->
+            <section class="card">
+                <h2>🦊 MetaMask Wallet</h2>
+                <div class="metamask-section">
+                    <p style="margin-bottom: 15px; color: #666;">
+                        Connect your MetaMask wallet to use it with PiSecure blockchain.
+                    </p>
+                    <div class="metamask-info">
+                        <div id="metamask-status" style="margin-bottom: 10px;">
+                            <span style="color: #999;">Not connected</span>
+                        </div>
+                        <div id="metamask-account" style="margin-bottom: 10px; font-family: monospace;"></div>
+                        <div id="metamask-chain" style="margin-bottom: 10px; color: #666;"></div>
+                        <div id="metamask-balance" style="margin-bottom: 10px; font-weight: bold;"></div>
+                    </div>
+                    <button id="metamask-connect-btn" onclick="connectMetamask()" style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 10px;">
+                        <span>Connect MetaMask</span>
+                    </button>
                 </div>
             </section>
 
@@ -395,7 +417,22 @@
         window.onload = function() {
             loadWallets();
             toggleNameInput(); // Initialize name input state
+            
+            // Initialize MetaMask integration
+            if (typeof MetamaskIntegration !== 'undefined') {
+                window.metamaskIntegration = new MetamaskIntegration();
+            }
         };
+
+        // MetaMask connection function
+        function connectMetamask() {
+            if (!window.metamaskIntegration) {
+                alert('MetaMask integration not initialized');
+                return;
+            }
+            
+            window.metamaskIntegration.connect();
+        }
 
         // Allow Enter key to trigger lookup
         document.getElementById('wallet-address').addEventListener('keypress', function(e) {
@@ -538,6 +575,39 @@
         .outgoing {
             color: #dc3545;
             font-weight: bold;
+        }
+
+        /* MetaMask Section Styling */
+        .metamask-section {
+            padding: 15px;
+        }
+
+        .metamask-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 4px solid #007bff;
+        }
+
+        #metamask-connect-btn {
+            transition: all 0.3s ease;
+        }
+
+        #metamask-connect-btn:hover:not(:disabled) {
+            background: #0056b3 !important;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        #metamask-connect-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.8;
+        }
+
+        #metamask-account {
+            color: #333;
+            font-size: 14px;
         }
     </style>
 </body>
