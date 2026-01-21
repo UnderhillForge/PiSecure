@@ -705,7 +705,8 @@ def verify_hardware():
 @click.option('--validate-rewards', is_flag=True, help='Earn validation rewards for blocks validated')
 @click.option('--refresh', default=1, show_default=True, help='Refresh interval in seconds')
 @click.option('--peer', help='Peer address to sync from (e.g., 192.168.1.100 or pi.local)')
-def monitor(wallet, validate_rewards, refresh, peer):
+@click.option('--resync', is_flag=True, help='Force full resync from network (clears local chain)')
+def monitor(wallet, validate_rewards, refresh, peer, resync):
     """Live blockchain/network monitor (non-mining)"""
     try:
         # Force read-only validation to avoid PiHash requirement during load
@@ -715,6 +716,34 @@ def monitor(wallet, validate_rewards, refresh, peer):
             os.environ['PISECURE_VALIDATION_WALLET'] = wallet
         
         testnet = os.environ.get('PISECURE_TESTNET') == '1'
+        
+        # Handle resync request - clear local chain and force fresh sync
+        if resync:
+            print_output("🔄 Force resync requested - clearing local blockchain data...")
+            try:
+                import shutil
+                if testnet:
+                    data_dir = Path("/var/lib/pisecure-testnet")
+                else:
+                    data_dir = Path("/var/lib/pisecure")
+                
+                # Remove blockchain files
+                if (data_dir / "blockchain.json").exists():
+                    (data_dir / "blockchain.json").unlink()
+                    print_output("   Removed blockchain.json")
+                
+                # Remove hybrid storage files
+                for blk_file in data_dir.glob("blk*.dat"):
+                    blk_file.unlink()
+                    print_output(f"   Removed {blk_file.name}")
+                
+                if (data_dir / "index.db").exists():
+                    (data_dir / "index.db").unlink()
+                    print_output("   Removed index.db")
+                
+                print_output("✅ Local blockchain cleared - will resync from network")
+            except Exception as e:
+                print_warning(f"Failed to clear blockchain: {e}")
         
         # Initialize blockchain
         blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
@@ -750,7 +779,22 @@ def monitor(wallet, validate_rewards, refresh, peer):
             p2p_sync = P2PSyncManager(blockchain, peer_discovery)
             
             initial_height = len(blockchain.chain)
-            p2p_sync._perform_sync_cycle()
+            
+            # Perform aggressive sync if resync flag or large block gap detected
+            if resync:
+                print_output("   Performing aggressive full sync...")
+                # Run multiple sync cycles to catch up quickly
+                for i in range(10):
+                    p2p_sync._perform_sync_cycle()
+                    current_height = len(blockchain.chain)
+                    if current_height > initial_height:
+                        print_output(f"   Sync cycle {i+1}: +{current_height - initial_height} blocks (total: {current_height})")
+                        initial_height = current_height
+                    else:
+                        break  # No more blocks available
+            else:
+                p2p_sync._perform_sync_cycle()
+            
             final_height = len(blockchain.chain)
             blocks_synced = final_height - initial_height
             
