@@ -499,23 +499,36 @@ class P2PSyncManager:
 
     def _switch_to_chain(self, new_chain: List[Dict]):
         """Switch to a new blockchain (fork resolution)."""
-        # This is a simplified implementation
-        # In a real blockchain, this would need to:
-        # 1. Validate all blocks
-        # 2. Handle orphaned transactions
-        # 3. Update wallet balances
-        # 4. Notify other components
+        self.logger.info(f"🔄 Switching to new chain with {len(new_chain)} blocks")
 
-        # For now, just replace the chain (this would need to be integrated with SignChain)
-        logger.info(f"🔄 Switching to new chain with {len(new_chain)} blocks")
-
-        # Update our known blocks
-        for block in new_chain:
-            self.known_blocks.add(block.get('hash', ''))
-
-        # This would need to call blockchain.replace_chain(new_chain) or similar
-        # For the test implementation, we'll just log it
-        self.sync_stats['blocks_synced'] += len(new_chain) - len(self.blockchain.chain)
+        try:
+            # Convert dict blocks to SignBlock objects
+            from .blockchain import SignBlock
+            
+            sign_blocks = []
+            for block_data in new_chain:
+                sign_block = SignBlock(
+                    index=block_data.get('index', 0),
+                    timestamp=block_data.get('timestamp', 0),
+                    transactions=block_data.get('transactions', []),
+                    previous_hash=block_data.get('previous_hash', ''),
+                    nonce=block_data.get('nonce', 0),
+                    hash=block_data.get('hash', '')
+                )
+                sign_blocks.append(sign_block)
+            
+            # Replace the blockchain
+            self.blockchain.chain = sign_blocks
+            
+            # Save to disk
+            self.blockchain.save_chain()
+            
+            self.logger.info(f"✅ Chain switched successfully - now at {len(self.blockchain.chain)} blocks")
+            self.sync_stats['blocks_synced'] += len(new_chain)
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to switch chain: {e}")
+            raise
 
     def _validate_transaction(self, tx_data: Dict) -> bool:
         """Validate a transaction."""
