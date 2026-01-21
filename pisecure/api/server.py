@@ -2943,13 +2943,65 @@ class BlockchainAPI:
                 except Exception:
                     pass
 
+    def _get_public_ip_fallback(self) -> Optional[str]:
+        """Get public IP using external services as fallback"""
+        services = [
+            'https://api.ipify.org',
+            'https://ifconfig.me/ip',
+            'https://icanhazip.com',
+            'https://ipinfo.io/ip'
+        ]
+        
+        for service_url in services:
+            try:
+                import requests
+                response = requests.get(service_url, timeout=5)
+                if response.status_code == 200:
+                    public_ip = response.text.strip()
+                    # Basic validation
+                    if '.' in public_ip and len(public_ip) <= 15:
+                        logger.debug(f"Got public IP {public_ip} from {service_url}")
+                        return public_ip
+            except Exception as e:
+                logger.debug(f"Failed to get IP from {service_url}: {e}")
+                continue
+        
+        return None
+
     def _register_with_bootstrap(self):
         """Register this node with the bootstrap service on startup"""
         try:
             # Get node information
             node_id = self.peer_discovery.node_id
-            host = self.host if self.host != '0.0.0.0' else 'localhost'
             port = self.port
+            
+            # Discover public IP address (for internet-wide P2P)
+            host = None
+            
+            # Try NAT traversal methods (STUN/UPnP)
+            try:
+                nat_results = node_discovery.make_node_discoverable()
+                endpoints = nat_results.get('endpoints', [])
+                if endpoints:
+                    # Use highest priority endpoint
+                    best_endpoint = max(endpoints, key=lambda e: e.get('priority', 0))
+                    host = best_endpoint.get('ip') or best_endpoint.get('address')
+                    if host:
+                        logger.info(f"🌐 Discovered public IP: {host} via {best_endpoint.get('type')}")
+            except Exception as e:
+                logger.debug(f"NAT traversal failed: {e}")
+            
+            # Try external service fallback if NAT traversal failed
+            if not host:
+                host = self._get_public_ip_fallback()
+                if host:
+                    logger.info(f"🌐 Discovered public IP: {host} via external service")
+            
+            # Final fallback to local address
+            if not host:
+                host = self.host if self.host != '0.0.0.0' else 'localhost'
+                logger.warning(f"⚠️ Using local address {host} - node may not be reachable from internet")
+                logger.warning(f"   Consider: 1) Enabling UPnP on router, 2) Port forwarding 3142, or 3) Using relay")
 
             # Get system information
             import platform
