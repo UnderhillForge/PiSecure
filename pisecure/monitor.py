@@ -270,10 +270,9 @@ class MiningDashboard:
             current_blocks = stats.get("total_blocks", 0)
             blocks_since_start = max(0, current_blocks - self.state.start_blocks)
             
-            # Update validated blocks count
-            if blocks_since_start > self.state.last_validated_block_height:
-                self.state.validated_blocks_count = blocks_since_start
-                self.state.last_validated_block_height = blocks_since_start
+            # Update validated blocks count (all blocks since validation started are validated)
+            self.state.validated_blocks_count = blocks_since_start
+            self.state.last_validated_block_height = blocks_since_start
             
             table.add_row("✅ Blocks Validated", f"[bold green]{self.state.validated_blocks_count}[/bold green]")
             
