@@ -57,6 +57,7 @@ class P2PSyncManager:
         self.peer_discovery = peer_discovery or PeerDiscovery()
         self.sync_interval = sync_interval
         self.max_sync_peers = max_sync_peers
+        self.logger = logging.getLogger(__name__)
 
         # Bootstrap node configuration
         self.bootstrap_urls = [
