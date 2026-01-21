@@ -1866,9 +1866,12 @@ class SignChain:
                 is_valid = False
                 break
 
-            # Check proof-of-work
-            if not hash_meets_zero_bits(current.hash, self.difficulty):
-                print(f"❌ Block {current.index} has invalid proof-of-work (requires ≥{self.difficulty} zero bits)")
+            # Check proof-of-work against minimum safe difficulty
+            # Note: Blocks mined at lower difficulties in the past are still valid
+            # We only enforce they meet the minimum safe threshold
+            min_difficulty = 130  # Minimum safe difficulty (from emergency_difficulty_floor)
+            if not hash_meets_zero_bits(current.hash, min_difficulty):
+                print(f"❌ Block {current.index} has invalid proof-of-work (requires ≥{min_difficulty} zero bits, current difficulty: {self.difficulty})")
                 is_valid = False
                 break
 
