@@ -15,6 +15,8 @@ import time
 import threading
 import subprocess
 import hashlib
+import secrets
+import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -370,25 +372,33 @@ class PiSecureDashboard:
                 if not metamask_address.startswith('0x') or len(metamask_address) != 42:
                     return jsonify({'error': 'Invalid MetaMask address format'})
                 
-                # Store MetaMask wallet link in wallet system
-                wallet = SignWallet()
-                
-                # Create a new wallet entry for this MetaMask wallet
-                wallet_id = f"metamask_{metamask_address[-8:]}"  # Use last 8 chars of address
+                # Generate unique wallet ID using hash of address to avoid collisions
+                address_hash = hashlib.sha256(metamask_address.encode()).hexdigest()[:16]
+                wallet_id = f"metamask_{address_hash}"
                 wallet_name = f"MetaMask {metamask_address[:6]}...{metamask_address[-4:]}"
                 
                 # Check if this MetaMask wallet is already linked
-                existing_wallets = wallet.list_wallets()
-                for w in existing_wallets:
-                    if w.get('metamask_address') == metamask_address:
-                        return jsonify({
-                            'success': True,
-                            'already_linked': True,
-                            'wallet_id': w['id'],
-                            'address': metamask_address,
-                            'chain_id': chain_id,
-                            'message': 'MetaMask wallet already linked'
-                        })
+                # Read MetaMask directory to check for existing wallets
+                metamask_dir = Path('/var/lib/pisecure/wallets/metamask')
+                metamask_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Check all existing MetaMask wallet files
+                for wallet_file in metamask_dir.glob('*.json'):
+                    try:
+                        with open(wallet_file, 'r') as f:
+                            existing_data = json.load(f)
+                            if existing_data.get('metamask_address') == metamask_address:
+                                return jsonify({
+                                    'success': True,
+                                    'already_linked': True,
+                                    'wallet_id': existing_data['wallet_id'],
+                                    'address': metamask_address,
+                                    'chain_id': chain_id,
+                                    'message': 'MetaMask wallet already linked'
+                                })
+                    except (json.JSONDecodeError, KeyError):
+                        # Skip invalid wallet files
+                        continue
                 
                 # Create wallet link record
                 # For now, we'll store MetaMask address as a special type of wallet
@@ -405,11 +415,6 @@ class PiSecureDashboard:
                 }
                 
                 # Save MetaMask wallet link
-                import json
-                from pathlib import Path
-                metamask_dir = Path('/var/lib/pisecure/wallets/metamask')
-                metamask_dir.mkdir(parents=True, exist_ok=True)
-                
                 metamask_wallet_file = metamask_dir / f"{wallet_id}.json"
                 with open(metamask_wallet_file, 'w') as f:
                     json.dump(wallet_data, f, indent=2)
@@ -423,7 +428,6 @@ class PiSecureDashboard:
                 })
                 
             except Exception as e:
-                import traceback
                 traceback.print_exc()
                 return jsonify({'error': str(e)})
 
