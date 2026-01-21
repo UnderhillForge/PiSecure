@@ -178,13 +178,24 @@ class P2PSyncManager:
         all_peers = self.peer_discovery.get_known_peers()
         healthy_peers = []
 
+        self.logger.info(f"🔍 Checking {len(all_peers)} known peers for sync...")
         for peer_id, peer_info in all_peers.items():
-            if peer_info.get('connected', False):
+            connected = peer_info.get('connected', False)
+            last_seen = peer_info.get('last_seen', 0)
+            age = time.time() - last_seen
+            self.logger.info(f"  Peer {peer_id}: connected={connected}, age={age:.1f}s")
+            
+            if connected:
                 # Prioritize peers with recent activity
-                last_seen = peer_info.get('last_seen', 0)
-                if time.time() - last_seen < 300:  # Active within 5 minutes
+                if age < 300:  # Active within 5 minutes
                     healthy_peers.append(peer_id)
+                    self.logger.info(f"    ✅ Selected for sync")
+                else:
+                    self.logger.info(f"    ⏰ Too old (>5min)")
+            else:
+                self.logger.info(f"    ❌ Not connected")
 
+        self.logger.info(f"📋 Selected {len(healthy_peers)} healthy peers for sync")
         # Sort by connection quality (could be enhanced with latency metrics)
         return healthy_peers[:self.max_sync_peers * 2]  # Select more than needed for failover
 

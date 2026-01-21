@@ -758,6 +758,7 @@ def monitor(wallet, validate_rewards, refresh, peer, resync):
             if peer:
                 print_output(f"   Adding peer: {peer}")
                 peer_discovery.add_peer(f"manual_{peer}", peer, 3142)
+                peer_discovery.mark_peer_connected(f"manual_{peer}")
 
             # Pull peers from bootstrap registry to seed discovery
             try:
@@ -771,7 +772,9 @@ def monitor(wallet, validate_rewards, refresh, peer, resync):
                         addr = p.get('address')
                         port = int(p.get('port', 3142))
                         if addr:
-                            peer_discovery.add_peer(f"bootstrap_{addr}:{port}", addr, port)
+                            peer_id = f"bootstrap_{addr}:{port}"
+                            peer_discovery.add_peer(peer_id, addr, port)
+                            peer_discovery.mark_peer_connected(peer_id)
                 else:
                     print_output("   No peers available from bootstrap (peer cache empty)")
             except Exception as e:
@@ -893,7 +896,9 @@ def monitor(wallet, validate_rewards, refresh, peer, resync):
                                     addr = p.get('address')
                                     port = int(p.get('port', 3142))
                                     if addr:
-                                        peer_discovery.add_peer(f"bootstrap_{addr}:{port}", addr, port)
+                                        peer_id = f"bootstrap_{addr}:{port}"
+                                        peer_discovery.add_peer(peer_id, addr, port)
+                                        peer_discovery.mark_peer_connected(peer_id)
                                 if sync_debug_log:
                                     sync_debug_log.write(f"[{time.time()}] Added {len(new_peers)} peers\n")
                                     sync_debug_log.flush()
