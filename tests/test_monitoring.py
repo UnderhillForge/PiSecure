@@ -161,7 +161,9 @@ class TestHealthChecker:
                 with patch('pisecure.core.monitoring.psutil'):
                     collector.collect_system_metrics(blockchain_height=100 + i*5)
 
-        health = checker.check_system_health()
+        # Check health with mocked time set to "now" (base_time)
+        with patch('pisecure.core.monitoring.time.time', return_value=base_time):
+            health = checker.check_system_health()
         growth_check = health.checks.get('blockchain_growth')
         assert growth_check is not None
         assert growth_check['status'] == 'healthy'

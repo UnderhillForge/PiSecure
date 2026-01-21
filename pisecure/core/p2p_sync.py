@@ -439,7 +439,44 @@ class P2PSyncManager:
 
     def _get_peer_transactions(self, peer_id: str) -> List[Dict]:
         """Get pending transactions from a peer."""
-        # Placeholder - would make API call to peer
+        try:
+            peers = self.peer_discovery.get_known_peers()
+            peer_info = peers.get(peer_id)
+            if not peer_info:
+                return []
+
+            address = peer_info.get('address')
+            port = peer_info.get('port', 3142)
+            if not address:
+                return []
+
+            base_url = f"http://{address}:{port}"
+            endpoint = f"{base_url}/api/v1/mempool"
+
+            # Determine network parameter from blockchain if available
+            params = {}
+            network_id = getattr(self.blockchain, 'network_id', None)
+            if isinstance(network_id, str) and network_id:
+                params['network'] = network_id
+
+            response = requests.get(endpoint, params=params, timeout=5)
+            if response.status_code != 200:
+                return []
+
+            data = response.json()
+            # Normalize response to list of transactions
+            if isinstance(data, dict):
+                pending = data.get('pending')
+                if isinstance(pending, list):
+                    return pending
+                # Fallback if server uses 'transactions'
+                txs = data.get('transactions')
+                if isinstance(txs, list):
+                    return txs
+            elif isinstance(data, list):
+                return data
+        except Exception:
+            return []
         return []
 
     def _calculate_tx_hash(self, tx_data: Dict) -> str:

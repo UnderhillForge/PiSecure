@@ -12,6 +12,7 @@ import json
 import threading
 import requests
 import logging
+import os
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 import secrets
@@ -273,6 +274,7 @@ class RobustMinerReporter:
         self.last_registration_attempt = time.time()
         self.registration_attempts += 1
 
+        is_testnet = os.environ.get('PISECURE_TESTNET') == '1'
         registration_data = {
             "node_id": self.node_id,
             "node_type": "miner",
@@ -280,8 +282,20 @@ class RobustMinerReporter:
             "capabilities": ["block_mining", "status_reporting"],
             "location": "unknown",  # Could be enhanced with geo detection
             "wallet_address": None,  # Set if available
-            "version": "0.1.0"
+            "version": "0.1.0",
+            "network": "testnet" if is_testnet else "mainnet"
         }
+
+        # Advertised endpoint (optional, helps peers reach us)
+        advertised_host = os.environ.get('PISECURE_PUBLIC_HOST')
+        advertised_port_raw = os.environ.get('PISECURE_PUBLIC_PORT')
+        if advertised_host:
+            registration_data["advertised_address"] = advertised_host
+        if advertised_port_raw:
+            try:
+                registration_data["advertised_port"] = int(advertised_port_raw)
+            except ValueError:
+                logger.debug("Ignoring invalid PISECURE_PUBLIC_PORT; must be integer")
 
         healthy_servers = self.registry.get_healthy_servers()
 
@@ -300,8 +314,10 @@ class RobustMinerReporter:
                         self.registry.update_server_health(server_url, success=True, response_time=response.elapsed.total_seconds())
                         logger.info(f"✅ Successfully registered with {server_url}")
                         return True
-
-                self.registry.update_server_health(server_url, success=False)
+                    else:
+                        self.registry.update_server_health(server_url, success=False)
+                else:
+                    self.registry.update_server_health(server_url, success=False)
 
             except Exception as e:
                 logger.debug(f"Registration failed with {server_url}: {e}")

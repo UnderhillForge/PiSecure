@@ -6,14 +6,21 @@
 # This script installs PiSecure as a complete blockchain node with:
 # - Wallet creation and management
 # - Background mining service
-# - REST API server
+# - REST API server (sync and async)
+# - System monitoring and health checks
 # - Web dashboard
 # - Automatic startup and peer discovery
 # - Scalable hybrid storage (block files + SQLite database)
+# - Remote monitor sync via bootstrap for network separation
 #
 # NOTE: This script uses virtual environments to avoid system Python conflicts.
 # Genesis keys are OPTIONAL - the system works without them for normal operations.
 # Hybrid storage is enabled by default for optimal performance.
+#
+# Dependencies installed include:
+# - aiohttp: Async HTTP client for remote monitoring and P2P networking
+# - psutil: System metrics collection for health monitoring
+# - All core requirements from requirements.txt
 #
 # Usage: curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/scripts/install.sh | bash
 #
@@ -82,8 +89,10 @@ install_dependencies() {
         fail2ban \
         unattended-upgrades \
         python3-dev \
-        build-essential
-        tor
+        build-essential \
+        tor \
+        libffi-dev \
+        libssl-dev
 
     log_success "System dependencies installed"
 }

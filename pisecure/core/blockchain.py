@@ -16,6 +16,11 @@ import secrets
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.backends import default_backend
+from cryptography.exceptions import InvalidSignature
+
 try:
     from .storage import HybridBlockchainStorage
     HYBRID_STORAGE_AVAILABLE = True
@@ -1043,6 +1048,7 @@ class SignBlock:
         current_zero_bits = count_zero_bits(self.hash)
 
         # Initial status write so dashboard shows progress from the start
+        last_status_write = time.time()
         try:
             with open('/tmp/pisecure_mining_status.txt', 'w') as f:
                 f.write(f"{self.nonce},{hashes_tried},{current_zero_bits},{target_zero_bits},0,0")
@@ -1055,11 +1061,12 @@ class SignBlock:
             hashes_tried += 1
             current_zero_bits = count_zero_bits(self.hash)
             
-            # Update status file for dashboard (every 100 hashes)
-            if hashes_tried % 100 == 0:
+            # Update status file for dashboard frequently (time- or count-based)
+            if (hashes_tried % 10 == 0) or (time.time() - last_status_write >= 0.5):
                 try:
                     with open('/tmp/pisecure_mining_status.txt', 'w') as f:
                         f.write(f"{self.nonce},{hashes_tried},{current_zero_bits},{target_zero_bits},0,0")
+                    last_status_write = time.time()
                 except Exception:
                     pass
 
@@ -1175,6 +1182,9 @@ class SignChain:
         # Validation reward tracking
         self.validation_rewards_awarded = {}  # wallet_address -> amount
         self.last_validated_block_height = 0
+
+        # Network identification (testnet vs mainnet)
+        self.network_id = "testnet" if os.environ.get('PISECURE_TESTNET') == '1' else "mainnet"
 
         # Hardware verification for scaling (bypass if validate-only mode)
         if os.environ.get('PISECURE_VALIDATE_ONLY') == '1':
@@ -1440,8 +1450,15 @@ class SignChain:
                     'error': f'Insufficient balance: {sender_balance} < {amount}'
                 }
 
-            # Verify signature (simplified - should use wallet system)
-            # In production, this would verify against sender's public key
+            # Validate network_id matches current network
+            tx_network = transaction.get('network_id', 'mainnet')
+            if tx_network != self.network_id:
+                return {
+                    'valid': False,
+                    'error': f'Network mismatch: transaction from {tx_network}, node on {self.network_id}'
+                }
+
+            # Verify signature
             signature = transaction.get('signature')
             if not signature:
                 return {
@@ -1449,10 +1466,14 @@ class SignChain:
                     'error': 'Missing transaction signature'
                 }
 
-            # For now, accept all signatures (implement proper verification later)
-            # sender_public_key = self._get_wallet_public_key(sender_address)
-            # if not self._verify_transaction_signature(transaction, signature, sender_public_key):
-            #     return {'valid': False, 'error': 'Invalid transaction signature'}
+            # Verify cryptographic signature
+            sender_public_key = self._get_wallet_public_key(sender_address)
+            if sender_public_key:
+                if not self._verify_transaction_signature(transaction, signature, sender_public_key):
+                    return {'valid': False, 'error': 'Invalid transaction signature'}
+            else:
+                # If public key not found, accept (new sender) but log
+                pass
 
             return {'valid': True}
 
@@ -1520,6 +1541,30 @@ class SignChain:
                     'error': f'Insufficient balance for batch: {sender_balance} < {total_amount}'
                 }
 
+            # Validate network_id matches current network
+            tx_network = transaction.get('network_id', 'mainnet')
+            if tx_network != self.network_id:
+                return {
+                    'valid': False,
+                    'error': f'Network mismatch: transaction from {tx_network}, node on {self.network_id}'
+                }
+
+            # Verify signature
+            signature = transaction.get('signature')
+            if not signature:
+                return {
+                    'valid': False,
+                    'error': 'Missing transaction signature'
+                }
+
+            # Verify cryptographic signature
+            sender_public_key = self._get_wallet_public_key(sender_address)
+            if sender_public_key:
+                if not self._verify_transaction_signature(transaction, signature, sender_public_key):
+                    return {'valid': False, 'error': 'Invalid transaction signature'}
+            else:
+                pass  # Accept if public key not found (new sender)
+
             return {'valid': True}
 
         except Exception as e:
@@ -1529,7 +1574,23 @@ class SignChain:
             }
 
     def _get_wallet_balance(self, wallet_address: str) -> float:
-        """Get wallet balance by tracking all transactions in the blockchain"""
+        """Get wallet balance using UTXO set when available, falls back to blockchain scan
+        
+        For Mac clients: tries UTXO-based balance first (O(1)), then blockchain scan (O(n))
+        For Pi5 nodes: uses blockchain scan (standard operation)
+        """
+        # Try UTXO-based balance first (efficient for Mac clients)
+        try:
+            from .utxo import UTXOSet
+            utxo = UTXOSet()
+            balance = utxo.get_balance(wallet_address)
+            # If UTXO has data or file exists, return UTXO balance (prefer efficiency)
+            if balance > 0 or utxo.utxo_file.exists():
+                return balance
+        except Exception:
+            pass
+        
+        # Fall back to blockchain scan (standard O(n) operation)
         balance = 0.0
 
         # Track all transactions involving this wallet
@@ -1567,15 +1628,64 @@ class SignChain:
         return max(0.0, balance)  # Ensure balance never goes negative
 
     def _get_wallet_public_key(self, wallet_address: str) -> Optional[str]:
-        """Get wallet public key (placeholder)"""
-        # In production, this would query wallet service
-        return None
+        """Get wallet public key from blockchain history or wallet metadata"""
+        try:
+            # First, search for wallet metadata in blockchain
+            for block in self.chain:
+                for tx in block.transactions:
+                    if tx.get('type') == 'wallet_metadata' and tx.get('wallet_address') == wallet_address:
+                        public_key = tx.get('public_key')
+                        if public_key:
+                            return public_key
+            
+            # Fallback: check if wallet exists locally
+            try:
+                from .wallet import SignWallet
+                wallet = SignWallet()
+                wallet_data = wallet.load_wallet(wallet_address)
+                if 'public_key' in wallet_data:
+                    return wallet_data['public_key']
+            except Exception:
+                pass
+            
+            return None
+        except Exception:
+            return None
 
     def _verify_transaction_signature(self, transaction: Dict[str, Any],
                                     signature: str, public_key_pem: str) -> bool:
-        """Verify transaction signature (placeholder)"""
-        # In production, this would use cryptography library
-        return True  # Mock validation
+        """Verify transaction signature using RSA with PSS padding"""
+        try:
+            if not public_key_pem or not signature:
+                return False
+            
+            # Load public key from PEM format
+            public_key = serialization.load_pem_public_key(
+                public_key_pem.encode() if isinstance(public_key_pem, str) else public_key_pem,
+                backend=default_backend()
+            )
+            
+            # Create canonical transaction string for verification
+            tx_copy = transaction.copy()
+            tx_copy.pop('signature', None)  # Remove signature before verifying
+            tx_string = json.dumps(tx_copy, sort_keys=True)
+            
+            # Verify RSA signature with PSS padding
+            public_key.verify(
+                bytes.fromhex(signature),
+                tx_string.encode(),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            return True
+            
+        except InvalidSignature:
+            return False
+        except Exception as e:
+            return False
 
     def get_wallet_balance(self, wallet_address: str) -> float:
         """Public method to get wallet balance"""

@@ -1867,9 +1867,6 @@ class BlockchainAPI:
 
         return recommendations
 
-            except Exception as e:
-                return jsonify({'error': str(e)}), 500
-
         # Get miner status and intelligence data
         @self.app.route(f'/api/{self.api_version}/nodes/status', methods=['GET'])
         def get_miner_status():

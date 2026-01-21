@@ -22,6 +22,7 @@ Usage:
 """
 
 import time
+import os
 import json
 import requests
 import logging
@@ -53,7 +54,7 @@ class PiSecureClient:
 
     def __init__(self, bootstrap_peers: Optional[List[str]] = None,
                  api_version: str = "v1", timeout: int = 30,
-                 max_retries: int = 3):
+                 max_retries: int = 3, enable_peer_exchange: bool = False):
         """
         Initialize the PiSecure client.
 
@@ -66,6 +67,7 @@ class PiSecureClient:
         self.api_version = api_version
         self.timeout = timeout
         self.max_retries = max_retries
+        self.enable_peer_exchange = enable_peer_exchange
 
         # Initialize peer discovery with known bootstrap nodes
         # Note: PiSecure bootstrap system uses intelligent handshake and registry
@@ -164,6 +166,19 @@ class PiSecureClient:
             except Exception as e:
                 logger.debug(f"Intelligent peer discovery failed: {e}")
 
+            # Special handling: Add bootstrap URLs themselves as API endpoints
+            # (bootstrap servers support /api/v1/ endpoints directly)
+            if not endpoints:
+                for bootstrap_url in self.bootstrap_endpoints:
+                    try:
+                        # Try health check on bootstrap itself
+                        response = requests.get(f"{bootstrap_url}/api/{self.api_version}/health", timeout=5)
+                        if response.status_code == 200:
+                            endpoints.append(bootstrap_url)
+                            logger.info(f"✅ Using bootstrap server directly: {bootstrap_url}")
+                    except Exception as e:
+                        logger.debug(f"Bootstrap health check failed for {bootstrap_url}: {e}")
+
         # Method 3: Try local peer cache as fallback
         if not endpoints:
             try:
@@ -240,25 +255,22 @@ class PiSecureClient:
                 response.raise_for_status()
                 result = response.json()
 
-                # Successful request - try to exchange peers with this node
-                try:
-                    self.exchange_peers(url.replace('/api/v1/', ''))  # Remove API path to get base URL
-                except Exception as e:
-                    logger.debug(f"Peer exchange failed after successful request: {e}")
+                # Successful request - optionally exchange peers with this node
+                if self.enable_peer_exchange:
+                    try:
+                        self.exchange_peers(url.replace('/api/v1/', ''))  # Remove API path to get base URL
+                    except Exception as e:
+                        logger.debug(f"Peer exchange failed after successful request: {e}")
 
                 return result
 
-            except requests.exceptions.RequestException as e:
+            except Exception as e:
                 last_error = e
                 logger.warning(f"Request failed (attempt {attempt + 1}/{self.max_retries}): {e}")
 
                 # Try next endpoint
                 if attempt < self.max_retries - 1:
                     continue
-
-            except json.JSONDecodeError as e:
-                last_error = e
-                logger.error(f"Invalid JSON response: {e}")
 
         # All retries failed
         raise ConnectionError(f"Failed to connect to PiSecure API after {self.max_retries} attempts: {last_error}")
@@ -421,6 +433,45 @@ class PiSecureClient:
         return transaction
 
     # Network Operations
+    def get_mempool(self, network: Optional[str] = None, limit: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Fetch pending transactions (mempool) from the network.
+
+        Args:
+            network: Network identifier (e.g., "mainnet", "testnet"). If None, attempts to infer.
+            limit: Optional maximum number of transactions to return (server may cap).
+
+        Returns:
+            Dictionary with mempool summary: {network, pending_count, pending, timestamp}
+        """
+        params = {}
+        try:
+            if network:
+                params['network'] = network
+            else:
+                # Attempt to infer network from environment or blockchain info
+                env_net = None
+                try:
+                    env_net = os.environ.get('PISECURE_TESTNET')
+                except Exception:
+                    env_net = None
+                if env_net:
+                    params['network'] = 'testnet' if env_net in ('1', 'true', 'True') else 'mainnet'
+            if limit is not None:
+                params['limit'] = int(limit)
+        except Exception:
+            # Fallback: no params
+            params = {}
+
+        response = self._make_request('GET', 'mempool', params=params)
+        # Normalize shape
+        if isinstance(response, dict):
+            if 'pending' not in response and 'transactions' in response:
+                response['pending'] = response.get('transactions', [])
+                response['pending_count'] = len(response['pending'])
+            if 'pending_count' not in response and 'pending' in response:
+                response['pending_count'] = len(response.get('pending', []))
+        return response
 
     def get_network_status(self) -> Dict[str, Any]:
         """

@@ -232,18 +232,23 @@ class TestSecurityUtils:
 
     def test_validate_request_rate(self):
         """Test rate limiting"""
+        SecurityUtils.reset_rate_limits()  # Clear any prior test state
         client_id = "test_client"
 
-        # Should allow initial requests
-        for i in range(10):
-            assert SecurityUtils.validate_request_rate(client_id, max_requests=10)
-
-        # Should deny 11th request
-        assert not SecurityUtils.validate_request_rate(client_id, max_requests=10)
-
-        # Should allow after time window passes (simulate time passing)
+        # Use a fixed time to track requests
         with patch('pisecure.core.validation.time.time') as mock_time:
-            mock_time.return_value = time.time() + 61  # 61 seconds later
+            base_time = 1000000.0
+            mock_time.return_value = base_time
+            
+            # Should allow initial requests
+            for i in range(10):
+                assert SecurityUtils.validate_request_rate(client_id, max_requests=10)
+
+            # Should deny 11th request
+            assert not SecurityUtils.validate_request_rate(client_id, max_requests=10)
+
+            # Should allow after time window passes (simulate time passing)
+            mock_time.return_value = base_time + 61  # 61 seconds later
             assert SecurityUtils.validate_request_rate(client_id, max_requests=10)
 
 

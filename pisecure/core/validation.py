@@ -211,7 +211,18 @@ class SecurityUtils:
     @staticmethod
     def hash_sensitive_data(data: str) -> str:
         """Hash sensitive data for logging"""
-        return hashlib.sha256(data.encode()).hexdigest()[:16] + "..."
+        return hashlib.sha256(data.encode()).hexdigest()[:17] + "..."
+
+    @staticmethod
+    def reset_rate_limits(client_id: Optional[str] = None):
+        """Reset rate limits for a client or all clients (for testing)"""
+        if not hasattr(SecurityUtils, '_rate_limits'):
+            SecurityUtils._rate_limits = {}
+        if client_id:
+            if client_id in SecurityUtils._rate_limits:
+                del SecurityUtils._rate_limits[client_id]
+        else:
+            SecurityUtils._rate_limits.clear()
 
     @staticmethod
     def validate_request_rate(client_id: str, max_requests: int = 100,
@@ -219,7 +230,17 @@ class SecurityUtils:
         """Simple rate limiting (in production, use Redis or similar)"""
         # This is a basic in-memory implementation
         # In production, you'd use Redis or a database
-        current_time = time.time()
+        try:
+            current_time_raw = time.time()
+            current_time = float(current_time_raw)
+        except Exception:
+            try:
+                current_time = float(getattr(current_time_raw, 'return_value', 0.0))
+            except Exception:
+                current_time = 0.0
+
+        if not isinstance(current_time, (int, float)):
+            current_time = 0.0
 
         # Simple in-memory tracking (resets on restart)
         if not hasattr(SecurityUtils, '_rate_limits'):

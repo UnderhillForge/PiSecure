@@ -41,6 +41,28 @@ class SystemResources:
     timestamp: float
 
 
+@dataclass
+class SystemMetrics:
+    """Aggregate system and network metrics for monitoring history"""
+    cpu_percent: float
+    memory_percent: float
+    disk_usage_percent: float
+    network_connections: int
+    blockchain_height: int
+    active_peers: int
+    pending_transactions: int
+    uptime_seconds: float
+    timestamp: float
+
+
+@dataclass
+class HealthStatus:
+    """Health status snapshot produced by HealthChecker"""
+    overall: str
+    checks: Dict[str, Any]
+    timestamp: float
+
+
 class SystemResourceMonitor:
     """
     Comprehensive system resource monitoring for mining operations
@@ -581,6 +603,230 @@ class SystemResourceMonitor:
             status_icon = "FAST"
 
         return f"{temp_display} | {mem_display} | {status_icon}"
+
+
+class MetricsCollector:
+    """Collects and aggregates lightweight operational metrics"""
+
+    def __init__(self):
+        self._metrics_history: List[SystemMetrics] = []
+        self._max_history = 1000
+        self._start_time = time.time()
+
+    def collect_system_metrics(
+        self,
+        blockchain_height: int = 0,
+        active_peers: int = 0,
+        pending_transactions: int = 0
+    ) -> SystemMetrics:
+        """Collect a single metrics sample"""
+        cpu_percent = psutil.cpu_percent(interval=0.0)
+        memory_percent = psutil.virtual_memory().percent
+        disk_usage_percent = psutil.disk_usage('/').percent
+
+        try:
+            network_connections = len(psutil.net_connections())
+        except Exception:
+            network_connections = 0
+
+        now = time.time()
+        metrics = SystemMetrics(
+            cpu_percent=cpu_percent,
+            memory_percent=memory_percent,
+            disk_usage_percent=disk_usage_percent,
+            network_connections=network_connections,
+            blockchain_height=blockchain_height,
+            active_peers=active_peers,
+            pending_transactions=pending_transactions,
+            uptime_seconds=max(0.0, now - self._start_time),
+            timestamp=now
+        )
+
+        self._metrics_history.append(metrics)
+        if len(self._metrics_history) > self._max_history:
+            # Keep only the most recent entries
+            self._metrics_history = self._metrics_history[-self._max_history:]
+
+        return metrics
+
+    def get_recent_metrics(self, hours: int = 1) -> List[SystemMetrics]:
+        """Return metrics collected within the last N hours"""
+        cutoff = time.time() - (hours * 3600)
+        return [m for m in self._metrics_history if m.timestamp >= cutoff]
+
+    def get_average_metrics(self, hours: int = 1) -> Optional[Dict[str, Any]]:
+        """Return simple averages over recent metrics or None if no data"""
+        recent = self.get_recent_metrics(hours)
+        if not recent:
+            return None
+
+        count = len(recent)
+        return {
+            'cpu_percent': sum(m.cpu_percent for m in recent) / count,
+            'memory_percent': sum(m.memory_percent for m in recent) / count,
+            'disk_usage_percent': sum(m.disk_usage_percent for m in recent) / count,
+            'network_connections': sum(m.network_connections for m in recent) / count,
+            'blockchain_height': sum(m.blockchain_height for m in recent) / count,
+            'active_peers': sum(m.active_peers for m in recent) / count,
+            'pending_transactions': sum(m.pending_transactions for m in recent) / count,
+            'samples': count
+        }
+
+
+class HealthChecker:
+    """Evaluates system and network health based on collected metrics"""
+
+    def __init__(self, collector: MetricsCollector):
+        self.collector = collector
+        self.thresholds = {
+            'cpu_percent': {'warning': 85, 'critical': 95},
+            'memory_percent': {'warning': 85, 'critical': 95},
+            'disk_usage_percent': {'warning': 90, 'critical': 97},
+            'active_peers': {'warning': 1, 'critical': 0},
+        }
+
+    def _classify(self, value: float, thresholds: Dict[str, float]) -> str:
+        try:
+            numeric_value = float(value)
+        except Exception:
+            numeric_value = 0.0
+
+        if numeric_value >= thresholds.get('critical', 1000):
+            return 'critical'
+        if numeric_value >= thresholds.get('warning', 1000):
+            return 'warning'
+        return 'healthy'
+
+    def check_system_health(self) -> HealthStatus:
+        """Compute health status from the latest metrics history"""
+        if not self.collector._metrics_history:
+            return HealthStatus(overall='unknown', checks={}, timestamp=time.time())
+
+        latest = self.collector._metrics_history[-1]
+        checks: Dict[str, Dict[str, Any]] = {}
+
+        # CPU
+        cpu_status = self._classify(latest.cpu_percent, self.thresholds['cpu_percent'])
+        checks['cpu_percent'] = {
+            'status': cpu_status,
+            'value': latest.cpu_percent,
+            'thresholds': self.thresholds['cpu_percent']
+        }
+
+        # Memory
+        mem_status = self._classify(latest.memory_percent, self.thresholds['memory_percent'])
+        checks['memory_percent'] = {
+            'status': mem_status,
+            'value': latest.memory_percent,
+            'thresholds': self.thresholds['memory_percent']
+        }
+
+        # Disk
+        disk_status = self._classify(latest.disk_usage_percent, self.thresholds['disk_usage_percent'])
+        checks['disk_usage_percent'] = {
+            'status': disk_status,
+            'value': latest.disk_usage_percent,
+            'thresholds': self.thresholds['disk_usage_percent']
+        }
+
+        # Peer connectivity (inverse classification)
+        if latest.active_peers <= self.thresholds['active_peers']['critical']:
+            peer_status = 'critical'
+        elif latest.active_peers <= self.thresholds['active_peers']['warning']:
+            peer_status = 'warning'
+        else:
+            peer_status = 'healthy'
+        checks['peer_connectivity'] = {
+            'status': peer_status,
+            'value': latest.active_peers,
+            'message': 'No active peers connected' if latest.active_peers == 0 else None
+        }
+
+        # Blockchain growth over last hour
+        recent = self.collector.get_recent_metrics(hours=1)
+        # If cutoff trimmed too much, fall back to the latest two samples
+        if len(recent) < 2 and len(self.collector._metrics_history) >= 2:
+            recent = self.collector._metrics_history[-2:]
+
+        if len(recent) >= 2:
+            # Sort by timestamp to ensure correct ordering
+            recent_sorted = sorted(recent, key=lambda m: m.timestamp)
+            growth = recent_sorted[-1].blockchain_height - recent_sorted[0].blockchain_height
+            if growth > 0:
+                growth_status = 'healthy'
+                message = f"Blockchain grew by +{growth} blocks in last hour"
+            else:
+                growth_status = 'warning'
+                message = 'No blockchain growth in the last hour'
+            checks['blockchain_growth'] = {
+                'status': growth_status,
+                'value': growth,
+                'message': message
+            }
+        else:
+            checks['blockchain_growth'] = {
+                'status': 'unknown',
+                'message': 'Insufficient data to assess growth'
+            }
+
+        # Determine overall
+        statuses = [c['status'] for c in checks.values() if c['status'] != 'unknown']
+        if 'critical' in statuses:
+            overall = 'critical'
+        elif 'warning' in statuses:
+            overall = 'warning'
+        else:
+            overall = 'healthy'
+
+        return HealthStatus(overall=overall, checks=checks, timestamp=time.time())
+
+
+class _BoundedAlertList(list):
+    """List that trims itself to a max length"""
+
+    def __init__(self, max_len: int):
+        super().__init__()
+        self._max_len = max_len
+
+    def append(self, item):  # type: ignore[override]
+        super().append(item)
+        if len(self) > self._max_len:
+            del self[0:len(self) - self._max_len]
+
+
+class AlertManager:
+    """Generates and stores alerts derived from health checks"""
+
+    def __init__(self):
+        self.max_alerts = 1000
+        self._alerts: _BoundedAlertList = _BoundedAlertList(self.max_alerts)
+
+    def check_and_alert(self, health: HealthStatus) -> List[Dict[str, Any]]:
+        """Produce alerts from non-healthy checks and store them"""
+        alerts: List[Dict[str, Any]] = []
+
+        if health.overall == 'healthy':
+            return alerts
+
+        for component, check in health.checks.items():
+            status = check.get('status', 'unknown')
+            if status in ['warning', 'critical']:
+                alert = {
+                    'timestamp': time.time(),
+                    'level': status,
+                    'component': component,
+                    'message': check.get('message', ''),
+                    'value': check.get('value')
+                }
+                alerts.append(alert)
+                self._alerts.append(alert)
+
+        return alerts
+
+    def get_recent_alerts(self, hours: int = 1) -> List[Dict[str, Any]]:
+        """Return alerts within the last N hours"""
+        cutoff = time.time() - (hours * 3600)
+        return [a for a in self._alerts if a.get('timestamp', 0) >= cutoff]
 
 
 # Global monitor instance
