@@ -10,6 +10,7 @@ import time
 import secrets
 import os
 import click
+from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
@@ -785,13 +786,23 @@ def monitor(wallet, validate_rewards, refresh, peer, resync):
                 print_output("   Performing aggressive full sync...")
                 # Run multiple sync cycles to catch up quickly
                 for i in range(10):
+                    before_cycle = len(blockchain.chain)
                     p2p_sync._perform_sync_cycle()
-                    current_height = len(blockchain.chain)
-                    if current_height > initial_height:
-                        print_output(f"   Sync cycle {i+1}: +{current_height - initial_height} blocks (total: {current_height})")
-                        initial_height = current_height
+                    after_cycle = len(blockchain.chain)
+                    gained = after_cycle - before_cycle
+                    
+                    if gained > 0:
+                        print_output(f"   Sync cycle {i+1}: +{gained} blocks (height: {before_cycle} → {after_cycle})")
                     else:
-                        break  # No more blocks available
+                        # No blocks gained - check if we have peers
+                        known_peers = peer_discovery.get_known_peers()
+                        if not known_peers:
+                            print_output(f"   ⚠️  No peers available after cycle {i+1}")
+                            break
+                        else:
+                            print_output(f"   Cycle {i+1}: No new blocks (peers may be at same height)")
+                            if i >= 2:  # Give up after 3 failed attempts
+                                break
             else:
                 p2p_sync._perform_sync_cycle()
             
