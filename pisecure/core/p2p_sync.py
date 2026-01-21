@@ -235,19 +235,92 @@ class P2PSyncManager:
 
     def _get_peer_chain_info(self, peer_id: str) -> Optional[Dict]:
         """Get blockchain information from a peer."""
-        # In a real implementation, this would make an HTTP request to the peer
-        # For now, simulate with local blockchain info
         try:
-            # This is a placeholder - in real P2P, we'd query the peer's API
-            return self.blockchain.get_chain_info()
-        except Exception:
+            # Get peer address from peer_discovery
+            peers = self.peer_discovery.get_known_peers()
+            if peer_id not in peers:
+                logger.debug(f"Peer {peer_id} not in known peers")
+                return None
+            
+            peer_info = peers[peer_id]
+            peer_address = peer_info.get('address')
+            peer_port = peer_info.get('port', 3142)
+            
+            if not peer_address:
+                logger.debug(f"No address for peer {peer_id}")
+                return None
+            
+            # Make HTTP request to peer's API
+            import requests
+            url = f"http://{peer_address}:{peer_port}/api/v1/chain"
+            response = requests.get(url, timeout=5)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.debug(f"Peer {peer_id} returned status {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logger.debug(f"Failed to get chain info from {peer_id}: {e}")
             return None
 
     def _request_blocks(self, peer_id: str, start_height: int, end_height: int) -> List[Dict]:
         """Request blocks from a peer."""
-        # In a real implementation, this would make HTTP requests to get blocks
-        # For now, return empty list as placeholder
-        logger.debug(f"Requesting blocks {start_height} to {end_height} from {peer_id}")
+        try:
+            # Get peer address
+            peers = self.peer_discovery.get_known_peers()
+            if peer_id not in peers:
+                return []
+            
+            peer_info = peers[peer_id]
+            peer_address = peer_info.get('address')
+            peer_port = peer_info.get('port', 3142)
+            
+            if not peer_address:
+                return []
+            
+            # Try to get full chain from peer (simpler approach)
+            # Most nodes will have /api/v1/chain endpoint that returns full chain
+            import requests
+            
+            try:
+                url = f"http://{peer_address}:{peer_port}/api/v1/chain"
+                logger.debug(f"Fetching full chain from {peer_id} at {url}")
+                response = requests.get(url, timeout=30)
+                
+                if response.status_code == 200:
+                    chain_data = response.json()
+                    blocks = chain_data.get('blocks', chain_data.get('chain', []))
+                    
+                    # Filter to only the blocks we need
+                    needed_blocks = [b for b in blocks if start_height < b.get('index', 0) <= end_height]
+                    logger.info(f"Received {len(needed_blocks)} blocks from {peer_id}")
+                    return needed_blocks
+            except Exception as e:
+                logger.debug(f"Failed to fetch chain from peer: {e}")
+            
+            # Fallback: Try bootstrap server's blockchain endpoint
+            if 'bootstrap' in peer_id.lower():
+                try:
+                    bootstrap_url = f"https://{peer_address}/api/v1/bootstrap/blockchain"
+                    logger.debug(f"Trying bootstrap blockchain endpoint: {bootstrap_url}")
+                    response = requests.get(bootstrap_url, timeout=30)
+                    
+                    if response.status_code == 200:
+                        blockchain_data = response.json()
+                        blocks = blockchain_data.get('blocks', [])
+                        needed_blocks = [b for b in blocks if start_height < b.get('index', 0) <= end_height]
+                        logger.info(f"Received {len(needed_blocks)} blocks from bootstrap")
+                        return needed_blocks
+                except Exception as e:
+                    logger.debug(f"Bootstrap blockchain fetch failed: {e}")
+            
+            return []
+            
+        except Exception as e:
+            logger.warning(f"Failed to request blocks from {peer_id}: {e}")
+            return []
         return []
 
     def _validate_and_add_blocks(self, blocks: List[Dict]) -> List[Dict]:
