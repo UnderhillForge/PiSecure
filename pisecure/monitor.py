@@ -151,7 +151,14 @@ class MiningDashboard:
     def build_header_panel(self) -> Panel:
         """Build header with PiSecure branding"""
         network = "TESTNET" if self.testnet else "MAINNET"
-        mode_display = "🔗 Syndicate Pool" if self.mode == "syndicate" else "⛏️  Solo Mining"
+        if self.mode == "validation":
+            mode_display = "🔍 Block Validation"
+        elif self.mode == "syndicate":
+            mode_display = "🔗 Syndicate Pool"
+        elif self.mode == "monitor":
+            mode_display = "📊 Network Monitor"
+        else:
+            mode_display = "⛏️  Solo Mining"
         
         header_text = Text()
         header_text.append("π", style="bold cyan")
@@ -167,11 +174,21 @@ class MiningDashboard:
         table.add_column("Metric", style="cyan")
         table.add_column("Value", style="white")
         
-        # Mining status
+        # Status depends on mode
         mining_active = stats.get("mining_active", False)
-        status_icon = "🟢" if mining_active else "🔴"
-        status_text = "ACTIVE" if mining_active else "IDLE"
-        table.add_row(f"{status_icon} Status", f"[bold]{status_text}[/bold]")
+        
+        if self.mode == "validation":
+            # In validation mode, show validation status instead of mining status
+            status_icon = "🔍"
+            status_text = "VALIDATING" if stats.get("total_blocks", 0) > 1 else "SYNCING"
+            status_color = "green" if stats.get("total_blocks", 0) > 1 else "yellow"
+        else:
+            # In mining/monitor mode, show mining activity
+            status_icon = "🟢" if mining_active else "🔴"
+            status_text = "ACTIVE" if mining_active else "IDLE"
+            status_color = "bold"
+        
+        table.add_row(f"{status_icon} Status", f"[{status_color}]{status_text}[/{status_color}]")
         
         # Current hashrate with sparkline
         hashrate = stats.get("hashrate", 0.0)

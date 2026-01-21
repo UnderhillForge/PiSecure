@@ -790,7 +790,38 @@ def monitor(wallet, validate_rewards, refresh, peer):
             wallet_address=wallet_address if validate_rewards else None
         )
         
-        dashboard.run()
+        # Start background sync thread for continuous block fetching
+        import threading
+        sync_stop_event = threading.Event()
+        
+        def background_sync_loop():
+            """Periodically sync new blocks from the network"""
+            sync_interval = 30  # Sync every 30 seconds
+            while not sync_stop_event.is_set():
+                try:
+                    # Perform a sync cycle every N seconds
+                    for _ in range(int(sync_interval / 2)):  # Check stop event more frequently
+                        if sync_stop_event.is_set():
+                            return
+                        time.sleep(2)
+                    
+                    # Only sync if we have peers
+                    if hasattr(p2p_sync, '_perform_sync_cycle'):
+                        p2p_sync._perform_sync_cycle()
+                except Exception as e:
+                    # Silently ignore sync errors to avoid dashboard flicker
+                    pass
+        
+        # Start the background sync thread
+        sync_thread = threading.Thread(target=background_sync_loop, daemon=True)
+        sync_thread.start()
+        
+        try:
+            dashboard.run()
+        finally:
+            # Signal sync thread to stop when dashboard exits
+            sync_stop_event.set()
+            sync_thread.join(timeout=2)
         
     except KeyboardInterrupt:
         print_output("\nMonitor stopped")
