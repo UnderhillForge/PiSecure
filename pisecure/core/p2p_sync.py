@@ -513,7 +513,8 @@ class P2PSyncManager:
                     transactions=block_data.get('transactions', []),
                     previous_hash=block_data.get('previous_hash', ''),
                     nonce=block_data.get('nonce', 0),
-                    hash=block_data.get('hash', '')
+                    algorithm=block_data.get('algorithm', 'pihash'),
+                    precomputed_hash=block_data.get('hash', '')  # Use precomputed_hash parameter
                 )
                 sign_blocks.append(sign_block)
             
