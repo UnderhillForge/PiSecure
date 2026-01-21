@@ -21,6 +21,7 @@
 - **PiHash Mining Algorithm** - Custom hardware-verified proof-of-work exclusive to Raspberry Pi
 - **Hybrid Storage Architecture** - Block files + SQLite for 90%+ performance gains
 - **Multi-Language SDKs** - Python, JavaScript/TypeScript, Go, Rust, C/C++, Android
+- **MetaMask Integration** - Connect Ethereum wallets to PiSecure blockchain
 - **Real-Time Monitoring** - Live dashboards with health checks and performance metrics
 - **REST API + WebSockets** - Full-featured API with real-time streaming
 
