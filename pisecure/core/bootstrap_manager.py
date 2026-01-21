@@ -80,6 +80,13 @@ class BootstrapRegistry:
                     data = json.load(f)
                     self.bootstrap_servers = data.get('servers', {})
                     self.peer_cache = data.get('peer_cache', {})
+        except json.JSONDecodeError as e:
+            logger.warning(f"Bootstrap registry corrupted, will recreate: {e}")
+            # Delete corrupted file so we start fresh
+            try:
+                self.registry_file.unlink()
+            except:
+                pass
         except Exception as e:
             logger.warning(f"Failed to load bootstrap registry: {e}")
 
@@ -201,8 +208,8 @@ class BootstrapRegistry:
 
         for server_url in self.get_healthy_servers():
             try:
-                # Check cache first
-                cache_key = (server_url, network or 'default')
+                # Check cache first (use string key for JSON serialization)
+                cache_key = f"{server_url}:{network or 'default'}"
                 cached = self.peer_cache.get(cache_key)
                 if cached and time.time() - cached['timestamp'] < self.cache_timeout:
                     peers.extend(cached['peers'])
@@ -217,7 +224,7 @@ class BootstrapRegistry:
                     data = response.json()
                     server_peers = data.get('peers', [])
 
-                    # Cache the result (network-aware)
+                    # Cache the result (network-aware, use string key for JSON serialization)
                     self.peer_cache[cache_key] = {
                         'peers': server_peers,
                         'timestamp': time.time()

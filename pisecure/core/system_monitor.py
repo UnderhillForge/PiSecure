@@ -28,7 +28,8 @@ class SystemMonitor:
                     return 'Raspberry Pi Zero'
                 return model
         except:
-            return 'Unknown Pi Model'
+            # Non-Pi platforms (e.g., macOS) will land here
+            return 'Non-Pi Hardware'
     
     def get_cpu_temperature(self) -> float:
         """Get CPU temperature in Celsius"""
