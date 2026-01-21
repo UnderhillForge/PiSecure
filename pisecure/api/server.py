@@ -339,7 +339,9 @@ class BlockchainAPI:
 
             try:
                 blocks = self.blockchain.chain[offset:offset + limit]
-                return jsonify(blocks)
+                # Convert SignBlock objects to dicts
+                blocks_dict = [block.to_dict() if hasattr(block, 'to_dict') else block for block in blocks]
+                return jsonify({'blocks': blocks_dict})
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
 

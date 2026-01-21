@@ -255,7 +255,7 @@ class P2PSyncManager:
             # Get peer address from peer_discovery
             peers = self.peer_discovery.get_known_peers()
             if peer_id not in peers:
-                logger.debug(f"Peer {peer_id} not in known peers")
+                self.logger.debug(f"Peer {peer_id} not in known peers")
                 return None
             
             peer_info = peers[peer_id]
@@ -263,22 +263,25 @@ class P2PSyncManager:
             peer_port = peer_info.get('port', 3142)
             
             if not peer_address:
-                logger.debug(f"No address for peer {peer_id}")
+                self.logger.debug(f"No address for peer {peer_id}")
                 return None
             
-            # Make HTTP request to peer's API
+            # Make HTTP request to peer's API (use correct endpoint)
             import requests
-            url = f"http://{peer_address}:{peer_port}/api/v1/chain"
+            url = f"http://{peer_address}:{peer_port}/api/v1/blockchain/info"
+            self.logger.info(f"🔗 Fetching chain info from {peer_id} at {url}")
             response = requests.get(url, timeout=5)
             
             if response.status_code == 200:
-                return response.json()
+                info = response.json()
+                self.logger.info(f"📊 Peer {peer_id} has {info.get('blocks', 0)} blocks")
+                return info
             else:
-                logger.debug(f"Peer {peer_id} returned status {response.status_code}")
+                self.logger.warning(f"❌ Peer {peer_id} returned status {response.status_code}")
                 return None
                 
         except Exception as e:
-            logger.debug(f"Failed to get chain info from {peer_id}: {e}")
+            self.logger.warning(f"❌ Failed to get chain info from {peer_id}: {e}")
             return None
 
     def _request_blocks(self, peer_id: str, start_height: int, end_height: int) -> List[Dict]:
@@ -296,25 +299,30 @@ class P2PSyncManager:
             if not peer_address:
                 return []
             
-            # Try to get full chain from peer (simpler approach)
-            # Most nodes will have /api/v1/chain endpoint that returns full chain
+            # Request blocks from the peer using correct API endpoint
             import requests
             
             try:
-                url = f"http://{peer_address}:{peer_port}/api/v1/chain"
-                logger.debug(f"Fetching full chain from {peer_id} at {url}")
-                response = requests.get(url, timeout=30)
+                url = f"http://{peer_address}:{peer_port}/api/v1/blockchain/blocks"
+                params = {'offset': start_height, 'limit': min(end_height - start_height, 100)}
+                self.logger.info(f"📥 Requesting blocks {start_height} to {end_height} from {peer_id}")
+                self.logger.info(f"   URL: {url}?offset={params['offset']}&limit={params['limit']}")
+                
+                response = requests.get(url, params=params, timeout=30)
                 
                 if response.status_code == 200:
-                    chain_data = response.json()
-                    blocks = chain_data.get('blocks', chain_data.get('chain', []))
+                    blocks = response.json()
+                    if not isinstance(blocks, list):
+                        blocks = blocks.get('blocks', [])
+                    self.logger.info(f"✅ Received {len(blocks)} blocks from {peer_id}")
+                    return blocks
+                else:
+                    self.logger.warning(f"❌ Peer {peer_id} returned {response.status_code}: {response.text[:200]}")
                     
-                    # Filter to only the blocks we need
-                    needed_blocks = [b for b in blocks if start_height < b.get('index', 0) <= end_height]
-                    logger.info(f"Received {len(needed_blocks)} blocks from {peer_id}")
-                    return needed_blocks
             except Exception as e:
-                logger.debug(f"Failed to fetch chain from peer: {e}")
+                self.logger.warning(f"❌ Failed to fetch blocks from {peer_id}: {e}")
+            
+            return []
             
             # Fallback: Try bootstrap server's blockchain endpoint
             if 'bootstrap' in peer_id.lower():
