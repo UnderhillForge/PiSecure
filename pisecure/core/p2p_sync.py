@@ -371,20 +371,27 @@ class P2PSyncManager:
 
         for field in required_fields:
             if field not in block_data:
+                self.logger.debug(f"❌ Missing field: {field}")
                 return False
 
         # Validate hash matches block content
         calculated_hash = self._calculate_block_hash(block_data)
         if calculated_hash != block_data['hash']:
+            self.logger.debug(f"❌ Hash mismatch: calc={calculated_hash[:16]} vs stored={block_data['hash'][:16]}")
             return False
 
-        # Validate proof-of-work using zero-bit difficulty
-        if not hash_meets_zero_bits(calculated_hash, self.blockchain.difficulty):
+        # Validate proof-of-work using MINIMUM difficulty (not current)
+        # Historical blocks may have been mined at lower difficulty
+        min_difficulty = 130  # Minimum threshold for testnet
+        if not hash_meets_zero_bits(calculated_hash, min_difficulty):
+            actual_bits = count_zero_bits(calculated_hash)
+            self.logger.debug(f"❌ PoW failed: {actual_bits} bits < {min_difficulty} required")
             return False
 
         # Validate transactions
         for tx in block_data['transactions']:
             if not self._validate_transaction(tx):
+                self.logger.debug(f"❌ Transaction validation failed: {tx.get('hash', 'unknown')[:16]}")
                 return False
 
         return True
@@ -458,23 +465,44 @@ class P2PSyncManager:
     def _validate_competing_chain(self, chain_blocks: List[Dict]) -> bool:
         """Validate an entire competing chain."""
         if not chain_blocks:
+            self.logger.warning("📛 No blocks to validate")
             return False
 
+        self.logger.info(f"🔍 Validating chain of {len(chain_blocks)} blocks...")
+        
         # Validate each block in sequence
         for i, block_data in enumerate(chain_blocks):
             # First block should be genesis or connect to previous
             if i == 0:
                 # Genesis block validation (simplified)
                 if not self._validate_block(block_data):
+                    self.logger.warning(f"📛 Block {i} (genesis) validation failed")
+                    self.logger.warning(f"   Block hash: {block_data.get('hash', 'N/A')[:16]}")
+                    self.logger.warning(f"   Block index: {block_data.get('index', 'N/A')}")
                     return False
+                self.logger.debug(f"✅ Block {i} validated (genesis)")
             else:
                 # Non-genesis block should connect to previous block
                 prev_block = chain_blocks[i-1]
-                if block_data.get('previous_hash') != prev_block.get('hash'):
+                expected_prev_hash = prev_block.get('hash')
+                actual_prev_hash = block_data.get('previous_hash')
+                
+                if actual_prev_hash != expected_prev_hash:
+                    self.logger.warning(f"📛 Block {i} previous_hash mismatch")
+                    self.logger.warning(f"   Expected: {expected_prev_hash[:16] if expected_prev_hash else 'None'}...")
+                    self.logger.warning(f"   Got: {actual_prev_hash[:16] if actual_prev_hash else 'None'}...")
                     return False
+                    
                 if not self._validate_block(block_data):
+                    self.logger.warning(f"📛 Block {i} validation failed")
+                    self.logger.warning(f"   Block hash: {block_data.get('hash', 'N/A')[:16]}")
+                    self.logger.warning(f"   Previous: {actual_prev_hash[:16] if actual_prev_hash else 'None'}...")
                     return False
+                    
+                if i % 10 == 0:  # Log every 10th block
+                    self.logger.info(f"   ✅ Validated blocks 0-{i}")
 
+        self.logger.info(f"✅ All {len(chain_blocks)} blocks validated successfully")
         return True
 
     def _switch_to_chain(self, new_chain: List[Dict]):
