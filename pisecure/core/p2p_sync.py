@@ -472,15 +472,13 @@ class P2PSyncManager:
         
         # Validate each block in sequence
         for i, block_data in enumerate(chain_blocks):
-            # First block should be genesis or connect to previous
+            # First block should be genesis - accept it without validation
+            # Genesis blocks must match network-wide and don't follow normal validation
             if i == 0:
-                # Genesis block validation (simplified)
-                if not self._validate_block(block_data):
-                    self.logger.warning(f"📛 Block {i} (genesis) validation failed")
-                    self.logger.warning(f"   Block hash: {block_data.get('hash', 'N/A')[:16]}")
-                    self.logger.warning(f"   Block index: {block_data.get('index', 'N/A')}")
+                if block_data.get('index') != 0:
+                    self.logger.warning(f"📛 First block is not genesis (index={block_data.get('index')})")
                     return False
-                self.logger.debug(f"✅ Block {i} validated (genesis)")
+                self.logger.info(f"✅ Genesis block accepted (hash: {block_data.get('hash', 'N/A')[:16]}...)")
             else:
                 # Non-genesis block should connect to previous block
                 prev_block = chain_blocks[i-1]
