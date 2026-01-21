@@ -187,12 +187,16 @@ class P2PSyncManager:
             self.logger.info(f"  Peer {peer_id}: connected={connected}, age={age:.1f}s")
             
             if connected:
-                # Prioritize peers with recent activity
-                if age < 300:  # Active within 5 minutes
+                # Accept manually added and bootstrap peers with longer timeout
+                # Regular discovered peers use 5min, manual/bootstrap use 24hr
+                is_manual = peer_id.startswith('manual_') or peer_id.startswith('bootstrap_')
+                timeout = 86400 if is_manual else 300  # 24 hours vs 5 minutes
+                
+                if age < timeout:
                     healthy_peers.append(peer_id)
                     self.logger.info(f"    ✅ Selected for sync")
                 else:
-                    self.logger.info(f"    ⏰ Too old (>5min)")
+                    self.logger.info(f"    ⏰ Too old (>{timeout}s)")
             else:
                 self.logger.info(f"    ❌ Not connected")
 
