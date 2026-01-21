@@ -18,6 +18,7 @@ Features:
 import time
 import json
 import threading
+import os
 import hashlib
 import requests
 from typing import Dict, List, Optional, Set, Tuple, Any
@@ -497,16 +498,25 @@ class P2PSyncManager:
         self.logger.info(f"✅ All {len(chain_blocks)} blocks validated successfully")
         return True
 
-    def _switch_to_chain(self, new_chain: List[Dict]):
-        """Switch to a new blockchain (fork resolution)."""
+    def _switch_to_chain(self, new_chain: List[Dict], node_id: str = None):
+        """Switch to a new blockchain with Byzantine validation tracking"""
         self.logger.info(f"🔄 Switching to new chain with {len(new_chain)} blocks")
 
         try:
-            # Convert dict blocks to SignBlock objects
+            # Convert dict blocks to SignBlock objects with validation metadata
             from .blockchain import SignBlock
+            
+            # Use node_id or generate one for this validator
+            if not node_id:
+                node_id = f"validator_{os.urandom(4).hex()}"
             
             sign_blocks = []
             for block_data in new_chain:
+                # Extract validation data from network
+                validators = block_data.get('validators', [])
+                validation_count = block_data.get('validation_count', 0)
+                validation_timestamp = block_data.get('validation_timestamp')
+                
                 sign_block = SignBlock(
                     index=block_data.get('index', 0),
                     timestamp=block_data.get('timestamp', 0),
@@ -514,8 +524,15 @@ class P2PSyncManager:
                     previous_hash=block_data.get('previous_hash', ''),
                     nonce=block_data.get('nonce', 0),
                     algorithm=block_data.get('algorithm', 'pihash'),
-                    precomputed_hash=block_data.get('hash', '')  # Use precomputed_hash parameter
+                    precomputed_hash=block_data.get('hash', ''),
+                    validators=validators,
+                    validation_count=validation_count,
+                    validation_timestamp=validation_timestamp
                 )
+                
+                # Add this validator to the block
+                sign_block.add_validator(node_id)
+                
                 sign_blocks.append(sign_block)
             
             # Replace the blockchain

@@ -266,18 +266,26 @@ class MiningDashboard:
         table.add_row("⏰ Uptime", self.format_uptime(uptime))
         
         if self.mode == "validation":
-            # Validation mode: track validated blocks and rewards
+            # Validation mode: track confirmed blocks and rewards
             current_blocks = stats.get("total_blocks", 0)
             blocks_since_start = max(0, current_blocks - self.state.start_blocks)
             
-            # Update validated blocks count (all blocks since validation started are validated)
+            # Count confirmed blocks (5+ validations or aged 7 days with 1+)
+            try:
+                confirmed_blocks = self.blockchain.count_confirmed_blocks()
+            except:
+                confirmed_blocks = 0
+            
+            # Track synced blocks (may not be confirmed yet)
             self.state.validated_blocks_count = blocks_since_start
             self.state.last_validated_block_height = blocks_since_start
             
-            table.add_row("✅ Blocks Validated", f"[bold green]{self.state.validated_blocks_count}[/bold green]")
+            # Show validation status: confirmed out of total synced
+            table.add_row("✅ Blocks Validated", 
+                         f"[bold green]{confirmed_blocks}[/bold green] / [yellow]{self.state.validated_blocks_count}[/yellow] confirmed")
             
-            # Validation rewards (0.5 per validated block)
-            validation_rewards = self.state.validated_blocks_count * 0.5
+            # Validation rewards (0.5 314ST per confirmed block)
+            validation_rewards = confirmed_blocks * 0.5
             table.add_row("💰 Validation Rewards", f"[bold yellow]{validation_rewards:.2f} 314ST[/bold yellow]")
             
             # Pending transactions being processed

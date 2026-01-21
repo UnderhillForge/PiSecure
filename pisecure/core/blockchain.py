@@ -716,6 +716,11 @@ class SignBlock:
         self.nonce = nonce
         self.algorithm = algorithm  # Mining algorithm identifier (default: 'pihash')
         
+        # Byzantine validation tracking
+        self.validators = set()  # Set of node IDs that validated
+        self.validation_count = 0  # Number of validators who validated (0-5+)
+        self.validation_timestamp = None  # When first validated
+        
         # Cache PiHash instance to avoid re-initialization on every hash calculation
         self._pihash_instance = None
         if not os.environ.get('PISECURE_VALIDATE_ONLY') == '1' and algorithm == 'pihash':
@@ -730,6 +735,33 @@ class SignBlock:
             self.hash = precomputed_hash
         else:
             self.hash = self.calculate_hash()
+
+        @property
+        def is_confirmed(self) -> bool:
+            """Check if block is confirmed (5+ validations or aged 7 days with 1+ validation)"""
+            if self.validation_count >= 5:
+                return True
+        
+            if self.validation_count >= 1 and self.validation_timestamp:
+                # Aged 7 days = confirmed
+                age_seconds = time.time() - self.validation_timestamp
+                if age_seconds >= 7 * 24 * 3600:  # 7 days
+                    return True
+        
+            return False
+    
+        def add_validator(self, node_id: str) -> bool:
+            """Add a validator (only once per node). Returns True if this is a new validator."""
+            if node_id not in self.validators:
+                self.validators.add(node_id)
+                self.validation_count = len(self.validators)
+            
+                # Record first validation timestamp
+                if self.validation_timestamp is None:
+                    self.validation_timestamp = time.time()
+            
+                return True
+            return False
 
     def calculate_hash(self) -> str:
         """Calculate hash of the block using PiHash algorithm (PiSecure standard)"""
@@ -1735,26 +1767,41 @@ class SignChain:
 
         return wallet_transactions
 
-    def award_validation_reward(self, wallet_address: str):
-        """Award validation reward for a validated block (0.5 tokens)"""
-        validation_reward = 0.5
-        current_height = len(self.chain)
+    def count_confirmed_blocks(self) -> int:
+        """Count blocks that have reached confirmation status"""
+        count = 0
+        for block in self.chain:
+            if block.is_confirmed:
+                count += 1
+        return count
+    
+    def award_validation_reward(self, wallet_address: str, node_id: str):
+        """Award validation reward for confirmed blocks (0.5 314ST per confirmed block)
         
-        # Only award if we've validated a new block since last time
-        if current_height > self.last_validated_block_height:
-            # Track the reward earned
-            if wallet_address not in self.validation_rewards_awarded:
-                self.validation_rewards_awarded[wallet_address] = 0.0
-            
-            self.validation_rewards_awarded[wallet_address] += validation_reward
-            self.last_validated_block_height = current_height
-            
-            return validation_reward
+        Only awards for:
+        - Blocks with 5+ validations, OR
+        - Blocks with 1+ validation aged 7+ days
+        - Only once per validator per block
+        """
+        if wallet_address not in self.validation_rewards_awarded:
+            self.validation_rewards_awarded[wallet_address] = 0.0
         
-        return 0.0
+        reward_per_block = 0.5
+        total_reward = 0.0
+        
+        # Award for each confirmed block this validator hasn't been rewarded for yet
+        for block in self.chain:
+            if block.is_confirmed and node_id in block.validators:
+                # Check if we've already awarded this (simple check: compare to current)
+                # In production, track confirmed rewards separately
+                total_reward += reward_per_block
+        
+        # Update rewards
+        self.validation_rewards_awarded[wallet_address] = total_reward
+        return total_reward
 
     def get_validation_rewards(self, wallet_address: str) -> float:
-        """Get total validation rewards earned by a wallet"""
+        """Get total validation rewards earned by wallet for confirmed blocks"""
         return self.validation_rewards_awarded.get(wallet_address, 0.0)
 
     def mine_pending_transactions(self, miner_wallet_address: str = None, verbose: bool = False, allow_empty: bool = False) -> Optional[SignBlock]:
