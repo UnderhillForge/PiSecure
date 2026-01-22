@@ -17,6 +17,12 @@
 - **ML-Powered DDoS Defense** - Real-time attack detection and mitigation
 - **Input Validation & Sanitization** - Comprehensive data security
 
+### 🎯 **Dual-Mode Operation**
+- **Mining (Pi-Only)** - Hardware-verified PiHash algorithm requires Raspberry Pi
+- **Validation (Universal)** - Run validators on ANY device (Mac, Windows, Linux, Pi)
+- **Validator Rewards** - Earn 314ST tokens for network participation
+- **Network Growth** - Open validation enables widespread adoption
+
 ### 🏗️ **Technical Excellence**
 - **PiHash Mining Algorithm** - Custom hardware-verified proof-of-work exclusive to Raspberry Pi
 - **Hybrid Storage Architecture** - Block files + SQLite for 90%+ performance gains
@@ -53,9 +59,16 @@ pisecure server
 
 ## 🔧 Usage Examples
 
-### Start Mining
+### Start Mining (Raspberry Pi Required)
 ```bash
 pisecure mine --wallet your_wallet_address
+```
+
+### Run Validator (Any Platform)
+```bash
+# Works on Mac, Windows, Linux, Pi
+export PISECURE_VALIDATE_ONLY=1
+pisecure validate --continuous
 ```
 
 ### Check Status

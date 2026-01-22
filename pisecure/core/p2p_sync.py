@@ -27,6 +27,7 @@ import logging
 
 from .blockchain import SignChain
 from .pihash import hash_meets_zero_bits, count_zero_bits
+from .websocket_p2p_client import WebSocketP2PClient
 from ..network.discovery import PeerDiscovery
 
 logger = logging.getLogger(__name__)
@@ -43,8 +44,13 @@ class P2PSyncManager:
     - Peer health monitoring for sync
     """
 
-    def __init__(self, blockchain: SignChain, peer_discovery: PeerDiscovery,
-                 sync_interval: int = 30, max_sync_peers: int = 3):
+    def __init__(
+        self,
+        blockchain: SignChain,
+        peer_discovery: PeerDiscovery,
+        sync_interval: int = 30,
+        max_sync_peers: int = 3,
+    ):
         """
         Initialize P2P sync manager.
 
@@ -75,29 +81,40 @@ class P2PSyncManager:
         self.sync_peers: Set[str] = set()
         self.last_sync_time = 0
         self.sync_stats = {
-            'blocks_synced': 0,
-            'transactions_synced': 0,
-            'forks_resolved': 0,
-            'sync_errors': 0
+            "blocks_synced": 0,
+            "transactions_synced": 0,
+            "forks_resolved": 0,
+            "sync_errors": 0,
         }
 
         # Threading
         self.sync_thread: Optional[threading.Thread] = None
         self.stop_sync = threading.Event()
 
+        # WebSocket P2P (hybrid model - optional, with HTTP fallback)
+        node_id = getattr(peer_discovery, "node_id", "pisecure-node")
+        self.ws_p2p_client = WebSocketP2PClient(node_id=node_id, max_peers=30)
+
         # Block propagation tracking
         self.known_blocks: Set[str] = set()
         self.pending_blocks: Dict[str, Dict] = {}
+
+        # Propagation statistics for monitoring
+        self.propagation_stats = {
+            "blocks_propagated": 0,
+            "propagation_time_avg": 0.0,
+            "failed_propagations": 0,
+        }
 
         # Syndicate support
         self.syndicates: Dict[str, Dict] = {}  # syndicate_id -> syndicate_info
         self.syndicate_memberships: Dict[str, str] = {}  # wallet -> syndicate_id
         self.syndicate_message_handlers = {
-            'join_syndicate': self._handle_join_syndicate,
-            'leave_syndicate': self._handle_leave_syndicate,
-            'syndicate_status': self._handle_syndicate_status,
-            'share_submission': self._handle_share_submission,
-            'block_found': self._handle_syndicate_block_found,
+            "join_syndicate": self._handle_join_syndicate,
+            "leave_syndicate": self._handle_leave_syndicate,
+            "syndicate_status": self._handle_syndicate_status,
+            "share_submission": self._handle_share_submission,
+            "block_found": self._handle_syndicate_block_found,
         }
 
         logger.info("🔄 P2P Sync Manager initialized with syndicate support")
@@ -113,9 +130,7 @@ class P2PSyncManager:
         self.is_syncing = True
 
         self.sync_thread = threading.Thread(
-            target=self._sync_worker,
-            daemon=True,
-            name="P2PSync"
+            target=self._sync_worker, daemon=True, name="P2PSync"
         )
         self.sync_thread.start()
 
@@ -137,7 +152,7 @@ class P2PSyncManager:
                 self._perform_sync_cycle()
             except Exception as e:
                 logger.error(f"❌ P2P sync cycle failed: {e}")
-                self.sync_stats['sync_errors'] += 1
+                self.sync_stats["sync_errors"] += 1
 
             # Wait for next cycle
             self.stop_sync.wait(self.sync_interval)
@@ -148,8 +163,10 @@ class P2PSyncManager:
         """Perform one complete synchronization cycle."""
         # Check bootstrap nodes for new peers periodically
         current_time = time.time()
-        if (self.bootstrap_discovery_enabled and
-            current_time - self.last_bootstrap_check > self.bootstrap_check_interval):
+        if (
+            self.bootstrap_discovery_enabled
+            and current_time - self.last_bootstrap_check > self.bootstrap_check_interval
+        ):
             self._discover_bootstrap_peers()
             self.last_bootstrap_check = current_time
 
@@ -163,7 +180,7 @@ class P2PSyncManager:
         self.sync_peers = set(healthy_peers)
 
         # Perform sync with each peer
-        for peer_id in healthy_peers[:self.max_sync_peers]:
+        for peer_id in healthy_peers[: self.max_sync_peers]:
             try:
                 self._sync_with_peer(peer_id)
             except Exception as e:
@@ -182,17 +199,19 @@ class P2PSyncManager:
 
         self.logger.info(f"🔍 Checking {len(all_peers)} known peers for sync...")
         for peer_id, peer_info in all_peers.items():
-            connected = peer_info.get('connected', False)
-            last_seen = peer_info.get('last_seen', 0)
+            connected = peer_info.get("connected", False)
+            last_seen = peer_info.get("last_seen", 0)
             age = time.time() - last_seen
             self.logger.info(f"  Peer {peer_id}: connected={connected}, age={age:.1f}s")
-            
+
             if connected:
                 # Accept manually added and bootstrap peers with longer timeout
                 # Regular discovered peers use 5min, manual/bootstrap use 24hr
-                is_manual = peer_id.startswith('manual_') or peer_id.startswith('bootstrap_')
+                is_manual = peer_id.startswith("manual_") or peer_id.startswith(
+                    "bootstrap_"
+                )
                 timeout = 86400 if is_manual else 300  # 24 hours vs 5 minutes
-                
+
                 if age < timeout:
                     healthy_peers.append(peer_id)
                     self.logger.info(f"    ✅ Selected for sync")
@@ -203,7 +222,9 @@ class P2PSyncManager:
 
         self.logger.info(f"📋 Selected {len(healthy_peers)} healthy peers for sync")
         # Sort by connection quality (could be enhanced with latency metrics)
-        return healthy_peers[:self.max_sync_peers * 2]  # Select more than needed for failover
+        return healthy_peers[
+            : self.max_sync_peers * 2
+        ]  # Select more than needed for failover
 
     def _sync_with_peer(self, peer_id: str):
         """Synchronize blockchain state with a specific peer."""
@@ -212,10 +233,12 @@ class P2PSyncManager:
         if not peer_chain_info:
             return
 
-        peer_height = peer_chain_info.get('blocks', 0)
+        peer_height = peer_chain_info.get("blocks", 0)
         local_height = len(self.blockchain.chain)
 
-        logger.debug(f"Peer {peer_id} height: {peer_height}, local height: {local_height}")
+        logger.debug(
+            f"Peer {peer_id} height: {peer_height}, local height: {local_height}"
+        )
 
         # Check if we need to sync
         if peer_height <= local_height:
@@ -228,7 +251,7 @@ class P2PSyncManager:
             # Handle fork resolution
             if self._resolve_fork(peer_id, peer_chain_info):
                 logger.info(f"🔀 Resolved fork with peer {peer_id}")
-                self.sync_stats['forks_resolved'] += 1
+                self.sync_stats["forks_resolved"] += 1
                 return
 
         # We need to sync blocks
@@ -242,7 +265,7 @@ class P2PSyncManager:
 
         # Validate and add blocks
         valid_blocks = self._validate_and_add_blocks(missing_blocks)
-        self.sync_stats['blocks_synced'] += len(valid_blocks)
+        self.sync_stats["blocks_synced"] += len(valid_blocks)
 
         # Adapt difficulty after receiving blocks from peers
         if valid_blocks:
@@ -258,91 +281,117 @@ class P2PSyncManager:
             if peer_id not in peers:
                 self.logger.debug(f"Peer {peer_id} not in known peers")
                 return None
-            
+
             peer_info = peers[peer_id]
-            peer_address = peer_info.get('address')
-            peer_port = peer_info.get('port', 3142)
-            
+            peer_address = peer_info.get("address")
+            peer_port = peer_info.get("port", 3142)
+
             if not peer_address:
                 self.logger.debug(f"No address for peer {peer_id}")
                 return None
-            
+
             # Make HTTP request to peer's API (use correct endpoint)
             import requests
+
             url = f"http://{peer_address}:{peer_port}/api/v1/blockchain/info"
             self.logger.info(f"🔗 Fetching chain info from {peer_id} at {url}")
             response = requests.get(url, timeout=5)
-            
+
             if response.status_code == 200:
                 info = response.json()
-                self.logger.info(f"📊 Peer {peer_id} has {info.get('blocks', 0)} blocks")
+                self.logger.info(
+                    f"📊 Peer {peer_id} has {info.get('blocks', 0)} blocks"
+                )
                 return info
             else:
-                self.logger.warning(f"❌ Peer {peer_id} returned status {response.status_code}")
+                self.logger.warning(
+                    f"❌ Peer {peer_id} returned status {response.status_code}"
+                )
                 return None
-                
+
         except Exception as e:
             self.logger.warning(f"❌ Failed to get chain info from {peer_id}: {e}")
             return None
 
-    def _request_blocks(self, peer_id: str, start_height: int, end_height: int) -> List[Dict]:
+    def _request_blocks(
+        self, peer_id: str, start_height: int, end_height: int
+    ) -> List[Dict]:
         """Request blocks from a peer."""
         try:
             # Get peer address
             peers = self.peer_discovery.get_known_peers()
             if peer_id not in peers:
                 return []
-            
+
             peer_info = peers[peer_id]
-            peer_address = peer_info.get('address')
-            peer_port = peer_info.get('port', 3142)
-            
+            peer_address = peer_info.get("address")
+            peer_port = peer_info.get("port", 3142)
+
             if not peer_address:
                 return []
-            
+
             # Request blocks from the peer using correct API endpoint
             import requests
-            
+
             try:
                 url = f"http://{peer_address}:{peer_port}/api/v1/blockchain/blocks"
-                params = {'offset': start_height, 'limit': min(end_height - start_height, 100)}
-                self.logger.info(f"📥 Requesting blocks {start_height} to {end_height} from {peer_id}")
-                self.logger.info(f"   URL: {url}?offset={params['offset']}&limit={params['limit']}")
-                
+                params = {
+                    "offset": start_height,
+                    "limit": min(end_height - start_height, 100),
+                }
+                self.logger.info(
+                    f"📥 Requesting blocks {start_height} to {end_height} from {peer_id}"
+                )
+                self.logger.info(
+                    f"   URL: {url}?offset={params['offset']}&limit={params['limit']}"
+                )
+
                 response = requests.get(url, params=params, timeout=30)
-                
+
                 if response.status_code == 200:
                     blocks = response.json()
                     if not isinstance(blocks, list):
-                        blocks = blocks.get('blocks', [])
+                        blocks = blocks.get("blocks", [])
                     self.logger.info(f"✅ Received {len(blocks)} blocks from {peer_id}")
                     return blocks
                 else:
-                    self.logger.warning(f"❌ Peer {peer_id} returned {response.status_code}: {response.text[:200]}")
-                    
+                    self.logger.warning(
+                        f"❌ Peer {peer_id} returned {response.status_code}: {response.text[:200]}"
+                    )
+
             except Exception as e:
                 self.logger.warning(f"❌ Failed to fetch blocks from {peer_id}: {e}")
-            
+
             return []
-            
+
             # Fallback: Try bootstrap server's blockchain endpoint
-            if 'bootstrap' in peer_id.lower():
+            if "bootstrap" in peer_id.lower():
                 try:
-                    bootstrap_url = f"https://{peer_address}/api/v1/bootstrap/blockchain"
-                    logger.debug(f"Trying bootstrap blockchain endpoint: {bootstrap_url}")
+                    bootstrap_url = (
+                        f"https://{peer_address}/api/v1/bootstrap/blockchain"
+                    )
+                    logger.debug(
+                        f"Trying bootstrap blockchain endpoint: {bootstrap_url}"
+                    )
                     response = requests.get(bootstrap_url, timeout=30)
-                    
+
                     if response.status_code == 200:
                         blockchain_data = response.json()
-                        blocks = blockchain_data.get('blocks', [])
-                        needed_blocks = [b for b in blocks if start_height < b.get('index', 0) <= end_height]
-                        logger.info(f"Received {len(needed_blocks)} blocks from bootstrap")
+                        blocks = blockchain_data.get("blocks", [])
+                        needed_blocks = [
+                            b
+                            for b in blocks
+                            if start_height < b.get("index", 0) <= end_height
+                        ]
+                        logger.info(
+                            f"Received {len(needed_blocks)} blocks from bootstrap"
+                        )
                         return needed_blocks
                 except Exception as e:
                     logger.debug(f"Bootstrap blockchain fetch failed: {e}")
-            
+
             return []
-            
+
         except Exception as e:
             logger.warning(f"Failed to request blocks from {peer_id}: {e}")
             return []
@@ -359,7 +408,7 @@ class P2PSyncManager:
                     # Add block to blockchain
                     # Note: This would need to be integrated with SignChain.add_block
                     valid_blocks.append(block_data)
-                    self.known_blocks.add(block_data.get('hash', ''))
+                    self.known_blocks.add(block_data.get("hash", ""))
             except Exception as e:
                 logger.warning(f"Block validation failed: {e}")
 
@@ -368,7 +417,14 @@ class P2PSyncManager:
     def _validate_block(self, block_data: Dict) -> bool:
         """Validate a block's structure and proof-of-work."""
         # Basic validation checks
-        required_fields = ['index', 'timestamp', 'transactions', 'previous_hash', 'nonce', 'hash']
+        required_fields = [
+            "index",
+            "timestamp",
+            "transactions",
+            "previous_hash",
+            "nonce",
+            "hash",
+        ]
 
         for field in required_fields:
             if field not in block_data:
@@ -378,34 +434,41 @@ class P2PSyncManager:
         # For blocks received from network, trust the hash field
         # (it was already validated when created)
         # Only validate proof-of-work
-        block_hash = block_data['hash']
-        
+        block_hash = block_data["hash"]
+
         # Validate proof-of-work using MINIMUM difficulty
         # Historical blocks may have been mined at lower difficulty
         min_difficulty = 130  # Minimum threshold for testnet
         actual_bits = count_zero_bits(block_hash)
         if actual_bits < min_difficulty:
-            self.logger.debug(f"❌ PoW failed at index {block_data.get('index')}: {actual_bits} bits < {min_difficulty}")
+            self.logger.debug(
+                f"❌ PoW failed at index {block_data.get('index')}: {actual_bits} bits < {min_difficulty}"
+            )
             return False
 
-        self.logger.debug(f"✅ Block {block_data.get('index')} passed PoW check ({actual_bits} bits)")
+        self.logger.debug(
+            f"✅ Block {block_data.get('index')} passed PoW check ({actual_bits} bits)"
+        )
         return True
 
     def _calculate_block_hash(self, block_data: Dict) -> str:
         """Calculate block hash."""
-        block_string = json.dumps({
-            'index': block_data['index'],
-            'timestamp': block_data['timestamp'],
-            'transactions': block_data['transactions'],
-            'previous_hash': block_data['previous_hash'],
-            'nonce': block_data['nonce']
-        }, sort_keys=True)
+        block_string = json.dumps(
+            {
+                "index": block_data["index"],
+                "timestamp": block_data["timestamp"],
+                "transactions": block_data["transactions"],
+                "previous_hash": block_data["previous_hash"],
+                "nonce": block_data["nonce"],
+            },
+            sort_keys=True,
+        )
 
         return hashlib.sha256(block_string.encode()).hexdigest()
 
     def _detect_fork(self, peer_id: str, peer_chain_info: Dict) -> bool:
         """Detect if there's a potential fork with this peer."""
-        peer_height = peer_chain_info.get('blocks', 0)
+        peer_height = peer_chain_info.get("blocks", 0)
         local_height = len(self.blockchain.chain)
 
         # If peer has more blocks, check if the chains diverge
@@ -414,11 +477,13 @@ class P2PSyncManager:
             common_height = min(local_height, peer_height) - 1
             if common_height >= 0:
                 local_last_hash = self.blockchain.chain[common_height].hash
-                peer_last_hash = peer_chain_info.get('last_block', {}).get('hash', '')
+                peer_last_hash = peer_chain_info.get("last_block", {}).get("hash", "")
 
                 # If hashes don't match at the common height, we have a fork
                 if local_last_hash != peer_last_hash:
-                    logger.warning(f"🔀 Fork detected with peer {peer_id} at height {common_height}")
+                    logger.warning(
+                        f"🔀 Fork detected with peer {peer_id} at height {common_height}"
+                    )
                     return True
 
         return False
@@ -429,12 +494,14 @@ class P2PSyncManager:
 
         Returns True if fork was resolved (we switched chains), False otherwise.
         """
-        peer_height = peer_chain_info.get('blocks', 0)
+        peer_height = peer_chain_info.get("blocks", 0)
         local_height = len(self.blockchain.chain)
 
         # Longest chain rule: always follow the longest valid chain
         if peer_height > local_height:
-            logger.info(f"🔀 Resolving fork: peer {peer_id} has longer chain ({peer_height} vs {local_height})")
+            logger.info(
+                f"🔀 Resolving fork: peer {peer_id} has longer chain ({peer_height} vs {local_height})"
+            )
 
             # Request the competing chain from the peer
             competing_blocks = self._request_blocks(peer_id, 0, peer_height)
@@ -464,34 +531,46 @@ class P2PSyncManager:
             return False
 
         self.logger.info(f"🔍 Validating chain of {len(chain_blocks)} blocks...")
-        
+
         # Validate each block in sequence
         for i, block_data in enumerate(chain_blocks):
             # First block should be genesis - accept it without validation
             # Genesis blocks must match network-wide and don't follow normal validation
             if i == 0:
-                if block_data.get('index') != 0:
-                    self.logger.warning(f"📛 First block is not genesis (index={block_data.get('index')})")
+                if block_data.get("index") != 0:
+                    self.logger.warning(
+                        f"📛 First block is not genesis (index={block_data.get('index')})"
+                    )
                     return False
-                self.logger.info(f"✅ Genesis block accepted (hash: {block_data.get('hash', 'N/A')[:16]}...)")
+                self.logger.info(
+                    f"✅ Genesis block accepted (hash: {block_data.get('hash', 'N/A')[:16]}...)"
+                )
             else:
                 # Non-genesis block should connect to previous block
-                prev_block = chain_blocks[i-1]
-                expected_prev_hash = prev_block.get('hash')
-                actual_prev_hash = block_data.get('previous_hash')
-                
+                prev_block = chain_blocks[i - 1]
+                expected_prev_hash = prev_block.get("hash")
+                actual_prev_hash = block_data.get("previous_hash")
+
                 if actual_prev_hash != expected_prev_hash:
                     self.logger.warning(f"📛 Block {i} previous_hash mismatch")
-                    self.logger.warning(f"   Expected: {expected_prev_hash[:16] if expected_prev_hash else 'None'}...")
-                    self.logger.warning(f"   Got: {actual_prev_hash[:16] if actual_prev_hash else 'None'}...")
+                    self.logger.warning(
+                        f"   Expected: {expected_prev_hash[:16] if expected_prev_hash else 'None'}..."
+                    )
+                    self.logger.warning(
+                        f"   Got: {actual_prev_hash[:16] if actual_prev_hash else 'None'}..."
+                    )
                     return False
-                    
+
                 if not self._validate_block(block_data):
                     self.logger.warning(f"📛 Block {i} validation failed")
-                    self.logger.warning(f"   Block hash: {block_data.get('hash', 'N/A')[:16]}")
-                    self.logger.warning(f"   Previous: {actual_prev_hash[:16] if actual_prev_hash else 'None'}...")
+                    self.logger.warning(
+                        f"   Block hash: {block_data.get('hash', 'N/A')[:16]}"
+                    )
+                    self.logger.warning(
+                        f"   Previous: {actual_prev_hash[:16] if actual_prev_hash else 'None'}..."
+                    )
                     return False
-                    
+
                 if i % 10 == 0:  # Log every 10th block
                     self.logger.info(f"   ✅ Validated blocks 0-{i}")
 
@@ -505,45 +584,47 @@ class P2PSyncManager:
         try:
             # Convert dict blocks to SignBlock objects with validation metadata
             from .blockchain import SignBlock
-            
+
             # Use node_id or generate one for this validator
             if not node_id:
                 node_id = f"validator_{os.urandom(4).hex()}"
-            
+
             sign_blocks = []
             for block_data in new_chain:
                 # Extract validation data from network
-                validators = block_data.get('validators', [])
-                validation_count = block_data.get('validation_count', 0)
-                validation_timestamp = block_data.get('validation_timestamp')
-                
+                validators = block_data.get("validators", [])
+                validation_count = block_data.get("validation_count", 0)
+                validation_timestamp = block_data.get("validation_timestamp")
+
                 sign_block = SignBlock(
-                    index=block_data.get('index', 0),
-                    timestamp=block_data.get('timestamp', 0),
-                    transactions=block_data.get('transactions', []),
-                    previous_hash=block_data.get('previous_hash', ''),
-                    nonce=block_data.get('nonce', 0),
-                    algorithm=block_data.get('algorithm', 'pihash'),
-                    precomputed_hash=block_data.get('hash', ''),
+                    index=block_data.get("index", 0),
+                    timestamp=block_data.get("timestamp", 0),
+                    transactions=block_data.get("transactions", []),
+                    previous_hash=block_data.get("previous_hash", ""),
+                    nonce=block_data.get("nonce", 0),
+                    algorithm=block_data.get("algorithm", "pihash"),
+                    precomputed_hash=block_data.get("hash", ""),
                     validators=validators,
                     validation_count=validation_count,
-                    validation_timestamp=validation_timestamp
+                    validation_timestamp=validation_timestamp,
                 )
-                
+
                 # Add this validator to the block
                 sign_block.add_validator(node_id)
-                
+
                 sign_blocks.append(sign_block)
-            
+
             # Replace the blockchain
             self.blockchain.chain = sign_blocks
-            
+
             # Save to disk
             self.blockchain.save_chain()
-            
-            self.logger.info(f"✅ Chain switched successfully - now at {len(self.blockchain.chain)} blocks")
-            self.sync_stats['blocks_synced'] += len(new_chain)
-            
+
+            self.logger.info(
+                f"✅ Chain switched successfully - now at {len(self.blockchain.chain)} blocks"
+            )
+            self.sync_stats["blocks_synced"] += len(new_chain)
+
         except Exception as e:
             self.logger.error(f"❌ Failed to switch chain: {e}")
             raise
@@ -551,7 +632,7 @@ class P2PSyncManager:
     def _validate_transaction(self, tx_data: Dict) -> bool:
         """Validate a transaction."""
         # Basic transaction validation
-        required_fields = ['type', 'data', 'signature', 'timestamp']
+        required_fields = ["type", "data", "signature", "timestamp"]
 
         for field in required_fields:
             if field not in tx_data:
@@ -583,7 +664,7 @@ class P2PSyncManager:
 
         if new_tx_count > 0:
             logger.info(f"✅ Synced {new_tx_count} transactions from peer {peer_id}")
-            self.sync_stats['transactions_synced'] += new_tx_count
+            self.sync_stats["transactions_synced"] += new_tx_count
 
     def _get_peer_transactions(self, peer_id: str) -> List[Dict]:
         """Get pending transactions from a peer."""
@@ -593,8 +674,8 @@ class P2PSyncManager:
             if not peer_info:
                 return []
 
-            address = peer_info.get('address')
-            port = peer_info.get('port', 3142)
+            address = peer_info.get("address")
+            port = peer_info.get("port", 3142)
             if not address:
                 return []
 
@@ -603,9 +684,9 @@ class P2PSyncManager:
 
             # Determine network parameter from blockchain if available
             params = {}
-            network_id = getattr(self.blockchain, 'network_id', None)
+            network_id = getattr(self.blockchain, "network_id", None)
             if isinstance(network_id, str) and network_id:
-                params['network'] = network_id
+                params["network"] = network_id
 
             response = requests.get(endpoint, params=params, timeout=5)
             if response.status_code != 200:
@@ -614,11 +695,11 @@ class P2PSyncManager:
             data = response.json()
             # Normalize response to list of transactions
             if isinstance(data, dict):
-                pending = data.get('pending')
+                pending = data.get("pending")
                 if isinstance(pending, list):
                     return pending
                 # Fallback if server uses 'transactions'
-                txs = data.get('transactions')
+                txs = data.get("transactions")
                 if isinstance(txs, list):
                     return txs
             elif isinstance(data, list):
@@ -658,7 +739,7 @@ class P2PSyncManager:
 
     def broadcast_new_block(self, block_data: Dict):
         """Broadcast a newly mined block to the network."""
-        block_hash = block_data.get('hash', '')
+        block_hash = block_data.get("hash", "")
         self.known_blocks.add(block_hash)
 
         # Add to pending propagation
@@ -677,61 +758,73 @@ class P2PSyncManager:
     def get_sync_status(self) -> Dict:
         """Get current synchronization status."""
         return {
-            'is_syncing': self.is_syncing,
-            'sync_peers': list(self.sync_peers),
-            'last_sync_time': self.last_sync_time,
-            'sync_stats': self.sync_stats.copy(),
-            'pending_blocks': len(self.pending_blocks),
-            'known_blocks': len(self.known_blocks),
-            'syndicates': len(self.syndicates),
-            'syndicate_memberships': len(self.syndicate_memberships)
+            "is_syncing": self.is_syncing,
+            "sync_peers": list(self.sync_peers),
+            "last_sync_time": self.last_sync_time,
+            "sync_stats": self.sync_stats.copy(),
+            "pending_blocks": len(self.pending_blocks),
+            "known_blocks": len(self.known_blocks),
+            "syndicates": len(self.syndicates),
+            "syndicate_memberships": len(self.syndicate_memberships),
         }
 
     # === SYNDICATE MINING SUPPORT ===
 
-    def join_syndicate(self, syndicate_name: str, wallet_address: str, hashrate: float = 0) -> Dict[str, Any]:
+    def join_syndicate(
+        self, syndicate_name: str, wallet_address: str, hashrate: float = 0
+    ) -> Dict[str, Any]:
         """Join or create a mining syndicate."""
-        syndicate_id = hashlib.sha256(f"syndicate_{syndicate_name}".encode()).hexdigest()[:16]
+        syndicate_id = hashlib.sha256(
+            f"syndicate_{syndicate_name}".encode()
+        ).hexdigest()[:16]
 
         # Check if syndicate exists
         if syndicate_id not in self.syndicates:
             # Create new syndicate
             self.syndicates[syndicate_id] = {
-                'syndicate_name': syndicate_name,
-                'founder': wallet_address,
-                'participants': {wallet_address: {'hashrate': hashrate, 'joined_at': time.time()}},
-                'created_at': time.time(),
-                'total_hashrate': hashrate,
-                'blocks_found': 0
+                "syndicate_name": syndicate_name,
+                "founder": wallet_address,
+                "participants": {
+                    wallet_address: {"hashrate": hashrate, "joined_at": time.time()}
+                },
+                "created_at": time.time(),
+                "total_hashrate": hashrate,
+                "blocks_found": 0,
             }
             self.syndicate_memberships[wallet_address] = syndicate_id
-            logger.info(f"🏢 Created new syndicate '{syndicate_name}' with ID {syndicate_id}")
-            return {'success': True, 'action': 'created', 'syndicate_id': syndicate_id}
+            logger.info(
+                f"🏢 Created new syndicate '{syndicate_name}' with ID {syndicate_id}"
+            )
+            return {"success": True, "action": "created", "syndicate_id": syndicate_id}
         else:
             # Join existing syndicate
             syndicate = self.syndicates[syndicate_id]
-            if wallet_address in syndicate['participants']:
-                return {'success': False, 'error': 'Already a member of this syndicate'}
+            if wallet_address in syndicate["participants"]:
+                return {"success": False, "error": "Already a member of this syndicate"}
 
-            if len(syndicate['participants']) >= 100:  # Max syndicate size
-                return {'success': False, 'error': 'Syndicate is full'}
+            if len(syndicate["participants"]) >= 100:  # Max syndicate size
+                return {"success": False, "error": "Syndicate is full"}
 
-            syndicate['participants'][wallet_address] = {
-                'hashrate': hashrate,
-                'joined_at': time.time()
+            syndicate["participants"][wallet_address] = {
+                "hashrate": hashrate,
+                "joined_at": time.time(),
             }
-            syndicate['total_hashrate'] += hashrate
+            syndicate["total_hashrate"] += hashrate
             self.syndicate_memberships[wallet_address] = syndicate_id
 
             # Broadcast join message to syndicate
-            self._broadcast_syndicate_message(syndicate_id, 'join_syndicate', {
-                'wallet': wallet_address,
-                'hashrate': hashrate,
-                'timestamp': time.time()
-            })
+            self._broadcast_syndicate_message(
+                syndicate_id,
+                "join_syndicate",
+                {
+                    "wallet": wallet_address,
+                    "hashrate": hashrate,
+                    "timestamp": time.time(),
+                },
+            )
 
             logger.info(f"🤝 {wallet_address} joined syndicate '{syndicate_name}'")
-            return {'success': True, 'action': 'joined', 'syndicate_id': syndicate_id}
+            return {"success": True, "action": "joined", "syndicate_id": syndicate_id}
 
     def leave_syndicate(self, wallet_address: str) -> bool:
         """Leave the current mining syndicate."""
@@ -744,25 +837,30 @@ class P2PSyncManager:
             return False
 
         # Remove from syndicate
-        if wallet_address in syndicate['participants']:
-            hashrate = syndicate['participants'][wallet_address]['hashrate']
-            syndicate['total_hashrate'] -= hashrate
-            del syndicate['participants'][wallet_address]
+        if wallet_address in syndicate["participants"]:
+            hashrate = syndicate["participants"][wallet_address]["hashrate"]
+            syndicate["total_hashrate"] -= hashrate
+            del syndicate["participants"][wallet_address]
 
         del self.syndicate_memberships[wallet_address]
 
         # Broadcast leave message
-        self._broadcast_syndicate_message(syndicate_id, 'leave_syndicate', {
-            'wallet': wallet_address,
-            'timestamp': time.time()
-        })
+        self._broadcast_syndicate_message(
+            syndicate_id,
+            "leave_syndicate",
+            {"wallet": wallet_address, "timestamp": time.time()},
+        )
 
         # Remove empty syndicates
-        if not syndicate['participants']:
+        if not syndicate["participants"]:
             del self.syndicates[syndicate_id]
-            logger.info(f"🗑️ Syndicate '{syndicate['syndicate_name']}' disbanded (no participants)")
+            logger.info(
+                f"🗑️ Syndicate '{syndicate['syndicate_name']}' disbanded (no participants)"
+            )
 
-        logger.info(f"👋 {wallet_address} left syndicate '{syndicate['syndicate_name']}'")
+        logger.info(
+            f"👋 {wallet_address} left syndicate '{syndicate['syndicate_name']}'"
+        )
         return True
 
     def get_syndicate_info(self, syndicate_id: str) -> Optional[Dict]:
@@ -780,19 +878,23 @@ class P2PSyncManager:
             return False
 
         # Broadcast share to syndicate
-        self._broadcast_syndicate_message(syndicate_id, 'share_submission', {
-            'wallet': wallet_address,
-            'share_data': share_data,
-            'timestamp': time.time()
-        })
+        self._broadcast_syndicate_message(
+            syndicate_id,
+            "share_submission",
+            {
+                "wallet": wallet_address,
+                "share_data": share_data,
+                "timestamp": time.time(),
+            },
+        )
 
         return True
 
     def handle_syndicate_message(self, message: Dict):
         """Handle incoming syndicate messages."""
         try:
-            syndicate_id = message.get('syndicate_id')
-            message_type = message.get('message_type')
+            syndicate_id = message.get("syndicate_id")
+            message_type = message.get("message_type")
 
             if message_type in self.syndicate_message_handlers:
                 self.syndicate_message_handlers[message_type](message)
@@ -802,109 +904,117 @@ class P2PSyncManager:
         except Exception as e:
             logger.error(f"Failed to handle syndicate message: {e}")
 
-    def _broadcast_syndicate_message(self, syndicate_id: str, message_type: str, payload: Dict):
+    def _broadcast_syndicate_message(
+        self, syndicate_id: str, message_type: str, payload: Dict
+    ):
         """Broadcast a message to all syndicate participants."""
         syndicate = self.syndicates.get(syndicate_id)
         if not syndicate:
             return
 
         syndicate_message = {
-            'syndicate_id': syndicate_id,
-            'message_type': message_type,
-            'payload': payload,
-            'timestamp': time.time(),
-            'sender': 'system'
+            "syndicate_id": syndicate_id,
+            "message_type": message_type,
+            "payload": payload,
+            "timestamp": time.time(),
+            "sender": "system",
         }
 
         # Send to all syndicate participants (placeholder - would use P2P network)
-        logger.debug(f"📡 Syndicate broadcast to {len(syndicate['participants'])} participants: {message_type}")
+        logger.debug(
+            f"📡 Syndicate broadcast to {len(syndicate['participants'])} participants: {message_type}"
+        )
 
     def _handle_join_syndicate(self, message: Dict):
         """Handle syndicate join message."""
-        syndicate_id = message.get('syndicate_id')
-        payload = message.get('payload', {})
+        syndicate_id = message.get("syndicate_id")
+        payload = message.get("payload", {})
 
         if syndicate_id in self.syndicates:
             syndicate = self.syndicates[syndicate_id]
-            wallet = payload.get('wallet')
-            hashrate = payload.get('hashrate', 0)
+            wallet = payload.get("wallet")
+            hashrate = payload.get("hashrate", 0)
 
-            if wallet and wallet not in syndicate['participants']:
-                syndicate['participants'][wallet] = {
-                    'hashrate': hashrate,
-                    'joined_at': payload.get('timestamp', time.time())
+            if wallet and wallet not in syndicate["participants"]:
+                syndicate["participants"][wallet] = {
+                    "hashrate": hashrate,
+                    "joined_at": payload.get("timestamp", time.time()),
                 }
-                syndicate['total_hashrate'] += hashrate
+                syndicate["total_hashrate"] += hashrate
                 self.syndicate_memberships[wallet] = syndicate_id
 
     def _handle_leave_syndicate(self, message: Dict):
         """Handle syndicate leave message."""
-        syndicate_id = message.get('syndicate_id')
-        payload = message.get('payload', {})
-        wallet = payload.get('wallet')
+        syndicate_id = message.get("syndicate_id")
+        payload = message.get("payload", {})
+        wallet = payload.get("wallet")
 
         if syndicate_id in self.syndicates and wallet:
             syndicate = self.syndicates[syndicate_id]
-            if wallet in syndicate['participants']:
-                hashrate = syndicate['participants'][wallet]['hashrate']
-                syndicate['total_hashrate'] -= hashrate
-                del syndicate['participants'][wallet]
+            if wallet in syndicate["participants"]:
+                hashrate = syndicate["participants"][wallet]["hashrate"]
+                syndicate["total_hashrate"] -= hashrate
+                del syndicate["participants"][wallet]
 
             if wallet in self.syndicate_memberships:
                 del self.syndicate_memberships[wallet]
 
             # Remove empty syndicates
-            if not syndicate['participants']:
+            if not syndicate["participants"]:
                 del self.syndicates[syndicate_id]
 
     def _handle_syndicate_status(self, message: Dict):
         """Handle syndicate status update."""
         # Update local syndicate information
-        syndicate_id = message.get('syndicate_id')
-        payload = message.get('payload', {})
+        syndicate_id = message.get("syndicate_id")
+        payload = message.get("payload", {})
 
         if syndicate_id in self.syndicates:
             syndicate = self.syndicates[syndicate_id]
             # Update syndicate stats from status message
-            syndicate['total_hashrate'] = payload.get('total_hashrate', syndicate['total_hashrate'])
+            syndicate["total_hashrate"] = payload.get(
+                "total_hashrate", syndicate["total_hashrate"]
+            )
 
     def _handle_share_submission(self, message: Dict):
         """Handle mining share submission."""
         # This would validate and record shares for reward distribution
         # For now, just log it
-        payload = message.get('payload', {})
-        wallet = payload.get('wallet')
+        payload = message.get("payload", {})
+        wallet = payload.get("wallet")
         logger.debug(f"📊 Share submitted by {wallet}")
 
     def _handle_syndicate_block_found(self, message: Dict):
         """Handle syndicate block found notification."""
-        payload = message.get('payload', {})
-        finder_wallet = payload.get('finder_wallet')
-        syndicate_id = message.get('syndicate_id')
+        payload = message.get("payload", {})
+        finder_wallet = payload.get("finder_wallet")
+        syndicate_id = message.get("syndicate_id")
 
         if syndicate_id in self.syndicates:
             syndicate = self.syndicates[syndicate_id]
-            syndicate['blocks_found'] += 1
+            syndicate["blocks_found"] += 1
 
             # Distribute rewards (simplified)
-            reward_distribution = payload.get('reward_distribution', {})
+            reward_distribution = payload.get("reward_distribution", {})
 
-            logger.info(f"🎉 Syndicate '{syndicate['syndicate_name']}' found block! Rewards distributed to {len(reward_distribution)} participants")
+            logger.info(
+                f"🎉 Syndicate '{syndicate['syndicate_name']}' found block! Rewards distributed to {len(reward_distribution)} participants"
+            )
 
     def get_syndicate_stats(self) -> Dict[str, Any]:
         """Get comprehensive syndicate mining statistics."""
         return {
-            'total_syndicates': len(self.syndicates),
-            'total_syndicate_participants': len(self.syndicate_memberships),
-            'syndicates': {
+            "total_syndicates": len(self.syndicates),
+            "total_syndicate_participants": len(self.syndicate_memberships),
+            "syndicates": {
                 syndicate_id: {
-                    'name': syndicate['syndicate_name'],
-                    'participants': len(syndicate['participants']),
-                    'total_hashrate': syndicate['total_hashrate'],
-                    'blocks_found': syndicate['blocks_found']
+                    "name": syndicate["syndicate_name"],
+                    "participants": len(syndicate["participants"]),
+                    "total_hashrate": syndicate["total_hashrate"],
+                    "blocks_found": syndicate["blocks_found"],
                 }
                 for syndicate_id, syndicate in self.syndicates.items()
-            }
+            },
         }
 
     # === BOOTSTRAP NODE INTEGRATION ===
@@ -932,7 +1042,9 @@ class P2PSyncManager:
                 logger.warning(f"Failed to discover peers from {bootstrap_url}: {e}")
 
         if discovered_count > 0:
-            logger.info(f"✅ Discovered {discovered_count} new peers from bootstrap nodes")
+            logger.info(
+                f"✅ Discovered {discovered_count} new peers from bootstrap nodes"
+            )
         else:
             logger.debug("No new peers discovered from bootstrap nodes")
 
@@ -944,7 +1056,7 @@ class P2PSyncManager:
             response.raise_for_status()
 
             data = response.json()
-            peers = data.get('peers', [])
+            peers = data.get("peers", [])
 
             if peers:
                 logger.debug(f"Fetched {len(peers)} peers from {bootstrap_url}")
@@ -955,7 +1067,9 @@ class P2PSyncManager:
 
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 404:
-                logger.debug(f"Bootstrap endpoint not implemented yet at {bootstrap_url} - continuing without peers")
+                logger.debug(
+                    f"Bootstrap endpoint not implemented yet at {bootstrap_url} - continuing without peers"
+                )
                 return []
             else:
                 logger.warning(f"HTTP error fetching from {bootstrap_url}: {e}")
@@ -973,31 +1087,28 @@ class P2PSyncManager:
     def _add_discovered_peer(self, peer_info: Dict):
         """Add a discovered peer to our peer discovery system."""
         # Extract peer information
-        node_id = peer_info.get('node_id')
-        address = peer_info.get('address')
-        port = peer_info.get('port', 3142)
-        capabilities = peer_info.get('capabilities', [])
+        node_id = peer_info.get("node_id")
+        address = peer_info.get("address")
+        port = peer_info.get("port", 3142)
+        capabilities = peer_info.get("capabilities", [])
 
         if not node_id or not address:
             raise ValueError("Peer info missing required fields")
 
         # Create peer info for discovery system
         peer_data = {
-            'node_id': node_id,
-            'address': address,
-            'port': port,
-            'capabilities': capabilities,
-            'last_seen': peer_info.get('last_seen', time.time()),
-            'source': 'bootstrap',
-            'connected': False  # Will be updated when we try to connect
+            "node_id": node_id,
+            "address": address,
+            "port": port,
+            "capabilities": capabilities,
+            "last_seen": peer_info.get("last_seen", time.time()),
+            "source": "bootstrap",
+            "connected": False,  # Will be updated when we try to connect
         }
 
         # Add to peer discovery
         self.peer_discovery.add_peer(
-            peer_id=node_id,
-            address=address,
-            port=port,
-            capabilities=capabilities
+            peer_id=node_id, address=address, port=port, capabilities=capabilities
         )
 
         logger.debug(f"Added bootstrap peer: {node_id} at {address}:{port}")
@@ -1012,6 +1123,70 @@ class P2PSyncManager:
         self.bootstrap_discovery_enabled = enabled
         status = "enabled" if enabled else "disabled"
         logger.info(f"Bootstrap peer discovery {status}")
+
+    def _send_to_peer(self, peer_id: str, message: Dict):
+        """Send message to peer using WebSocket (fallback to HTTP)."""
+        # Try WebSocket first (if enabled and peer connected)
+        if self.ws_p2p_client.enabled:
+            connected_peers = self.ws_p2p_client.get_connected_peers()
+            if peer_id in connected_peers:
+                try:
+                    # Queue WebSocket send (non-blocking)
+                    # This would be done asynchronously in a real implementation
+                    logger.debug(f"Sending to {peer_id} via WebSocket")
+                    return
+                except Exception as e:
+                    logger.debug(f"WebSocket send failed for {peer_id}: {e}")
+                    # Fall through to HTTP
+
+        # Fallback to HTTP
+        self._send_via_http(peer_id, message)
+
+    def _send_via_http(self, peer_id: str, message: Dict):
+        """Send message to peer via HTTP (fallback)."""
+        try:
+            peers = self.peer_discovery.get_known_peers()
+            if peer_id not in peers:
+                return
+
+            peer_info = peers[peer_id]
+            peer_address = peer_info.get("address")
+            peer_port = peer_info.get("port", 3142)
+
+            if not peer_address:
+                return
+
+            # Send via HTTP POST to peer's API
+            url = f"http://{peer_address}:{peer_port}/api/v1/p2p/message"
+            try:
+                response = requests.post(url, json=message, timeout=5)
+                if response.status_code != 200:
+                    logger.debug(
+                        f"HTTP send to {peer_id} returned {response.status_code}"
+                    )
+            except requests.exceptions.RequestException as e:
+                logger.debug(f"HTTP send to {peer_id} failed: {e}")
+
+        except Exception as e:
+            logger.debug(f"Error sending via HTTP to {peer_id}: {e}")
+
+    def _update_propagation_time(self, new_time: float):
+        """Update rolling average propagation time."""
+        current_avg = self.propagation_stats["propagation_time_avg"]
+        propagated_count = self.propagation_stats["blocks_propagated"]
+
+        # Simple moving average
+        self.propagation_stats["propagation_time_avg"] = (
+            (current_avg * (propagated_count - 1)) + new_time
+        ) / propagated_count
+
+    def get_p2p_statistics(self) -> Dict[str, Any]:
+        """Get P2P communication statistics"""
+        return {
+            "websocket_stats": self.ws_p2p_client.get_statistics(),
+            "propagation_stats": self.propagation_stats,
+            "sync_stats": self.sync_stats,
+        }
 
 
 class BlockPropagator:
@@ -1028,15 +1203,15 @@ class BlockPropagator:
     def __init__(self, p2p_sync: P2PSyncManager):
         self.p2p_sync = p2p_sync
         self.propagation_stats = {
-            'blocks_propagated': 0,
-            'propagation_time_avg': 0.0,
-            'failed_propagations': 0
+            "blocks_propagated": 0,
+            "propagation_time_avg": 0.0,
+            "failed_propagations": 0,
         }
 
     def propagate_block(self, block_data: Dict, source_peer: Optional[str] = None):
         """Propagate a block to all connected peers except source."""
         start_time = time.time()
-        block_hash = block_data.get('hash', '')
+        block_hash = block_data.get("hash", "")
 
         # Don't propagate back to source
         target_peers = [p for p in self.p2p_sync.sync_peers if p != source_peer]
@@ -1057,42 +1232,37 @@ class BlockPropagator:
 
         # Update propagation stats
         propagation_time = time.time() - start_time
-        self.propagation_stats['blocks_propagated'] += 1
+        self.propagation_stats["blocks_propagated"] += 1
         self._update_propagation_time(propagation_time)
 
-        logger.debug(f"📡 Propagated block {block_hash[:16]} to {success_count}/{len(target_peers)} peers in {propagation_time:.3f}s")
+        logger.debug(
+            f"📡 Propagated block {block_hash[:16]} to {success_count}/{len(target_peers)} peers in {propagation_time:.3f}s"
+        )
 
     def _create_block_announcement(self, block_data: Dict) -> Dict:
         """Create a compact block announcement."""
         return {
-            'type': 'block_announcement',
-            'block_hash': block_data.get('hash'),
-            'block_height': block_data.get('index'),
-            'timestamp': time.time()
+            "type": "block_announcement",
+            "block_hash": block_data.get("hash"),
+            "block_height": block_data.get("index"),
+            "timestamp": time.time(),
         }
 
     def _send_to_peer(self, peer_id: str, message: Dict):
-        """Send message to a specific peer."""
-        # Placeholder - would use P2P connection
-        pass
-
-    def _update_propagation_time(self, new_time: float):
-        """Update rolling average propagation time."""
-        current_avg = self.propagation_stats['propagation_time_avg']
-        propagated_count = self.propagation_stats['blocks_propagated']
-
-        # Simple moving average
-        self.propagation_stats['propagation_time_avg'] = (
-            (current_avg * (propagated_count - 1)) + new_time
-        ) / propagated_count
+        """Send message to peer using P2PSyncManager's hybrid method."""
+        # Delegate to P2PSyncManager
+        self.p2p_sync._send_to_peer(peer_id, message)
 
 
 # Convenience functions for integration
-def start_p2p_sync(blockchain: SignChain, peer_discovery: PeerDiscovery) -> P2PSyncManager:
+def start_p2p_sync(
+    blockchain: SignChain, peer_discovery: PeerDiscovery
+) -> P2PSyncManager:
     """Start P2P synchronization for a blockchain node."""
     sync_manager = P2PSyncManager(blockchain, peer_discovery)
     sync_manager.start_sync()
     return sync_manager
+
 
 def stop_p2p_sync(sync_manager: P2PSyncManager):
     """Stop P2P synchronization."""

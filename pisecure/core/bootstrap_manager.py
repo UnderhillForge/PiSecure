@@ -30,7 +30,9 @@ class BootstrapRegistry:
     and discovers new servers dynamically.
     """
 
-    def __init__(self, registry_file: str = "/var/lib/pisecure/bootstrap_registry.json"):
+    def __init__(
+        self, registry_file: str = "/var/lib/pisecure/bootstrap_registry.json"
+    ):
         self.registry_file = Path(registry_file)
         self.bootstrap_servers: Dict[str, Dict[str, Any]] = {}
         self.peer_cache: Dict[str, Any] = {}
@@ -51,7 +53,7 @@ class BootstrapRegistry:
                 "total_requests": 0,
                 "successful_requests": 0,
                 "response_time": None,
-                "source": "default"
+                "source": "default",
             },
             "https://pisecure-bootstrap-production.up.railway.app": {
                 "priority": 2,
@@ -62,8 +64,8 @@ class BootstrapRegistry:
                 "total_requests": 0,
                 "successful_requests": 0,
                 "response_time": None,
-                "source": "default"
-            }
+                "source": "default",
+            },
         }
 
         for url, info in default_servers.items():
@@ -76,10 +78,10 @@ class BootstrapRegistry:
         """Load registry from disk"""
         try:
             if self.registry_file.exists():
-                with open(self.registry_file, 'r') as f:
+                with open(self.registry_file, "r") as f:
                     data = json.load(f)
-                    self.bootstrap_servers = data.get('servers', {})
-                    self.peer_cache = data.get('peer_cache', {})
+                    self.bootstrap_servers = data.get("servers", {})
+                    self.peer_cache = data.get("peer_cache", {})
         except json.JSONDecodeError as e:
             logger.warning(f"Bootstrap registry corrupted, will recreate: {e}")
             # Delete corrupted file so we start fresh
@@ -94,12 +96,12 @@ class BootstrapRegistry:
         """Save registry to disk"""
         try:
             data = {
-                'servers': self.bootstrap_servers,
-                'peer_cache': self.peer_cache,
-                'last_updated': time.time()
+                "servers": self.bootstrap_servers,
+                "peer_cache": self.peer_cache,
+                "last_updated": time.time(),
             }
             self.registry_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.registry_file, 'w') as f:
+            with open(self.registry_file, "w") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
             logger.warning(f"Failed to save bootstrap registry: {e}")
@@ -116,32 +118,35 @@ class BootstrapRegistry:
         for server_url in healthy_servers[:3]:  # Query top 3 healthy servers
             try:
                 response = requests.get(
-                    f"{server_url}/api/v1/bootstrap/registry",
-                    timeout=10
+                    f"{server_url}/api/v1/bootstrap/registry", timeout=10
                 )
 
                 if response.status_code == 200:
                     data = response.json()
 
                     # Add secondary nodes to registry
-                    for node_info in data.get('secondary_nodes', []):
-                        node_url = node_info.get('address') or node_info.get('url')
+                    for node_info in data.get("secondary_nodes", []):
+                        node_url = node_info.get("address") or node_info.get("url")
                         if node_url and node_url not in self.bootstrap_servers:
                             self.bootstrap_servers[node_url] = {
                                 "priority": 3,  # Lower priority for discovered servers
-                                "capabilities": node_info.get('services', []),
+                                "capabilities": node_info.get("services", []),
                                 "health_score": 0.8,  # Start with decent health
                                 "last_seen": time.time(),
                                 "consecutive_failures": 0,
                                 "total_requests": 0,
                                 "successful_requests": 0,
                                 "response_time": None,
-                                "region": node_info.get('region', 'unknown'),
-                                "source": "discovered"
+                                "region": node_info.get("region", "unknown"),
+                                "source": "discovered",
                             }
                             discovered_count += 1
 
-                    self.update_server_health(server_url, success=True, response_time=response.elapsed.total_seconds())
+                    self.update_server_health(
+                        server_url,
+                        success=True,
+                        response_time=response.elapsed.total_seconds(),
+                    )
 
             except Exception as e:
                 logger.debug(f"Failed to discover from {server_url}: {e}")
@@ -153,52 +158,65 @@ class BootstrapRegistry:
 
         return discovered_count
 
-    def update_server_health(self, url: str, success: bool, response_time: Optional[float] = None):
+    def update_server_health(
+        self, url: str, success: bool, response_time: Optional[float] = None
+    ):
         """Update health metrics for a bootstrap server"""
         if url not in self.bootstrap_servers:
             return
 
         server = self.bootstrap_servers[url]
-        server['total_requests'] += 1
+        server["total_requests"] += 1
 
         if success:
-            server['successful_requests'] += 1
-            server['last_seen'] = time.time()
-            server['consecutive_failures'] = 0
+            server["successful_requests"] += 1
+            server["last_seen"] = time.time()
+            server["consecutive_failures"] = 0
             if response_time:
-                server['response_time'] = response_time
+                server["response_time"] = response_time
         else:
-            server['consecutive_failures'] += 1
+            server["consecutive_failures"] += 1
 
         # Calculate health score
-        if server['total_requests'] > 0:
-            success_rate = server['successful_requests'] / server['total_requests']
-            recency_factor = min(1.0, (time.time() - server['last_seen']) / (24 * 3600))  # 24 hour decay
-            server['health_score'] = success_rate * (1 - recency_factor * 0.5)  # Health decays over time
+        if server["total_requests"] > 0:
+            success_rate = server["successful_requests"] / server["total_requests"]
+            recency_factor = min(
+                1.0, (time.time() - server["last_seen"]) / (24 * 3600)
+            )  # 24 hour decay
+            server["health_score"] = success_rate * (
+                1 - recency_factor * 0.5
+            )  # Health decays over time
         else:
-            server['health_score'] = 0.5  # Default for new servers
+            server["health_score"] = 0.5  # Default for new servers
 
         # Mark as inactive if too many failures or very low health
-        server['is_active'] = server['health_score'] > 0.1 and server['consecutive_failures'] < 5
+        server["is_active"] = (
+            server["health_score"] > 0.1 and server["consecutive_failures"] < 5
+        )
 
         self._save_registry()
 
     def get_healthy_servers(self) -> List[str]:
         """Get list of healthy bootstrap servers sorted by priority"""
         healthy = [
-            url for url, info in self.bootstrap_servers.items()
-            if info.get('is_active', True) and info['health_score'] > 0.3
+            url
+            for url, info in self.bootstrap_servers.items()
+            if info.get("is_active", True) and info["health_score"] > 0.3
         ]
 
         # Sort by priority (lower number first), then by health score
-        healthy.sort(key=lambda url: (
-            self.bootstrap_servers[url]['priority'],
-            -self.bootstrap_servers[url]['health_score']
-        ))
+        healthy.sort(
+            key=lambda url: (
+                self.bootstrap_servers[url]["priority"],
+                -self.bootstrap_servers[url]["health_score"],
+            )
+        )
 
         return healthy
 
-    def get_peer_list(self, limit: int = 50, network: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_peer_list(
+        self, limit: int = 50, network: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
         Get peer list from healthy bootstrap servers.
 
@@ -211,8 +229,8 @@ class BootstrapRegistry:
                 # Check cache first (use string key for JSON serialization)
                 cache_key = f"{server_url}:{network or 'default'}"
                 cached = self.peer_cache.get(cache_key)
-                if cached and time.time() - cached['timestamp'] < self.cache_timeout:
-                    peers.extend(cached['peers'])
+                if cached and time.time() - cached["timestamp"] < self.cache_timeout:
+                    peers.extend(cached["peers"])
                     continue
 
                 url = f"{server_url}/api/v1/bootstrap/peers"
@@ -222,16 +240,20 @@ class BootstrapRegistry:
 
                 if response.status_code == 200:
                     data = response.json()
-                    server_peers = data.get('peers', [])
+                    server_peers = data.get("peers", [])
 
                     # Cache the result (network-aware, use string key for JSON serialization)
                     self.peer_cache[cache_key] = {
-                        'peers': server_peers,
-                        'timestamp': time.time()
+                        "peers": server_peers,
+                        "timestamp": time.time(),
                     }
 
                     peers.extend(server_peers)
-                    self.update_server_health(server_url, success=True, response_time=response.elapsed.total_seconds())
+                    self.update_server_health(
+                        server_url,
+                        success=True,
+                        response_time=response.elapsed.total_seconds(),
+                    )
 
             except Exception as e:
                 logger.debug(f"Failed to get peers from {server_url}: {e}")
@@ -281,7 +303,7 @@ class RobustMinerReporter:
         self.last_registration_attempt = time.time()
         self.registration_attempts += 1
 
-        is_testnet = os.environ.get('PISECURE_TESTNET') == '1'
+        is_testnet = os.environ.get("PISECURE_TESTNET") == "1"
         registration_data = {
             "node_id": self.node_id,
             "node_type": "miner",
@@ -290,12 +312,12 @@ class RobustMinerReporter:
             "location": "unknown",  # Could be enhanced with geo detection
             "wallet_address": None,  # Set if available
             "version": "0.1.0",
-            "network": "testnet" if is_testnet else "mainnet"
+            "network": "testnet" if is_testnet else "mainnet",
         }
 
         # Advertised endpoint (optional, helps peers reach us)
-        advertised_host = os.environ.get('PISECURE_PUBLIC_HOST')
-        advertised_port_raw = os.environ.get('PISECURE_PUBLIC_PORT')
+        advertised_host = os.environ.get("PISECURE_PUBLIC_HOST")
+        advertised_port_raw = os.environ.get("PISECURE_PUBLIC_PORT")
         if advertised_host:
             registration_data["advertised_address"] = advertised_host
         if advertised_port_raw:
@@ -311,14 +333,18 @@ class RobustMinerReporter:
                 response = requests.post(
                     f"{server_url}/api/v1/nodes/register",
                     json=registration_data,
-                    timeout=90  # Increased to handle 60-90s server response times
+                    timeout=90,  # Increased to handle 60-90s server response times
                 )
 
                 if response.status_code == 200:
                     result = response.json()
-                    if result.get('registration_success'):
+                    if result.get("registration_success"):
                         self.registered = True
-                        self.registry.update_server_health(server_url, success=True, response_time=response.elapsed.total_seconds())
+                        self.registry.update_server_health(
+                            server_url,
+                            success=True,
+                            response_time=response.elapsed.total_seconds(),
+                        )
                         logger.info(f"✅ Successfully registered with {server_url}")
                         return True
                     else:
@@ -332,7 +358,9 @@ class RobustMinerReporter:
 
         # Don't log warning on first attempt - registration is async
         if self.registration_attempts > 2:
-            logger.warning(f"⚠️ Failed to register with bootstrap servers (attempt {self.registration_attempts})")
+            logger.warning(
+                f"⚠️ Failed to register with bootstrap servers (attempt {self.registration_attempts})"
+            )
         return False
 
     def send_status_report(self, status_data: Dict[str, Any]) -> bool:
@@ -348,48 +376,45 @@ class RobustMinerReporter:
 
         # Calculate uptime percentage based on session start time
         uptime_percentage = 100.0  # Default for new sessions
-        if status_data.get('session_start_time'):
-            session_duration = time.time() - status_data['session_start_time']
+        if status_data.get("session_start_time"):
+            session_duration = time.time() - status_data["session_start_time"]
             if session_duration > 0:
                 # Assume 95% uptime minimum for established sessions
-                uptime_percentage = min(100.0, 95.0 + (session_duration / 86400))  # Slight bonus for long sessions
+                uptime_percentage = min(
+                    100.0, 95.0 + (session_duration / 86400)
+                )  # Slight bonus for long sessions
 
         # Get actual peer count (would be passed from mining system)
-        peers_connected = status_data.get('peers_connected', 0)
+        peers_connected = status_data.get("peers_connected", 0)
 
         # Syndicate membership (would be configurable)
-        syndicate_membership = status_data.get('syndicate_membership')
+        syndicate_membership = status_data.get("syndicate_membership")
 
-        is_testnet = os.environ.get('PISECURE_TESTNET') == '1'
+        is_testnet = os.environ.get("PISECURE_TESTNET") == "1"
         status_payload = {
             # Required fields
             "node_id": self.node_id,
             "status": "active",
-            "mining_active": status_data.get('mining_active', False),
-            "hashrate": status_data.get('hashrate', 0),
-
+            "mining_active": status_data.get("mining_active", False),
+            "hashrate": status_data.get("hashrate", 0),
             # Mining metrics for intelligence
-            "blocks_mined": status_data.get('blocks_mined', 0),
+            "blocks_mined": status_data.get("blocks_mined", 0),
             "peers_connected": peers_connected,
             "uptime_percentage": uptime_percentage,
-
             # Syndicate information (if applicable)
             "syndicate_membership": syndicate_membership,
-
             # System monitoring data
-            "temperature": status_data.get('temperature'),
-            "memory_usage": status_data.get('memory_usage'),
-
+            "temperature": status_data.get("temperature"),
+            "memory_usage": status_data.get("memory_usage"),
             # Session and identity data
-            "session_start_time": status_data.get('session_start_time'),
-            "wallet_address": status_data.get('wallet_address'),
-            "location": status_data.get('location', 'unknown'),
-            "hardware_model": status_data.get('hardware_model', 'unknown'),
-
+            "session_start_time": status_data.get("session_start_time"),
+            "wallet_address": status_data.get("wallet_address"),
+            "location": status_data.get("location", "unknown"),
+            "hardware_model": status_data.get("hardware_model", "unknown"),
             # Metadata
             "reported_at": time.time(),
             "intelligence_enabled": True,  # Indicate this report includes intelligence data
-            "network": "testnet" if is_testnet else "mainnet"
+            "network": "testnet" if is_testnet else "mainnet",
         }
 
         # Remove None values to keep payload clean
@@ -403,14 +428,18 @@ class RobustMinerReporter:
                 response = requests.post(
                     f"{server_url}/api/v1/nodes/status",
                     json=status_payload,
-                    timeout=90  # Increased to handle 60-90s server response times
+                    timeout=90,  # Increased to handle 60-90s server response times
                 )
 
                 if response.status_code == 200:
                     result = response.json()
-                    if result.get('status_update_accepted'):
+                    if result.get("status_update_accepted"):
                         success_count += 1
-                        self.registry.update_server_health(server_url, success=True, response_time=response.elapsed.total_seconds())
+                        self.registry.update_server_health(
+                            server_url,
+                            success=True,
+                            response_time=response.elapsed.total_seconds(),
+                        )
                     else:
                         self.registry.update_server_health(server_url, success=False)
                 else:
@@ -421,7 +450,9 @@ class RobustMinerReporter:
                 self.registry.update_server_health(server_url, success=False)
 
         if success_count > 0:
-            logger.debug(f"✅ Status report sent to {success_count} bootstrap server(s)")
+            logger.debug(
+                f"✅ Status report sent to {success_count} bootstrap server(s)"
+            )
             return True
         else:
             logger.debug("⚠️ Status report failed to all bootstrap servers")
@@ -481,10 +512,154 @@ class BackgroundStatusReporter:
             self.thread.join(timeout=5)
 
 
+class NodeRegistration:
+    """
+    Node registration with bootstrap server
+
+    Handles registration workflow:
+    1. Register node with bootstrap
+    2. Receive network permissions and configuration
+    3. Submit initial entropy (for miners)
+    4. Maintain heartbeat
+    """
+
+    def __init__(self, registry: BootstrapRegistry):
+        self.registry = registry
+        self.registered_nodes: Dict[str, Dict[str, Any]] = {}
+
+    def register_node(
+        self,
+        node_id: str,
+        node_type: str,
+        wallet_address: Optional[str] = None,
+        location: Optional[str] = None,
+        services: Optional[List[str]] = None,
+        capabilities: Optional[List[str]] = None,
+        network: str = "mainnet",
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Register node with bootstrap server
+
+        Args:
+            node_id: Unique node identifier (8-64 chars)
+            node_type: One of: miner, validator, sentinel_ai, relay
+            wallet_address: Wallet address for rewards
+            location: Geographic region (e.g., 'us-east', 'eu-west')
+            services: List of services offered
+            capabilities: List of node capabilities
+            network: 'mainnet' or 'testnet'
+
+        Returns:
+            Registration response data or None if failed
+        """
+        # Validate inputs
+        if not node_id or len(node_id) < 8 or len(node_id) > 64:
+            logger.error(f"Invalid node_id length: {len(node_id)}")
+            return None
+
+        if node_type not in ["miner", "validator", "sentinel_ai", "relay"]:
+            logger.error(f"Invalid node_type: {node_type}")
+            return None
+
+        # Build registration payload
+        payload = {"node_id": node_id, "node_type": node_type, "network": network}
+
+        if wallet_address:
+            payload["wallet_address"] = wallet_address
+        if location:
+            payload["location"] = location
+        if services:
+            payload["services"] = services
+        if capabilities:
+            payload["capabilities"] = capabilities
+
+        # Try registration with each healthy bootstrap server
+        for bootstrap_url in self.registry.get_healthy_servers():
+            try:
+                response = requests.post(
+                    f"{bootstrap_url}/api/v1/nodes/register",
+                    json=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "User-Agent": f"PiSecure-Node/{node_id}",
+                    },
+                    timeout=10,
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+
+                    if data.get("registration_success"):
+                        logger.info(f"✓ Node registered: {node_id} as {node_type}")
+
+                        # Cache registration info
+                        self.registered_nodes[node_id] = {
+                            "registration_data": data,
+                            "bootstrap_url": bootstrap_url,
+                            "registered_at": time.time(),
+                        }
+
+                        # Log important info
+                        if (
+                            "entropy_submission_required" in data
+                            and data["entropy_submission_required"]
+                        ):
+                            deadline = data.get("entropy_submission_deadline", 0)
+                            logger.info(
+                                f"  Entropy submission required before {deadline}"
+                            )
+
+                        if "heartbeat_interval" in data:
+                            logger.info(
+                                f"  Heartbeat interval: {data['heartbeat_interval']}s"
+                            )
+
+                        return data
+                    else:
+                        logger.warning(f"Registration failed: {data}")
+                        return None
+
+                elif response.status_code == 409:
+                    # Already registered
+                    logger.info(f"Node {node_id} already registered")
+                    return response.json()
+
+                elif response.status_code == 400:
+                    # Validation error
+                    error_data = response.json()
+                    logger.error(
+                        f"Registration validation error: {error_data.get('error')}"
+                    )
+                    return None
+
+                else:
+                    logger.warning(
+                        f"Registration failed with status {response.status_code}"
+                    )
+                    continue
+
+            except Exception as e:
+                logger.debug(f"Registration attempt failed for {bootstrap_url}: {e}")
+                continue
+
+        logger.error("Failed to register with any bootstrap server")
+        return None
+
+    def get_registration_info(self, node_id: str) -> Optional[Dict[str, Any]]:
+        """Get cached registration info for a node"""
+        return self.registered_nodes.get(node_id)
+
+    def is_registered(self, node_id: str) -> bool:
+        """Check if node is registered"""
+        return node_id in self.registered_nodes
+
+
 # Global instances
 _bootstrap_registry = None
 _miner_reporter = None
 _status_reporter = None
+_node_registration = None
+
 
 def get_bootstrap_registry() -> BootstrapRegistry:
     """Get global bootstrap registry instance"""
@@ -492,6 +667,7 @@ def get_bootstrap_registry() -> BootstrapRegistry:
     if _bootstrap_registry is None:
         _bootstrap_registry = BootstrapRegistry()
     return _bootstrap_registry
+
 
 def get_miner_reporter(node_id: str) -> RobustMinerReporter:
     """Get global miner reporter instance"""
@@ -501,6 +677,7 @@ def get_miner_reporter(node_id: str) -> RobustMinerReporter:
         _miner_reporter = RobustMinerReporter(registry, node_id)
     return _miner_reporter
 
+
 def get_status_reporter(node_id: str) -> BackgroundStatusReporter:
     """Get global background status reporter instance"""
     global _status_reporter
@@ -508,3 +685,12 @@ def get_status_reporter(node_id: str) -> BackgroundStatusReporter:
         reporter = get_miner_reporter(node_id)
         _status_reporter = BackgroundStatusReporter(reporter)
     return _status_reporter
+
+
+def get_node_registration() -> NodeRegistration:
+    """Get global node registration instance"""
+    global _node_registration
+    if _node_registration is None:
+        registry = get_bootstrap_registry()
+        _node_registration = NodeRegistration(registry)
+    return _node_registration

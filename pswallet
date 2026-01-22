@@ -1,408 +1,502 @@
 #!/usr/bin/env python3
 """
-pswallet - Simple PiSecure Wallet CLI
-======================================
+pswallet - PiSecure Wallet CLI
+================================
 
-Standalone wallet management tool for PiSecure.
-No blockchain operations - just wallet management.
-
-Usage:
-  pswallet list                          # List all wallets
-  pswallet create <name>                 # Create new wallet
-  pswallet show <name>                   # Show wallet details
-  pswallet balance <address>             # Check balance
-  pswallet export <name>                 # Export wallet (backup)
-  pswallet import <file>                 # Import wallet backup
-  
-  PiNS (PiSecure Name Service):
-  pswallet resolve <name>                # Resolve PiNS name
-  pswallet register <name> <wallet>      # Register PiNS name
-  pswallet names <wallet>                # List wallet's PiNS names
-  
-Options:
-  --testnet                              # Use testnet wallets
-  --json                                 # Output as JSON
+Complete wallet management and blockchain interaction tool for PiSecure.
 """
 
-import sys
-import os
-import json
-import time
-import click
+import sys, os, json, time, secrets, click
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 console = Console()
 
-# Import wallet functionality
+# Import PiSecure components
 try:
+    from pisecure.core import SignChain
     from pisecure.core.wallet import SignWallet
 except ImportError:
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from pisecure.core import SignChain
         from pisecure.core.wallet import SignWallet
     except ImportError:
-        console.print("[red]Error: Could not import SignWallet[/red]")
-        console.print("[yellow]Make sure PiSecure is installed: pip install -e .[/yellow]")
+        console.print("[red]Error: Could not import PiSecure[/red]")
         sys.exit(1)
 
 
 def get_wallet_dir(testnet=False, custom_dir=None):
-    """Get wallet directory based on network"""
+    """Get wallet directory"""
     if custom_dir:
         return custom_dir
-    
-    # Try system directories first (on Raspberry Pi)
-    if testnet or os.environ.get('PISECURE_TESTNET') == '1':
+    if testnet or os.environ.get("PISECURE_TESTNET") == "1":
         system_dir = "/var/lib/pisecure-testnet/wallets"
     else:
         system_dir = "/var/lib/pisecure/wallets"
-    
-    # If system directory is accessible, use it
-    try:
-        if os.path.exists(os.path.dirname(system_dir)):
-            return system_dir
-    except (OSError, PermissionError):
-        pass
-    
-    # Fallback to local directory for development/testing
+    if os.path.exists(os.path.dirname(system_dir)):
+        return system_dir
     local_dir = os.path.expanduser("~/.pisecure/wallets")
-    if testnet or os.environ.get('PISECURE_TESTNET') == '1':
+    if testnet or os.environ.get("PISECURE_TESTNET") == "1":
         local_dir = os.path.expanduser("~/.pisecure-testnet/wallets")
-    
     return local_dir
 
 
+def get_blockchain(testnet=False):
+    """Get blockchain instance"""
+    if testnet or os.environ.get("PISECURE_TESTNET") == "1":
+        os.environ["PISECURE_TESTNET"] = "1"
+    return SignChain()
+
+
 @click.group()
-@click.option('--testnet', is_flag=True, help='Use testnet network')
-@click.option('--json', 'output_json', is_flag=True, help='Output as JSON')
-@click.option('--wallet-dir', help='Custom wallet directory (default: /var/lib/pisecure/wallets)')
+@click.option("--testnet", is_flag=True)
+@click.option("--json", "output_json", is_flag=True)
+@click.option("--wallet-dir")
+@click.option("--quiet", is_flag=True)
 @click.pass_context
-def cli(ctx, testnet, output_json, wallet_dir):
-    """pswallet - Simple PiSecure Wallet Manager"""
+def cli(ctx, testnet, output_json, wallet_dir, quiet):
+    """pswallet - PiSecure Wallet Manager"""
     ctx.ensure_object(dict)
-    ctx.obj['testnet'] = testnet
-    ctx.obj['json'] = output_json
-    ctx.obj['wallet_dir'] = wallet_dir
-    
+    ctx.obj["testnet"] = testnet
+    ctx.obj["json"] = output_json
+    ctx.obj["wallet_dir"] = wallet_dir
+    ctx.obj["quiet"] = quiet
+    if testnet and not quiet:
+        console.print("[dim]Using testnet[/dim]")
     if testnet:
-        console.print("[dim]Using testnet wallets[/dim]")
+        os.environ["PISECURE_TESTNET"] = "1"
+
+
+# Wallet commands
+@cli.command()
+@click.argument("name")
+@click.option("--display-name")
+@click.pass_context
+def create(ctx, name, display_name):
+    """Create new wallet"""
+    wallet_dir = get_wallet_dir(ctx.obj["testnet"], ctx.obj.get("wallet_dir"))
+    os.makedirs(wallet_dir, exist_ok=True)
+    wallet = SignWallet(os.path.join(wallet_dir, "wallets.json"))
+    result = wallet.create_wallet(name, display_name or name)
+    if ctx.obj["json"]:
+        print(json.dumps(result, indent=2))
+    elif result.get("success"):
+        console.print(f"[green]✅ Created: {name}[/green]")
+        console.print(f"[cyan]{result.get('address')}[/cyan]")
+    else:
+        console.print(f"[red]❌ {result.get('error')}[/red]")
+        sys.exit(1)
 
 
 @cli.command()
 @click.pass_context
 def list(ctx):
     """List all wallets"""
-    testnet = ctx.obj['testnet']
-    output_json = ctx.obj['json']
-    custom_dir = ctx.obj.get('wallet_dir')
-    
-    try:
-        wallet_dir = get_wallet_dir(testnet, custom_dir)
-        wallet_metadata = os.path.join(wallet_dir, 'wallets.json')
-        wallet = SignWallet(wallet_metadata)
-        wallets = wallet.list_wallets()
-        
-        if output_json:
-            print(json.dumps(wallets, indent=2))
-            return
-        
-        if not wallets:
-            console.print("[yellow]No wallets found[/yellow]")
-            console.print("[dim]Create one with: pswallet create <name>[/dim]")
-            return
-        
-        table = Table(title="💰 PiSecure Wallets")
+    wallet_dir = get_wallet_dir(ctx.obj["testnet"], ctx.obj.get("wallet_dir"))
+    wallet_file = os.path.join(wallet_dir, "wallets.json")
+    if not os.path.exists(wallet_file):
+        console.print("[yellow]No wallets[/yellow]")
+        return
+    wallet = SignWallet(wallet_file)
+    wallets = wallet.list_wallets()
+    if ctx.obj["json"]:
+        print(json.dumps(wallets, indent=2))
+    elif not wallets:
+        console.print("[yellow]No wallets[/yellow]")
+    else:
+        table = Table(title="💰 Wallets")
         table.add_column("Name", style="cyan")
         table.add_column("Address", style="green")
         table.add_column("Balance", style="yellow", justify="right")
-        table.add_column("Created", style="blue")
-        
         for w in wallets:
-            name = w.get('name', w.get('id', 'unknown'))
-            address = w.get('address', 'unknown')
-            balance = w.get('balance', 0)
-            created = time.ctime(w.get('created', 0))
-            
+            addr = w.get("address", "")
             table.add_row(
-                name,
-                address[:16] + "..." if len(address) > 16 else address,
-                f"{balance:.2f}",
-                created
+                w.get("name", "unknown"),
+                addr[:12] + "..." + addr[-8:] if len(addr) > 20 else addr,
+                f"{w.get('balance', 0):.2f}",
             )
-        
         console.print(table)
-        
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
 
 
 @cli.command()
-@click.argument('name')
-@click.option('--display-name', help='Display name for wallet')
-@click.pass_context
-def create(ctx, name, display_name):
-    """Create a new wallet"""
-    testnet = ctx.obj['testnet']
-    output_json = ctx.obj['json']
-    custom_dir = ctx.obj.get('wallet_dir')
-    
-    try:
-        wallet_dir = get_wallet_dir(testnet, custom_dir)
-        
-        # Ensure directory exists
-        os.makedirs(wallet_dir, exist_ok=True)
-        
-        wallet_metadata = os.path.join(wallet_dir, 'wallets.json')
-        wallet = SignWallet(wallet_metadata)
-        result = wallet.create_wallet(name, display_name or name)
-        
-        if output_json:
-            print(json.dumps(result, indent=2))
-            return
-        
-        if result.get('success'):
-            console.print(f"[green]✅ Wallet created: {name}[/green]")
-            console.print(f"[cyan]Address: {result.get('address')}[/cyan]")
-            console.print(f"[yellow]Keep your keys safe![/yellow]")
-        else:
-            console.print(f"[red]❌ Error: {result.get('error')}[/red]")
-            sys.exit(1)
-            
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-@cli.command()
-@click.argument('name')
-@click.pass_context
-def show(ctx, name):
-    """Show wallet details"""
-    testnet = ctx.obj['testnet']
-    output_json = ctx.obj['json']
-    custom_dir = ctx.obj.get('wallet_dir')
-    
-    try:
-        wallet_dir = get_wallet_dir(testnet, custom_dir)
-        wallet_metadata = os.path.join(wallet_dir, 'wallets.json')
-        wallet = SignWallet(wallet_metadata)
-        wallet_data = wallet.load_wallet(name)
-        
-        if 'error' in wallet_data:
-            console.print(f"[red]❌ Wallet not found: {name}[/red]")
-            sys.exit(1)
-        
-        if output_json:
-            # Remove private key from JSON output
-            safe_data = {k: v for k, v in wallet_data.items() if k != 'private_key'}
-            print(json.dumps(safe_data, indent=2, default=str))
-            return
-        
-        table = Table(title=f"🏦 Wallet: {name}")
-        table.add_column("Property", style="cyan")
-        table.add_column("Value", style="magenta")
-        
-        table.add_row("Wallet ID", wallet_data.get('wallet_id', 'unknown'))
-        table.add_row("Name", wallet_data.get('name', 'unnamed'))
-        table.add_row("Address", wallet_data.get('address', 'unknown'))
-        table.add_row("Balance", f"{wallet_data.get('balance', 0):.2f} 314ST")
-        table.add_row("Created", time.ctime(wallet_data.get('created_at', 0)))
-        table.add_row("Transactions", str(len(wallet_data.get('transactions', []))))
-        
-        console.print(table)
-        
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-@cli.command()
-@click.argument('address')
+@click.argument("address")
 @click.pass_context
 def balance(ctx, address):
-    """Check balance of an address"""
-    output_json = ctx.obj['json']
-    
+    """Check balance from blockchain"""
+    blockchain = get_blockchain(ctx.obj["testnet"])
+    balance = blockchain.get_wallet_balance(address)
+    if ctx.obj["json"]:
+        print(json.dumps({"address": address, "balance": balance}))
+    else:
+        console.print(f"[green]{balance:.2f} 314ST[/green]")
+
+
+# Transaction commands
+@cli.command()
+@click.argument("address")
+@click.option("--limit", default=20)
+@click.pass_context
+def history(ctx, address, limit):
+    """Show transaction history"""
+    blockchain = get_blockchain(ctx.obj["testnet"])
+    txs = blockchain.get_wallet_transactions(address)
+    if limit and len(txs) > limit:
+        txs = txs[-limit:]  # Get last N transactions
+    if ctx.obj["json"]:
+        print(json.dumps(txs, indent=2, default=str))
+    elif not txs:
+        console.print("[yellow]No transactions[/yellow]")
+    else:
+        table = Table(title=f"📜 History ({len(txs)} tx)")
+        table.add_column("Type")
+        table.add_column("From")
+        table.add_column("To")
+        table.add_column("Amount", justify="right")
+        for tx in txs:
+            table.add_row(
+                tx.get("type", "?")[:15],
+                (tx.get("from", "N/A")[:8] + "...") if tx.get("from") else "N/A",
+                (tx.get("to", "N/A")[:8] + "...") if tx.get("to") else "N/A",
+                f"{tx.get('amount', 0):.2f}" if tx.get("amount") else "-",
+            )
+        console.print(table)
+
+
+@cli.command()
+@click.argument("wallet_id")
+@click.argument("recipient")
+@click.argument("amount", type=float)
+@click.option("--memo", default="")
+@click.pass_context
+def send(ctx, wallet_id, recipient, amount, memo):
+    """Send tokens from wallet to recipient"""
+    wallet_dir = get_wallet_dir(ctx.obj["testnet"], ctx.obj.get("wallet_dir"))
+
     try:
-        # This would need blockchain access - simplified version
-        console.print(f"[yellow]Address: {address}[/yellow]")
-        console.print(f"[dim]Note: Balance checking requires blockchain access[/dim]")
-        console.print(f"[dim]Use: pisecure wallet <name> --testnet for full details[/dim]")
-        
+        # Create wallet manager and load wallet with private key
+        wallet_manager = SignWallet(os.path.join(wallet_dir, "wallets.json"))
+        wallet_data = wallet_manager.load_wallet(wallet_id)
+
+        if "error" in wallet_data:
+            console.print(f"[red]❌ {wallet_data['error']}[/red]")
+            sys.exit(1)
+
+        if "private_key" not in wallet_data:
+            console.print(
+                f"[red]❌ Private key not found for wallet '{wallet_id}'[/red]"
+            )
+            sys.exit(1)
+
+        # Get balance
+        blockchain = get_blockchain(ctx.obj["testnet"])
+        sender_addr = wallet_data["address"]
+        balance = blockchain.get_wallet_balance(sender_addr)
+
+        # Calculate transaction fee
+        fee = blockchain._calculate_transaction_fee(amount, "token_transfer")
+        total_cost = amount + fee
+
+        if balance < total_cost:
+            console.print(
+                f"[red]❌ Insufficient balance: {balance:.2f} < {total_cost:.2f}[/red]"
+            )
+            console.print(f"   [dim]Amount: {amount:.2f}, Fee: {fee:.2f}[/dim]")
+            sys.exit(1)
+
+        # Create transaction
+        network_id = "testnet" if ctx.obj["testnet"] else "mainnet"
+        transaction = {
+            "type": "token_transfer",
+            "sender_address": sender_addr,
+            "sender_wallet": wallet_id,
+            "recipient_address": recipient,
+            "amount": amount,
+            "memo": memo,
+            "timestamp": time.time(),
+            "nonce": secrets.token_hex(8),
+            "network_id": network_id,
+        }
+
+        # Sign transaction
+        private_key = wallet_data["private_key"]
+        tx_copy = transaction.copy()
+        tx_string = json.dumps(tx_copy, sort_keys=True)
+
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import padding
+
+        signature = private_key.sign(
+            tx_string.encode(),
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256(),
+        )
+
+        transaction["signature"] = signature.hex()
+
+        # Submit to blockchain
+        tx_hash = blockchain.add_transaction(transaction)
+
+        if ctx.obj["json"]:
+            print(
+                json.dumps(
+                    {"success": True, "tx_hash": tx_hash, "amount": amount, "fee": fee}
+                )
+            )
+        else:
+            console.print(f"[green]✅ Transfer submitted[/green]")
+            console.print(f"   Amount: {amount:.2f} 314ST")
+            console.print(f"   Fee: {fee:.2f} 314ST")
+            console.print(f"   Total Cost: {total_cost:.2f} 314ST")
+            console.print(f"   To: {recipient[:20]}...")
+            console.print(f"   TX: {tx_hash[:20]}...")
+            console.print(f"   [dim]Status: Pending (mine to confirm)[/dim]")
+
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]❌ Error: {e}[/red]")
         sys.exit(1)
 
 
-# === PiNS (PiSecure Name Service) COMMANDS ===
+@cli.command("create-tx")
+@click.option("--count", default=5)
+@click.pass_context
+def create_tx(ctx, count):
+    """Create test transactions"""
+    blockchain = get_blockchain(ctx.obj["testnet"])
+    for i in range(count):
+        tx = {
+            "type": "test",
+            "data": {"id": secrets.token_hex(8)},
+            "signature": f"sig_{secrets.token_hex(4)}",
+            "timestamp": time.time(),
+        }
+        blockchain.add_transaction(tx)
+    console.print(f"[green]✅ Created {count} transactions[/green]")
+
 
 @cli.command()
-@click.argument('name')
+@click.pass_context
+def pending(ctx):
+    """Show pending transactions"""
+    blockchain = get_blockchain(ctx.obj["testnet"])
+    pending = blockchain.pending_transactions
+    if ctx.obj["json"]:
+        print(json.dumps(pending, indent=2, default=str))
+    else:
+        console.print(f"[cyan]{len(pending)} pending transactions[/cyan]")
+
+
+# Blockchain queries
+@cli.command()
+@click.argument("number", type=int)
+@click.pass_context
+def block(ctx, number):
+    """Show block details"""
+    blockchain = get_blockchain(ctx.obj["testnet"])
+    if number < 0 or number >= len(blockchain.chain):
+        console.print(f"[red]Block #{number} not found[/red]")
+        sys.exit(1)
+    blk = blockchain.chain[number]
+    if ctx.obj["json"]:
+        print(json.dumps(blk.to_dict(), indent=2, default=str))
+    else:
+        table = Table(title=f"🧱 Block #{blk.index}")
+        table.add_column("Property", style="cyan")
+        table.add_column("Value")
+        table.add_row("Hash", blk.hash[:40] + "...")
+        table.add_row("Previous", blk.previous_hash[:40] + "...")
+        table.add_row("Timestamp", time.ctime(blk.timestamp))
+        table.add_row("Transactions", str(len(blk.transactions)))
+        console.print(table)
+
+
+@cli.command()
+@click.pass_context
+def status(ctx):
+    """Show blockchain status"""
+    blockchain = get_blockchain(ctx.obj["testnet"])
+    info = {
+        "blocks": len(blockchain.chain),
+        "pending": len(blockchain.pending_transactions),
+        "difficulty": blockchain.difficulty,
+        "valid": blockchain.validate_chain(),
+    }
+    if ctx.obj["json"]:
+        print(json.dumps(info))
+    else:
+        table = Table(title="🔗 Status")
+        table.add_column("Metric")
+        table.add_column("Value")
+        table.add_row("Blocks", str(info["blocks"]))
+        table.add_row("Pending TX", str(info["pending"]))
+        table.add_row("Difficulty", str(info["difficulty"]))
+        table.add_row("Valid", "✅" if info["valid"] else "❌")
+        console.print(table)
+
+
+@cli.command()
+@click.pass_context
+def validate(ctx):
+    """Validate blockchain"""
+    blockchain = get_blockchain(ctx.obj["testnet"])
+    if blockchain.validate_chain():
+        console.print(f"[green]✅ Valid ({len(blockchain.chain)} blocks)[/green]")
+    else:
+        console.print("[red]❌ Invalid[/red]")
+        sys.exit(1)
+
+
+# PiNS commands
+@cli.command()
+@click.argument("name")
 @click.pass_context
 def resolve(ctx, name):
-    """Resolve a PiNS name to wallet address"""
-    output_json = ctx.obj['json']
-    
-    try:
-        # Remove .pisecure suffix if present
-        if name.endswith('.pisecure'):
-            name = name[:-9]
-        
-        console.print(f"[yellow]🔍 Resolving PiNS name: {name}.pisecure[/yellow]")
-        console.print(f"[dim]Note: PiNS resolution requires blockchain access[/dim]")
-        console.print(f"[dim]Use the full pisecure CLI for name resolution[/dim]")
-        
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
+    """Resolve PiNS name"""
+    if name.endswith(".pisecure"):
+        name = name[:-9]
+    blockchain = get_blockchain(ctx.obj["testnet"])
+    if hasattr(blockchain, "name_registry") and name in blockchain.name_registry:
+        record = blockchain.name_registry[name]
+        if ctx.obj["json"]:
+            print(json.dumps(record, indent=2, default=str))
+        else:
+            console.print(f"[green]{name}.pisecure → {record.get('address')}[/green]")
+    else:
+        console.print(f"[yellow]Not registered: {name}.pisecure[/yellow]")
 
 
-@cli.command()
-@click.argument('name')
-@click.argument('wallet_name')
-@click.option('--years', default=1, help='Years to register (default: 1)')
+# Validator commands
+@cli.command("validator-rewards")
+@click.argument("wallet_address", required=False)
 @click.pass_context
-def register(ctx, name, wallet_name, years):
-    """Register a PiNS name for a wallet"""
-    testnet = ctx.obj['testnet']
-    output_json = ctx.obj['json']
-    
-    try:
-        import re
-        
-        # Validate name format
-        if not name or len(name) < 2 or len(name) > 32:
-            console.print("[red]❌ Name must be 2-32 characters[/red]")
-            sys.exit(1)
-        
-        if not re.match(r'^[a-zA-Z0-9_-]+$', name):
-            console.print("[red]❌ Name can only contain letters, numbers, hyphens, and underscores[/red]")
-            sys.exit(1)
-        
-        # Reserved names
-        reserved = {'foundation', 'genesis', 'admin', 'system', 'pisecure'}
-        if name.lower() in reserved:
-            console.print(f"[red]❌ Name '{name}' is reserved[/red]")
-            sys.exit(1)
-        
-        # Calculate cost
-        cost = 5.0 * years
-        
-        console.print(f"[cyan]📝 Registering PiNS name: {name}.pisecure[/cyan]")
-        console.print(f"[yellow]Wallet: {wallet_name}[/yellow]")
-        console.print(f"[yellow]Duration: {years} year(s)[/yellow]")
-        console.print(f"[yellow]Cost: {cost} tokens[/yellow]")
-        console.print(f"[dim]Note: PiNS registration requires blockchain access[/dim]")
-        console.print(f"[dim]Use: pisecure register-name {name} {wallet_name} --years {years}[/dim]")
-        
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
+def validator_rewards(ctx, wallet_address):
+    """Check total validator rewards earned by wallet"""
+    blockchain = get_blockchain(ctx.obj["testnet"])
+
+    if wallet_address:
+        rewards = blockchain.get_validation_rewards(wallet_address)
+        if ctx.obj["json"]:
+            print(
+                json.dumps(
+                    {"wallet": wallet_address, "total_rewards": rewards}, indent=2
+                )
+            )
+        else:
+            console.print(
+                f"[cyan]{wallet_address}[/cyan]: [green]{rewards:.2f}[/green] 314ST"
+            )
+    else:
+        # Show all validators
+        if blockchain.validation_rewards_awarded:
+            table = Table(title="Validator Rewards")
+            table.add_column("Wallet Address", style="cyan")
+            table.add_column("Total Rewards (314ST)", style="green", justify="right")
+
+            for wallet, rewards in sorted(
+                blockchain.validation_rewards_awarded.items(),
+                key=lambda x: x[1],
+                reverse=True,
+            ):
+                table.add_row(
+                    wallet[:20] + "..." if len(wallet) > 20 else wallet,
+                    f"{rewards:.2f}",
+                )
+
+            console.print(table)
+        else:
+            console.print("[yellow]No validator rewards earned yet[/yellow]")
 
 
-@cli.command()
-@click.argument('wallet_name')
+@cli.command("validator-history")
+@click.argument("wallet_address", required=False)
+@click.option("--limit", default=20, help="Maximum rewards to show")
 @click.pass_context
-def names(ctx, wallet_name):
-    """List PiNS names owned by a wallet"""
-    testnet = ctx.obj['testnet']
-    output_json = ctx.obj['json']
-    
-    try:
-        console.print(f"[cyan]📋 PiNS names for wallet: {wallet_name}[/cyan]")
-        console.print(f"[dim]Note: Listing names requires blockchain access[/dim]")
-        console.print(f"[dim]Use the full pisecure CLI for name management[/dim]")
-        
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
+def validator_history(ctx, wallet_address, limit):
+    """Show validator reward history"""
+    blockchain = get_blockchain(ctx.obj["testnet"])
+
+    history = blockchain.get_validator_reward_history(wallet_address)
+
+    if not history:
+        console.print("[yellow]No validator reward history[/yellow]")
+        return
+
+    if ctx.obj["json"]:
+        print(json.dumps(history[-limit:], indent=2, default=str))
+    else:
+        table = Table(title="Validator Reward History")
+        table.add_column("Block #", style="cyan", justify="right")
+        table.add_column("Validator ID", style="magenta")
+        table.add_column("Wallet", style="green")
+        table.add_column("Amount (314ST)", justify="right", style="yellow")
+        table.add_column("Time", style="dim")
+
+        import datetime
+
+        for reward in history[-limit:]:
+            timestamp = datetime.datetime.fromtimestamp(reward["timestamp"]).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            wallet_short = (
+                reward["wallet_address"][:16] + "..."
+                if len(reward["wallet_address"]) > 16
+                else reward["wallet_address"]
+            )
+            validator_short = reward["validator_node_id"][:8]
+
+            table.add_row(
+                str(reward["block_index"]),
+                validator_short,
+                wallet_short,
+                f"{reward['amount']:.2f}",
+                timestamp,
+            )
+
+        console.print(table)
 
 
-@cli.command()
-@click.argument('name')
-@click.argument('output_file', required=False)
+@cli.command("validator-status")
 @click.pass_context
-def export(ctx, name, output_file):
-    """Export wallet to file (backup)"""
-    testnet = ctx.obj['testnet']
-    custom_dir = ctx.obj.get('wallet_dir')
-    
-    try:
-        wallet_dir = get_wallet_dir(testnet, custom_dir)
-        wallet_metadata = os.path.join(wallet_dir, 'wallets.json')
-        wallet = SignWallet(wallet_metadata)
-        wallet_data = wallet.load_wallet(name)
-        
-        if 'error' in wallet_data:
-            console.print(f"[red]❌ Wallet not found: {name}[/red]")
-            sys.exit(1)
-        
-        # Default output file
-        if not output_file:
-            output_file = f"{name}_backup_{int(time.time())}.json"
-        
-        # Export (without private key for security)
-        export_data = {
-            'wallet_id': wallet_data.get('wallet_id'),
-            'name': wallet_data.get('name'),
-            'address': wallet_data.get('address'),
-            'public_key': wallet_data.get('public_key'),
-            'created_at': wallet_data.get('created_at'),
-            'balance': wallet_data.get('balance', 0),
-            'transactions': wallet_data.get('transactions', [])
-        }
-        
-        with open(output_file, 'w') as f:
-            json.dump(export_data, f, indent=2)
-        
-        console.print(f"[green]✅ Wallet exported to: {output_file}[/green]")
-        console.print(f"[yellow]⚠️  Private keys NOT included for security[/yellow]")
-        
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
+def validator_status(ctx):
+    """Show validator network statistics"""
+    blockchain = get_blockchain(ctx.obj["testnet"])
+
+    stats = blockchain.get_confirmed_blocks_stats()
+
+    if ctx.obj["json"]:
+        print(json.dumps(stats, indent=2))
+    else:
+        console.print("\n[bold]Validator Network Statistics[/bold]")
+        console.print(
+            f"  [cyan]Confirmed Blocks:[/cyan] {stats['total_confirmed_blocks']}"
+        )
+        console.print(f"  [cyan]Unique Validators:[/cyan] {stats['unique_validators']}")
+        console.print(
+            f"  [cyan]Total Validations:[/cyan] {stats['total_validators_across_confirmed']}"
+        )
+
+        if stats["total_confirmed_blocks"] > 0:
+            avg_validators = stats["total_validators_across_confirmed"] / max(
+                1, stats["total_confirmed_blocks"]
+            )
+            console.print(f"  [cyan]Avg Validators/Block:[/cyan] {avg_validators:.2f}")
+
+            # Show top validators
+            if stats["validator_participation"]:
+                console.print("\n  [bold]Top Validators:[/bold]")
+                for validator_id, count in sorted(
+                    stats["validator_participation"].items(),
+                    key=lambda x: x[1],
+                    reverse=True,
+                )[:5]:
+                    console.print(f"    • {validator_id[:8]}... ({count} blocks)")
+
+        console.print()
 
 
-@cli.command()
-@click.argument('backup_file')
-@click.pass_context
-def import_wallet(ctx, backup_file):
-    """Import wallet from backup file"""
-    testnet = ctx.obj['testnet']
-    custom_dir = ctx.obj.get('wallet_dir')
-    
-    try:
-        wallet_dir = get_wallet_dir(testnet, custom_dir)
-        
-        if not os.path.exists(backup_file):
-            console.print(f"[red]❌ File not found: {backup_file}[/red]")
-            sys.exit(1)
-        
-        with open(backup_file, 'r') as f:
-            wallet_data = json.load(f)
-        
-        wallet_name = wallet_data.get('wallet_id')
-        if not wallet_name:
-            console.print("[red]❌ Invalid backup file[/red]")
-            sys.exit(1)
-        
-        # Save to wallet directory
-        os.makedirs(wallet_dir, exist_ok=True)
-        wallet_file = os.path.join(wallet_dir, f"{wallet_name}.json")
-        
-        with open(wallet_file, 'w') as f:
-            json.dump(wallet_data, f, indent=2)
-        
-        console.print(f"[green]✅ Wallet imported: {wallet_name}[/green]")
-        console.print(f"[yellow]⚠️  Note: Private keys must be restored separately[/yellow]")
-        
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     cli(obj={})

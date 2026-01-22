@@ -33,7 +33,7 @@ console = Console()
 
 # Global configuration
 USE_HYBRID_STORAGE = None  # None = auto-detect, True/False = explicit
-USE_PLAIN_OUTPUT = False   # Global flag for plain text output
+USE_PLAIN_OUTPUT = False  # Global flag for plain text output
 
 
 def print_output(message, style=None):
@@ -41,12 +41,13 @@ def print_output(message, style=None):
     if USE_PLAIN_OUTPUT:
         # Strip Rich markup and print plain text
         import re
+
         # Remove Rich markup like [green]text[/green] and [red]❌ Error[/red]
-        plain_message = re.sub(r'\[.*?\]', '', message)
+        plain_message = re.sub(r"\[.*?\]", "", message)
         # Remove all non-ASCII characters (including emojis, Unicode symbols)
-        plain_message = re.sub(r'[^\x20-\x7E]+', '', plain_message)
+        plain_message = re.sub(r"[^\x20-\x7E]+", "", plain_message)
         # Clean up extra whitespace
-        plain_message = ' '.join(plain_message.split())
+        plain_message = " ".join(plain_message.split())
         if plain_message:  # Only print if there's content left
             print(plain_message)
     else:
@@ -59,12 +60,13 @@ def print_output(message, style=None):
 def strip_rich_formatting(text):
     """Strip Rich markup and emojis from text"""
     import re
+
     # Remove Rich markup like [green]text[/green]
-    text = re.sub(r'\[.*?\]', '', text)
+    text = re.sub(r"\[.*?\]", "", text)
     # Remove all non-ASCII characters (including emojis, Unicode symbols)
-    text = re.sub(r'[^\x20-\x7E]+', '', text)
+    text = re.sub(r"[^\x20-\x7E]+", "", text)
     # Clean up extra whitespace
-    return ' '.join(text.split()).strip()
+    return " ".join(text.split()).strip()
 
 
 def print_success(message):
@@ -100,47 +102,76 @@ def print_info(message):
 
 
 @click.group()
-@click.option('--hybrid-storage/--no-hybrid-storage', default=None,
-              help='Use hybrid storage system (default: auto-detect)')
-@click.option('--test', '--testnet', 'use_testnet', is_flag=True, default=False,
-              help='Use testnet blockchain (separate from mainnet)')
-@click.option('--validate-only', is_flag=True, default=False,
-              help='Validation mode: verify blockchain integrity without Pi hardware (status/wallet commands only)')
-@click.option('--quiet', is_flag=True, default=False,
-              help='Reduce output verbosity (only show essential messages)')
+@click.option(
+    "--hybrid-storage/--no-hybrid-storage",
+    default=None,
+    help="Use hybrid storage system (default: auto-detect)",
+)
+@click.option(
+    "--test",
+    "--testnet",
+    "use_testnet",
+    is_flag=True,
+    default=False,
+    help="Use testnet blockchain (separate from mainnet)",
+)
+@click.option(
+    "--validate-only",
+    is_flag=True,
+    default=False,
+    help="Validation mode: verify blockchain integrity without Pi hardware (status/wallet commands only)",
+)
+@click.option(
+    "--quiet",
+    is_flag=True,
+    default=False,
+    help="Reduce output verbosity (only show essential messages)",
+)
+@click.option(
+    "--no-websocket",
+    is_flag=True,
+    default=False,
+    help="Disable automatic WebSocket connection to bootstrap server",
+)
 @click.version_option(version="0.1.0")
-def cli(hybrid_storage, use_testnet, validate_only, quiet):
+def cli(hybrid_storage, use_testnet, validate_only, quiet, no_websocket):
     """PiSecure - Decentralized Security Framework for Raspberry Pi"""
     import logging
-    
+    import os
+
     # Store the hybrid storage preference globally
     global USE_HYBRID_STORAGE
     USE_HYBRID_STORAGE = hybrid_storage
-    
+
+    # Disable WebSocket if requested
+    if no_websocket:
+        os.environ["PISECURE_NO_WEBSOCKET"] = "1"
+
     # Set quiet mode
     if quiet:
-        import os
-        os.environ['PISECURE_QUIET'] = '1'
+        os.environ["PISECURE_QUIET"] = "1"
         # Reduce logging noise from submodules
-        logging.getLogger('pisecure.core.p2p_sync').setLevel(logging.WARNING)
-        logging.getLogger('pisecure.core.nat_traversal').setLevel(logging.WARNING)
-        logging.getLogger('pisecure.core.bootstrap_manager').setLevel(logging.ERROR)
-        logging.getLogger('pisecure.network').setLevel(logging.WARNING)
-    
+        logging.getLogger("pisecure.core.p2p_sync").setLevel(logging.WARNING)
+        logging.getLogger("pisecure.core.nat_traversal").setLevel(logging.WARNING)
+        logging.getLogger("pisecure.core.bootstrap_manager").setLevel(logging.ERROR)
+        logging.getLogger("pisecure.network").setLevel(logging.WARNING)
+
     # Set testnet mode as environment variable
     if use_testnet:
-        import os
-        os.environ['PISECURE_TESTNET'] = '1'
+        os.environ["PISECURE_TESTNET"] = "1"
         if not quiet:
             print_info("Running in TESTNET mode - using /var/lib/pisecure-testnet/")
-    
+
     # Set validate-only mode as environment variable for core modules
     if validate_only:
         import os
-        os.environ['PISECURE_VALIDATE_ONLY'] = '1'
+
+        os.environ["PISECURE_VALIDATE_ONLY"] = "1"
         if not quiet:
             print_warning("⚠️  VALIDATE-ONLY MODE: Hardware checks bypassed")
-            print_info("This mode is for blockchain verification only (status, wallet commands)")
+            print_info(
+                "This mode is for blockchain verification only (status, wallet commands)"
+            )
             print_info("Mining is disabled - use a Raspberry Pi for mining operations")
 
 
@@ -162,13 +193,15 @@ def status():
             print(f"Difficulty: {info['difficulty']}")
             print(f"Chain Valid: {'Yes' if info['is_valid'] else 'No'}")
 
-            if info['latest_block']:
-                block = info['latest_block']
-                print(f"Latest Block: #{block['index']} ({len(block['transactions'])} TX)")
+            if info["latest_block"]:
+                block = info["latest_block"]
+                print(
+                    f"Latest Block: #{block['index']} ({len(block['transactions'])} TX)"
+                )
 
             # Network health (if available)
-            if 'network_health' in info:
-                health = info['network_health']
+            if "network_health" in info:
+                health = info["network_health"]
                 print(f"Participation: {health.get('participation', 0):.1%}")
                 print(f"Avg Block Time: {health.get('avg_block_time', 0):.1f}s")
                 print(f"Network Health: {health.get('health_score', 0):.1%}")
@@ -178,20 +211,25 @@ def status():
             table.add_column("Metric", style="cyan", no_wrap=True)
             table.add_column("Value", style="magenta")
 
-            table.add_row("Blocks", str(info['blocks']))
-            table.add_row("Pending TX", str(info['pending_transactions']))
-            table.add_row("Difficulty", str(info['difficulty']))
-            table.add_row("Chain Valid", "✅ Yes" if info['is_valid'] else "❌ No")
+            table.add_row("Blocks", str(info["blocks"]))
+            table.add_row("Pending TX", str(info["pending_transactions"]))
+            table.add_row("Difficulty", str(info["difficulty"]))
+            table.add_row("Chain Valid", "✅ Yes" if info["is_valid"] else "❌ No")
 
-            if info['latest_block']:
-                block = info['latest_block']
-                table.add_row("Latest Block", f"#{block['index']} ({len(block['transactions'])} TX)")
+            if info["latest_block"]:
+                block = info["latest_block"]
+                table.add_row(
+                    "Latest Block",
+                    f"#{block['index']} ({len(block['transactions'])} TX)",
+                )
 
             # Network health (if available)
-            if 'network_health' in info:
-                health = info['network_health']
+            if "network_health" in info:
+                health = info["network_health"]
                 table.add_row("Participation", f"{health.get('participation', 0):.1%}")
-                table.add_row("Avg Block Time", f"{health.get('avg_block_time', 0):.1f}s")
+                table.add_row(
+                    "Avg Block Time", f"{health.get('avg_block_time', 0):.1f}s"
+                )
                 table.add_row("Network Health", f"{health.get('health_score', 0):.1%}")
 
             console.print(table)
@@ -201,11 +239,58 @@ def status():
 
 
 @cli.command()
+@click.option("--enable", is_flag=True, help="Enable WebSocket P2P")
+@click.option("--disable", is_flag=True, help="Disable WebSocket P2P")
+@click.pass_context
+def network(ctx, enable, disable):
+    """Configure network settings (WebSocket P2P, peer connections)"""
+    if enable and disable:
+        print_error("Cannot use both --enable and --disable")
+        return
+
+    if enable:
+        os.environ["PISECURE_WEBSOCKET_P2P"] = "1"
+        console.print("[green]✅ WebSocket P2P enabled[/green]")
+        console.print(
+            "  WebSocket P2P will be used for block propagation with HTTP fallback"
+        )
+        console.print("  Restart your node for changes to take effect")
+
+    elif disable:
+        os.environ["PISECURE_WEBSOCKET_P2P"] = "0"
+        console.print("[yellow]⏸️  WebSocket P2P disabled[/yellow]")
+        console.print("  Node will use HTTP for all P2P communication")
+        console.print("  Restart your node for changes to take effect")
+
+    else:
+        # Show current settings
+        ws_enabled = os.environ.get("PISECURE_WEBSOCKET_P2P") == "1"
+
+        table = Table(title="Network Configuration")
+        table.add_column("Setting", style="cyan")
+        table.add_column("Value", style="green")
+
+        table.add_row("WebSocket P2P", "✅ Enabled" if ws_enabled else "❌ Disabled")
+        table.add_row("P2P Mode", "Hybrid (WS + HTTP)" if ws_enabled else "HTTP only")
+        table.add_row(
+            "Block Propagation",
+            "Real-time (50-200ms)" if ws_enabled else "Polling (30s)",
+        )
+
+        console.print(table)
+        console.print("\nUsage:")
+        console.print("  pisecure network --enable   # Enable WebSocket P2P")
+        console.print("  pisecure network --disable  # Disable WebSocket P2P")
+
+
+@cli.command()
 def migrate_storage():
     """Migrate blockchain from JSON to hybrid storage"""
     try:
         console.print("🔄 Migrating to hybrid storage system...")
-        console.print("   This will convert your JSON blockchain to block files + SQLite database")
+        console.print(
+            "   This will convert your JSON blockchain to block files + SQLite database"
+        )
         console.print()
 
         # Enable hybrid storage for migration
@@ -221,7 +306,7 @@ def migrate_storage():
 
 
 @cli.command()
-@click.option('--count', default=5, help='Number of test transactions to create')
+@click.option("--count", default=5, help="Number of test transactions to create")
 def create_tx(count):
     """Create test transactions for mining"""
     try:
@@ -237,27 +322,40 @@ def create_tx(count):
                 "data": {
                     "message": f"Test transaction #{i+1}",
                     "timestamp": time.time(),
-                    "test_id": secrets.token_hex(8)
+                    "test_id": secrets.token_hex(8),
                 },
                 "signature": f"test_sig_{secrets.token_hex(4)}",
-                "timestamp": time.time()
+                "timestamp": time.time(),
             }
             tx_hash = blockchain.add_transaction(tx)
             console.print(f"✅ Added test transaction: {tx_hash[:16]}...")
 
-        console.print(f"\n💡 Created {count} test transactions. Run 'pisecure mine' to mine them!")
+        console.print(
+            f"\n💡 Created {count} test transactions. Run 'pisecure mine' to mine them!"
+        )
 
     except Exception as e:
         console.print(f"[red]❌ Error creating transactions: {e}[/red]")
 
 
 @cli.command()
-@click.option('--interactive/--background', default=True,
-              help='Interactive mining with progress display')
-@click.option('--wallet', help='Wallet address to receive mining rewards')
-@click.option('--no-sync', is_flag=True, help='Skip network synchronization before mining')
-@click.option('--safe-mode', is_flag=True, help='Enable system monitoring and thermal throttling')
-@click.option('--plain', is_flag=True, help='Disable ANSI colors and formatting for plain text output')
+@click.option(
+    "--interactive/--background",
+    default=True,
+    help="Interactive mining with progress display",
+)
+@click.option("--wallet", help="Wallet address to receive mining rewards")
+@click.option(
+    "--no-sync", is_flag=True, help="Skip network synchronization before mining"
+)
+@click.option(
+    "--safe-mode", is_flag=True, help="Enable system monitoring and thermal throttling"
+)
+@click.option(
+    "--plain",
+    is_flag=True,
+    help="Disable ANSI colors and formatting for plain text output",
+)
 def mine(interactive, wallet, no_sync, safe_mode, plain):
     """Start blockchain mining"""
     global USE_PLAIN_OUTPUT
@@ -266,34 +364,43 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
     # CRITICAL: Verify hardware BEFORE allowing mining
     # Mining is NEVER allowed on non-Pi systems, regardless of flags
     import os
+
     try:
         from pisecure.core.pihash import PiHash
+
         pihash = PiHash()
         hw_fingerprint = pihash._get_hardware_fingerprint()
-        
+
         # Verify this is actually a Raspberry Pi
         if not pihash._verify_hardware(hw_fingerprint):
             print_error("❌ MINING BLOCKED: This system is not a verified Raspberry Pi")
             print_info("PiSecure mining requires genuine Raspberry Pi hardware")
-            print_info("Use 'pisecure status' or 'pisecure wallet' to interact with the blockchain")
+            print_info(
+                "Use 'pisecure status' or 'pisecure wallet' to interact with the blockchain"
+            )
             return
-            
+
     except Exception as e:
         print_error(f"❌ MINING BLOCKED: Hardware verification failed - {e}")
         print_info("PiSecure mining requires genuine Raspberry Pi hardware")
-        print_info("Use 'pisecure status' or 'pisecure wallet' to interact with the blockchain")
+        print_info(
+            "Use 'pisecure status' or 'pisecure wallet' to interact with the blockchain"
+        )
         return
 
     # Signal handling for graceful shutdown
     import signal
+
     mining_stopped = False
 
     def stop_mining_handler(signum, frame):
         # Immediately terminate the process - no cleanup needed
         import sys
+
         print_output("\nMining stopped by user")
         sys.stdout.flush()  # Ensure message is displayed
         import os
+
         os._exit(0)  # Force immediate termination
 
     # Register signal handler for SIGINT (Ctrl-C)
@@ -307,19 +414,22 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
             # Try to load from config
             try:
                 import json
+
                 config_path = "/etc/pisecure/config.json"
-                with open(config_path, 'r') as f:
+                with open(config_path, "r") as f:
                     config = json.load(f)
-                miner_wallet = config.get('mining', {}).get('wallet_address')
+                miner_wallet = config.get("mining", {}).get("wallet_address")
             except (FileNotFoundError, json.JSONDecodeError, KeyError):
                 pass
 
-        quiet_mode = os.environ.get('PISECURE_QUIET') == '1'
-        
+        quiet_mode = os.environ.get("PISECURE_QUIET") == "1"
+
         if not miner_wallet:
             if not quiet_mode:
                 print_warning("No miner wallet configured")
-                print_info("Use --wallet to specify wallet address, or set mining.wallet_address in /etc/pisecure/config.json")
+                print_info(
+                    "Use --wallet to specify wallet address, or set mining.wallet_address in /etc/pisecure/config.json"
+                )
             miner_wallet = None
 
         # Sync with network before mining (unless disabled)
@@ -351,6 +461,7 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
         if safe_mode:
             try:
                 from .core.monitoring import get_system_monitor
+
                 system_monitor = get_system_monitor()
                 system_monitor.start_monitoring()
                 if not quiet_mode:
@@ -363,12 +474,18 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
 
         # Initialize robust bootstrap-based status reporting
         try:
-            from .core.bootstrap_manager import get_bootstrap_registry, get_status_reporter
+            from .core.bootstrap_manager import (
+                get_bootstrap_registry,
+                get_status_reporter,
+            )
+
             bootstrap_registry = get_bootstrap_registry()
             status_reporter = get_status_reporter(f"miner_{secrets.token_hex(4)}")
             if not quiet_mode:
                 print_success("Bootstrap-based status reporting enabled")
-                print_info("Will report to bootstrap.pisecure.org with automatic failover")
+                print_info(
+                    "Will report to bootstrap.pisecure.org with automatic failover"
+                )
         except Exception as e:
             if not quiet_mode:
                 print_warning(f"Could not initialize bootstrap reporting: {e}")
@@ -389,54 +506,65 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
             if safe_mode:
                 print_output("Safe mode: Thermal throttling and memory cleanup enabled")
             print_output("Press Ctrl-C to stop")
-            
+
             # Use MiningDashboard for rich UI
             from .monitor import MiningDashboard
             import threading
             import logging
-            
-            testnet = os.environ.get('PISECURE_TESTNET') == '1'
-            
+
+            testnet = os.environ.get("PISECURE_TESTNET") == "1"
+
             # Event to signal when dashboard is ready to start mining
             mining_ready = threading.Event()
-            
+
             dashboard = MiningDashboard(
                 blockchain=blockchain,
-                mode='solo',
+                mode="solo",
                 refresh_rate=1.0,
                 testnet=testnet,
                 wallet_address=miner_wallet,
-                mining_ready_callback=lambda: mining_ready.set()
+                mining_ready_callback=lambda: mining_ready.set(),
             )
-            
+
             # Start mining in background thread
             def mine_loop():
                 # Wait for dashboard to signal ready before starting mining
                 mining_ready.wait()
-                
+
                 import os
-                
+
                 blocks_mined_session = 0
-                
+
                 # Set environment flag for PISECURE_QUIET mode
-                os.environ['PISECURE_QUIET'] = '1'
-                
+                os.environ["PISECURE_QUIET"] = "1"
+
                 # Disable ALL loggers to prevent any console output that would flicker TUI
                 logging.getLogger().setLevel(logging.CRITICAL)
-                for logger_name in ['pisecure', 'pisecure.core.nat_traversal', 
-                                   'pisecure.network.discovery', 'pisecure.core.p2p_sync',
-                                   'pisecure.core.blockchain', 'urllib3', 'requests',
-                                   'aiohttp', 'asyncio', 'dns', 'pip']:
+                for logger_name in [
+                    "pisecure",
+                    "pisecure.core.nat_traversal",
+                    "pisecure.network.discovery",
+                    "pisecure.core.p2p_sync",
+                    "pisecure.core.blockchain",
+                    "urllib3",
+                    "requests",
+                    "aiohttp",
+                    "asyncio",
+                    "dns",
+                    "pip",
+                ]:
                     logger = logging.getLogger(logger_name)
                     logger.setLevel(logging.CRITICAL)
                     # Remove all handlers to prevent output
                     logger.handlers.clear()
                     logger.propagate = False
-                
+
                 while not mining_stopped:
                     try:
                         # Mine with verbose=False to suppress block found messages
-                        block = blockchain.mine_pending_transactions(miner_wallet, verbose=False)
+                        block = blockchain.mine_pending_transactions(
+                            miner_wallet, verbose=False
+                        )
                         if block:
                             blocks_mined_session += 1
                             blockchain.adapt_difficulty()
@@ -444,15 +572,15 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
                     except Exception as e:
                         # Log to file only
                         try:
-                            with open('/tmp/pisecure_mining_errors.log', 'a') as f:
+                            with open("/tmp/pisecure_mining_errors.log", "a") as f:
                                 f.write(f"{time.time()}: {e}\n")
                         except Exception:
                             pass
                         time.sleep(1)
-            
+
             mining_thread = threading.Thread(target=mine_loop, daemon=True)
             mining_thread.start()
-            
+
             # Run dashboard (blocking)
             try:
                 dashboard.run()
@@ -471,29 +599,46 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
 
                         # Display current system status
                         if throttle_status:
-                            status_display = system_monitor.get_status_display(throttle_status)
+                            status_display = system_monitor.get_status_display(
+                                throttle_status
+                            )
                             print_info(f"System status: {status_display}")
 
                         # Apply cool-off strategy if needed
-                        if not throttle_status['should_pause_mining']:
-                            cool_off_action = system_monitor.apply_cool_off_strategy(throttle_status)
-                            if cool_off_action['action'] != 'none':
+                        if not throttle_status["should_pause_mining"]:
+                            cool_off_action = system_monitor.apply_cool_off_strategy(
+                                throttle_status
+                            )
+                            if cool_off_action["action"] != "none":
                                 action_msg = {
-                                    'emergency_stop': 'Emergency stop triggered',
-                                    'pause_mining': 'Cooling down - mining paused',
-                                    'throttle_mining': 'Increased delays for cooling',
-                                    'periodic_cleanup': 'Memory cleanup performed'
-                                }.get(cool_off_action['action'], cool_off_action['action'])
+                                    "emergency_stop": "Emergency stop triggered",
+                                    "pause_mining": "Cooling down - mining paused",
+                                    "throttle_mining": "Increased delays for cooling",
+                                    "periodic_cleanup": "Memory cleanup performed",
+                                }.get(
+                                    cool_off_action["action"], cool_off_action["action"]
+                                )
 
-                                if cool_off_action.get('memory_cleanup', {}).get('memory_freed_mb', 0) > 0:
-                                    freed_mb = cool_off_action['memory_cleanup']['memory_freed_mb']
+                                if (
+                                    cool_off_action.get("memory_cleanup", {}).get(
+                                        "memory_freed_mb", 0
+                                    )
+                                    > 0
+                                ):
+                                    freed_mb = cool_off_action["memory_cleanup"][
+                                        "memory_freed_mb"
+                                    ]
                                     action_msg += f" ({freed_mb:.1f}MB freed)"
 
                                 print_warning(action_msg)
-                        elif throttle_status['cool_down_time_remaining'] > 0:
-                            remaining = throttle_status['cool_down_time_remaining']
-                            print_warning(f"Cooling down... ({remaining:.0f}s remaining)")
-                            time.sleep(min(remaining, 10))  # Sleep for remaining time or 10s max
+                        elif throttle_status["cool_down_time_remaining"] > 0:
+                            remaining = throttle_status["cool_down_time_remaining"]
+                            print_warning(
+                                f"Cooling down... ({remaining:.0f}s remaining)"
+                            )
+                            time.sleep(
+                                min(remaining, 10)
+                            )  # Sleep for remaining time or 10s max
                             continue
 
                     # Check stop flag before mining
@@ -501,7 +646,9 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
                         break
 
                     # Mine a single block (quietly - no Tor/P2P messages)
-                    block = blockchain.mine_pending_transactions(miner_wallet, verbose=False)
+                    block = blockchain.mine_pending_transactions(
+                        miner_wallet, verbose=False
+                    )
                     if block:
                         blocks_mined_session += 1
                         print_success(f"Block mined! #{block.index}")
@@ -513,34 +660,59 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
                         if miner_wallet:
                             try:
                                 # Sync wallet balance with blockchain
-                                blockchain_balance = blockchain.get_wallet_balance(miner_wallet)
+                                blockchain_balance = blockchain.get_wallet_balance(
+                                    miner_wallet
+                                )
                                 # Update local wallet balance
                                 try:
                                     from .core.wallet import SignWallet
+
                                     wallet = SignWallet()
                                     # Find wallet file for this address
                                     wallet_dir = "/var/lib/pisecure/wallets"
                                     if os.path.exists(wallet_dir):
                                         for wallet_file in os.listdir(wallet_dir):
-                                            if wallet_file.endswith('.json'):
+                                            if wallet_file.endswith(".json"):
                                                 try:
-                                                    wallet_path = os.path.join(wallet_dir, wallet_file)
-                                                    temp_wallet = SignWallet(wallet_path)
-                                                    if temp_wallet.get_address() == miner_wallet:
+                                                    wallet_path = os.path.join(
+                                                        wallet_dir, wallet_file
+                                                    )
+                                                    temp_wallet = SignWallet(
+                                                        wallet_path
+                                                    )
+                                                    if (
+                                                        temp_wallet.get_address()
+                                                        == miner_wallet
+                                                    ):
                                                         # Update balance to match blockchain
-                                                        temp_wallet.wallet_data['balance'] = blockchain_balance
+                                                        temp_wallet.wallet_data[
+                                                            "balance"
+                                                        ] = blockchain_balance
                                                         temp_wallet._save_wallet()
                                                         # Count mining reward transactions in the block
-                                                        reward_txs = [tx for tx in block.transactions if tx.get('type') == 'mining_reward']
+                                                        reward_txs = [
+                                                            tx
+                                                            for tx in block.transactions
+                                                            if tx.get("type")
+                                                            == "mining_reward"
+                                                        ]
                                                         if reward_txs:
-                                                            reward_amount = reward_txs[0].get('amount', 0)
-                                                            print_success(f"Mining reward: {reward_amount} tokens credited to {miner_wallet}")
-                                                            print_success(f"Updated wallet balance: {blockchain_balance:.2f} tokens")
+                                                            reward_amount = reward_txs[
+                                                                0
+                                                            ].get("amount", 0)
+                                                            print_success(
+                                                                f"Mining reward: {reward_amount} tokens credited to {miner_wallet}"
+                                                            )
+                                                            print_success(
+                                                                f"Updated wallet balance: {blockchain_balance:.2f} tokens"
+                                                            )
                                                         break
                                                 except:
                                                     continue
                                 except Exception as e:
-                                    print_warning(f"Could not update wallet balance: {e}")
+                                    print_warning(
+                                        f"Could not update wallet balance: {e}"
+                                    )
                             except Exception as e:
                                 print_warning(f"Could not sync wallet balance: {e}")
 
@@ -555,9 +727,13 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
                         # Check for bootstrap server discovery periodically
                         if current_time - last_discovery_check >= discovery_interval:
                             try:
-                                discovered = bootstrap_registry.discover_bootstrap_servers()
+                                discovered = (
+                                    bootstrap_registry.discover_bootstrap_servers()
+                                )
                                 if discovered > 0:
-                                    print_info(f"Discovered {discovered} new bootstrap server(s)")
+                                    print_info(
+                                        f"Discovered {discovered} new bootstrap server(s)"
+                                    )
                             except Exception as e:
                                 print_warning(f"Bootstrap discovery failed: {e}")
                             last_discovery_check = current_time
@@ -565,32 +741,35 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
                         # Queue comprehensive status report for intelligence processing
                         status_data = {
                             # Required fields for bootstrap server
-                            'mining_active': True,
-                            'blocks_mined': blocks_mined_session,
-                            'hashrate': 0.5,  # Estimated hashrate (H/s)
-                            'session_start_time': session_start_time,
-                            'wallet_address': miner_wallet,
-                            'hardware_model': 'pi5' if safe_mode else 'pi4',
-                            'location': 'us-east',
-
+                            "mining_active": True,
+                            "blocks_mined": blocks_mined_session,
+                            "hashrate": 0.5,  # Estimated hashrate (H/s)
+                            "session_start_time": session_start_time,
+                            "wallet_address": miner_wallet,
+                            "hardware_model": "pi5" if safe_mode else "pi4",
+                            "location": "us-east",
                             # Intelligence fields for enhanced processing
-                            'peers_connected': 3,  # TODO: Get actual P2P peer count
-                            'syndicate_membership': None,  # TODO: Get syndicate name if applicable
+                            "peers_connected": 3,  # TODO: Get actual P2P peer count
+                            "syndicate_membership": None,  # TODO: Get syndicate name if applicable
                         }
 
                         # Add system monitoring data for intelligence
                         if safe_mode and system_monitor:
                             system_status = system_monitor.check_system_resources()
-                            if system_status.get('resources'):
-                                resources = system_status['resources']
-                                status_data.update({
-                                    'temperature': resources.temperature,
-                                    'memory_usage': resources.memory_percent,
-                                    'system_health': {
-                                        'cpu_usage': resources.cpu_percent,
-                                        'load_average': list(resources.load_average)
+                            if system_status.get("resources"):
+                                resources = system_status["resources"]
+                                status_data.update(
+                                    {
+                                        "temperature": resources.temperature,
+                                        "memory_usage": resources.memory_percent,
+                                        "system_health": {
+                                            "cpu_usage": resources.cpu_percent,
+                                            "load_average": list(
+                                                resources.load_average
+                                            ),
+                                        },
                                     }
-                                })
+                                )
 
                         # Queue the comprehensive status report
                         status_reporter.queue_status_report(status_data)
@@ -602,7 +781,7 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
                     # Dynamic delay based on system status
                     delay = 2.0  # Default delay
                     if safe_mode and throttle_status:
-                        delay = throttle_status['recommended_delay']
+                        delay = throttle_status["recommended_delay"]
                         if delay > 2.0:
                             print_info(f"Throttling active - waiting {delay:.1f}s")
 
@@ -632,7 +811,9 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
             # For background mining, mine one block at a time (quietly)
             block = blockchain.mine_pending_transactions(miner_wallet, verbose=False)
             if block:
-                print_success(f"Background mining completed - Block #{block.index} mined")
+                print_success(
+                    f"Background mining completed - Block #{block.index} mined"
+                )
                 if miner_wallet:
                     try:
                         # Sync wallet balance with blockchain
@@ -640,25 +821,43 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
                         # Update local wallet balance
                         try:
                             from .core.wallet import SignWallet
+
                             wallet = SignWallet()
                             # Find wallet file for this address
                             wallet_dir = "/var/lib/pisecure/wallets"
                             if os.path.exists(wallet_dir):
                                 for wallet_file in os.listdir(wallet_dir):
-                                    if wallet_file.endswith('.json'):
+                                    if wallet_file.endswith(".json"):
                                         try:
-                                            wallet_path = os.path.join(wallet_dir, wallet_file)
+                                            wallet_path = os.path.join(
+                                                wallet_dir, wallet_file
+                                            )
                                             temp_wallet = SignWallet(wallet_path)
-                                            if temp_wallet.get_address() == miner_wallet:
+                                            if (
+                                                temp_wallet.get_address()
+                                                == miner_wallet
+                                            ):
                                                 # Update balance to match blockchain
-                                                temp_wallet.wallet_data['balance'] = blockchain_balance
+                                                temp_wallet.wallet_data["balance"] = (
+                                                    blockchain_balance
+                                                )
                                                 temp_wallet._save_wallet()
                                                 # Count mining reward transactions in the block
-                                                reward_txs = [tx for tx in block.transactions if tx.get('type') == 'mining_reward']
+                                                reward_txs = [
+                                                    tx
+                                                    for tx in block.transactions
+                                                    if tx.get("type") == "mining_reward"
+                                                ]
                                                 if reward_txs:
-                                                    reward_amount = reward_txs[0].get('amount', 0)
-                                                    print_success(f"Mining reward: {reward_amount} tokens credited to {miner_wallet}")
-                                                    print_success(f"Updated wallet balance: {blockchain_balance:.2f} tokens")
+                                                    reward_amount = reward_txs[0].get(
+                                                        "amount", 0
+                                                    )
+                                                    print_success(
+                                                        f"Mining reward: {reward_amount} tokens credited to {miner_wallet}"
+                                                    )
+                                                    print_success(
+                                                        f"Updated wallet balance: {blockchain_balance:.2f} tokens"
+                                                    )
                                                 break
                                         except:
                                             continue
@@ -676,6 +875,140 @@ def mine(interactive, wallet, no_sync, safe_mode, plain):
 
 
 @cli.command()
+@click.option("--wallet", help="Wallet address to receive mining rewards")
+@click.option(
+    "--count", default=0, type=int, help="Mine N blocks and stop (0=infinite)"
+)
+@click.option("--verbose", is_flag=True, help="Verbose output with challenge details")
+@click.option(
+    "--plain",
+    is_flag=True,
+    help="Disable ANSI colors and formatting for plain text output",
+)
+def mine_challenge(wallet, count, verbose, plain):
+    """
+    Start mining with Phase 1: Mining Challenge System (Fiat-Shamir ZK proofs)
+
+    This command enables network-issued mining challenges that prove the miner
+    found a valid hash without revealing the exact nonce (zero-knowledge proof).
+
+    Process:
+    - Network issues challenge with nonce constraints
+    - Miner mines within those constraints
+    - Proof is generated and validated on-chain
+    """
+    global USE_PLAIN_OUTPUT
+    USE_PLAIN_OUTPUT = plain
+
+    # Verify hardware
+    import os
+
+    try:
+        from pisecure.core.pihash import PiHash
+
+        pihash = PiHash()
+        hw_fingerprint = pihash._get_hardware_fingerprint()
+
+        if not pihash._verify_hardware(hw_fingerprint):
+            print_error("❌ MINING BLOCKED: This system is not a verified Raspberry Pi")
+            print_info("PiSecure mining requires genuine Raspberry Pi hardware")
+            return
+
+    except Exception as e:
+        print_error(f"Hardware verification failed: {e}")
+        print_info("Use PISECURE_MOCK_HARDWARE=1 for testing")
+        return
+
+    try:
+        testnet = USE_TESTNET
+
+        # Initialize blockchain
+        blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
+
+        print_success(
+            f"{'[TESTNET]' if testnet else '[MAINNET]'} Challenge Mining Started"
+        )
+        print_info(f"Mining with Fiat-Shamir ZK proofs (Phase 1)")
+
+        if not wallet:
+            wallet = "miner-no-wallet"
+            print_warning(f"No wallet specified, using: {wallet}")
+
+        blocks_mined = 0
+        max_blocks = count if count > 0 else float("inf")
+
+        while blocks_mined < max_blocks:
+            try:
+                # Get current challenge
+                from pisecure.core.challenges import get_challenge_manager
+
+                challenge_manager = get_challenge_manager()
+                current_challenge = challenge_manager.get_current_challenge()
+
+                if not current_challenge:
+                    # Generate new challenge
+                    epoch = (
+                        len(blockchain.chain) // challenge_manager.CHALLENGE_INTERVAL
+                    )
+                    current_challenge = challenge_manager.generate_challenge(
+                        epoch=epoch,
+                        prev_block_hash=(
+                            blockchain.chain[-1].hash if blockchain.chain else "0"
+                        ),
+                        difficulty=blockchain.difficulty,
+                    )
+                    if verbose:
+                        print_info(
+                            f"Generated challenge: {current_challenge.challenge_id[:8]}..."
+                        )
+
+                # Mine with challenge support
+                block = blockchain.mine_pending_transactions_with_challenge(
+                    miner_wallet_address=wallet, verbose=verbose
+                )
+
+                if block:
+                    blocks_mined += 1
+
+                    # Display challenge proof info
+                    if block.challenge_response:
+                        resp = block.challenge_response
+                        print_success(f"Block #{block.index} mined with ZK proof")
+                        if verbose:
+                            print_info(f"  Challenge: {resp['challenge_id'][:8]}...")
+                            print_info(f"  Nonce: {resp['nonce_used']}")
+                            print_info(f"  Zero bits: {resp['zero_bits']}")
+                            print_info(f"  Commitment: {resp['commitment'][:16]}...")
+                    else:
+                        print_info(
+                            f"Block #{block.index} mined (no challenge available)"
+                        )
+
+                    # Show progress
+                    if count > 0:
+                        print_info(f"Progress: {blocks_mined}/{count} blocks")
+                else:
+                    time.sleep(0.5)
+
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                print_warning(f"Mining iteration failed: {e}")
+                time.sleep(1)
+
+        print_success(
+            f"Challenge mining session complete ({blocks_mined} blocks mined)"
+        )
+
+    except Exception as e:
+        print_error(f"Challenge mining error: {e}")
+        import traceback
+
+        if verbose:
+            traceback.print_exc()
+
+
+@cli.command()
 def verify_hardware():
     """Verify Raspberry Pi hardware for mining eligibility"""
     try:
@@ -685,16 +1018,20 @@ def verify_hardware():
 
         result = verifier.verify_mining_eligibility()
 
-        if result['eligible']:
+        if result["eligible"]:
             console.print("[green]✅ Hardware verification PASSED![/green]")
             console.print(f"📱 Device: {result['hardware_model']}")
             console.print(f"🎯 Confidence: {result['confidence_score']:.1%}")
-            console.print(f"🔒 Anti-spoofing: {'✅' if result['anti_spoofing_passed'] else '❌'}")
+            console.print(
+                f"🔒 Anti-spoofing: {'✅' if result['anti_spoofing_passed'] else '❌'}"
+            )
             console.print("\n[green]🚀 This device can mine PiSecure tokens![/green]")
         else:
             console.print("[red]❌ Hardware verification FAILED[/red]")
             console.print(f"🎯 Confidence: {result['confidence_score']:.1%}")
-            console.print("\n[yellow]⚠️ This device cannot mine PiSecure tokens[/yellow]")
+            console.print(
+                "\n[yellow]⚠️ This device cannot mine PiSecure tokens[/yellow]"
+            )
             console.print("[dim]Only verified Raspberry Pi hardware is eligible[/dim]")
 
     except Exception as e:
@@ -702,58 +1039,73 @@ def verify_hardware():
 
 
 @cli.command()
-@click.option('--wallet', help='Wallet name or address to monitor (or earn validation rewards)')
-@click.option('--validate-rewards', is_flag=True, help='Earn validation rewards for blocks validated')
-@click.option('--refresh', default=1, show_default=True, help='Refresh interval in seconds')
-@click.option('--peer', help='Peer address to sync from (e.g., 192.168.1.100 or pi.local)')
-@click.option('--resync', is_flag=True, help='Force full resync from network (clears local chain)')
+@click.option(
+    "--wallet", help="Wallet name or address to monitor (or earn validation rewards)"
+)
+@click.option(
+    "--validate-rewards",
+    is_flag=True,
+    help="Earn validation rewards for blocks validated",
+)
+@click.option(
+    "--refresh", default=1, show_default=True, help="Refresh interval in seconds"
+)
+@click.option(
+    "--peer", help="Peer address to sync from (e.g., 192.168.1.100 or pi.local)"
+)
+@click.option(
+    "--resync", is_flag=True, help="Force full resync from network (clears local chain)"
+)
 def monitor(wallet, validate_rewards, refresh, peer, resync):
     """Live blockchain/network monitor (non-mining)"""
     try:
         # Force read-only validation to avoid PiHash requirement during load
-        os.environ['PISECURE_VALIDATE_ONLY'] = '1'
+        os.environ["PISECURE_VALIDATE_ONLY"] = "1"
         # Set validation wallet if rewards enabled
         if wallet and validate_rewards:
-            os.environ['PISECURE_VALIDATION_WALLET'] = wallet
-        
-        testnet = os.environ.get('PISECURE_TESTNET') == '1'
-        
+            os.environ["PISECURE_VALIDATION_WALLET"] = wallet
+
+        testnet = os.environ.get("PISECURE_TESTNET") == "1"
+
         # Handle resync request - clear local chain and force fresh sync
         if resync:
-            print_output("🔄 Force resync requested - clearing local blockchain data...")
+            print_output(
+                "🔄 Force resync requested - clearing local blockchain data..."
+            )
             try:
                 import shutil
+
                 if testnet:
                     data_dir = Path("/var/lib/pisecure-testnet")
                 else:
                     data_dir = Path("/var/lib/pisecure")
-                
+
                 # Remove blockchain files
                 if (data_dir / "blockchain.json").exists():
                     (data_dir / "blockchain.json").unlink()
                     print_output("   Removed blockchain.json")
-                
+
                 # Remove hybrid storage files
                 for blk_file in data_dir.glob("blk*.dat"):
                     blk_file.unlink()
                     print_output(f"   Removed {blk_file.name}")
-                
+
                 if (data_dir / "index.db").exists():
                     (data_dir / "index.db").unlink()
                     print_output("   Removed index.db")
-                
+
                 print_output("✅ Local blockchain cleared - will resync from network")
             except Exception as e:
                 print_warning(f"Failed to clear blockchain: {e}")
-        
+
         # Initialize blockchain
         blockchain = SignChain(use_hybrid_storage=USE_HYBRID_STORAGE)
-        
+
         # Sync with network to get latest blocks before monitoring
         print_output("🔄 Syncing with network for latest blocks...")
         try:
             peer_discovery = PeerDiscovery()
-            
+
             # If peer address specified, add it to known peers
             if peer:
                 print_output(f"   Adding peer: {peer}")
@@ -763,27 +1115,32 @@ def monitor(wallet, validate_rewards, refresh, peer, resync):
             # Pull peers from bootstrap registry to seed discovery
             try:
                 from .core.bootstrap_manager import get_bootstrap_registry
+
                 registry = get_bootstrap_registry()
-                network = 'testnet' if testnet else None
+                network = "testnet" if testnet else None
                 bootstrap_peers = registry.get_peer_list(limit=50, network=network)
                 if bootstrap_peers:
-                    print_output(f"   Seeding {len(bootstrap_peers)} peer(s) from bootstrap")
+                    print_output(
+                        f"   Seeding {len(bootstrap_peers)} peer(s) from bootstrap"
+                    )
                     for p in bootstrap_peers:
-                        addr = p.get('address')
-                        port = int(p.get('port', 3142))
+                        addr = p.get("address")
+                        port = int(p.get("port", 3142))
                         if addr:
                             peer_id = f"bootstrap_{addr}:{port}"
                             peer_discovery.add_peer(peer_id, addr, port)
                             peer_discovery.mark_peer_connected(peer_id)
                 else:
-                    print_output("   No peers available from bootstrap (peer cache empty)")
+                    print_output(
+                        "   No peers available from bootstrap (peer cache empty)"
+                    )
             except Exception as e:
                 print_output(f"   Bootstrap peer fetch failed: {e}")
-            
+
             p2p_sync = P2PSyncManager(blockchain, peer_discovery)
-            
+
             initial_height = len(blockchain.chain)
-            
+
             # Perform aggressive sync if resync flag or large block gap detected
             if resync:
                 print_output("   Performing aggressive full sync...")
@@ -793,9 +1150,11 @@ def monitor(wallet, validate_rewards, refresh, peer, resync):
                     p2p_sync._perform_sync_cycle()
                     after_cycle = len(blockchain.chain)
                     gained = after_cycle - before_cycle
-                    
+
                     if gained > 0:
-                        print_output(f"   Sync cycle {i+1}: +{gained} blocks (height: {before_cycle} → {after_cycle})")
+                        print_output(
+                            f"   Sync cycle {i+1}: +{gained} blocks (height: {before_cycle} → {after_cycle})"
+                        )
                     else:
                         # No blocks gained - check if we have peers
                         known_peers = peer_discovery.get_known_peers()
@@ -803,145 +1162,169 @@ def monitor(wallet, validate_rewards, refresh, peer, resync):
                             print_output(f"   ⚠️  No peers available after cycle {i+1}")
                             break
                         else:
-                            print_output(f"   Cycle {i+1}: No new blocks (peers may be at same height)")
+                            print_output(
+                                f"   Cycle {i+1}: No new blocks (peers may be at same height)"
+                            )
                             if i >= 2:  # Give up after 3 failed attempts
                                 break
             else:
                 p2p_sync._perform_sync_cycle()
-            
+
             final_height = len(blockchain.chain)
             blocks_synced = final_height - initial_height
-            
+
             if blocks_synced > 0:
-                print_output(f"✅ Synced {blocks_synced} blocks from network (height: {initial_height} → {final_height})")
+                print_output(
+                    f"✅ Synced {blocks_synced} blocks from network (height: {initial_height} → {final_height})"
+                )
             else:
-                print_output(f"✅ Already up-to-date with network ({final_height} blocks)")
+                print_output(
+                    f"✅ Already up-to-date with network ({final_height} blocks)"
+                )
         except Exception as e:
             print_output(f"⚠️  Network sync had issues: {e}")
             print_output("   Continuing with local blockchain...")
-        
+
         # Resolve wallet name to address if needed
         wallet_address = None
         if wallet:
             try:
                 from .core.wallet import SignWallet
+
                 # Try treat as name by loading wallet
                 sw = SignWallet()
                 data = sw.load_wallet(wallet)
-                if isinstance(data, dict) and data.get('address'):
-                    wallet_address = data['address']
+                if isinstance(data, dict) and data.get("address"):
+                    wallet_address = data["address"]
                 else:
                     # Fallback to assuming provided is an address
                     wallet_address = wallet
             except Exception:
                 wallet_address = wallet
-        
+
         # Use MiningDashboard for rich UI monitoring
         from .monitor import MiningDashboard
-        
-        mode = 'validation' if validate_rewards else 'monitor'
+
+        mode = "validation" if validate_rewards else "monitor"
         dashboard = MiningDashboard(
             blockchain=blockchain,
             mode=mode,
             refresh_rate=float(refresh),
             testnet=testnet,
-            wallet_address=wallet_address if validate_rewards else None
+            wallet_address=wallet_address if validate_rewards else None,
         )
-        
+
         # Start background sync thread for continuous block fetching
         import threading
         import logging as bg_logging
+
         sync_stop_event = threading.Event()
         sync_debug_log = None
-        
+
         # Open debug log for background sync
         try:
-            sync_debug_log = open('/tmp/pisecure_bg_sync.log', 'w')
+            sync_debug_log = open("/tmp/pisecure_bg_sync.log", "w")
             sync_debug_log.write(f"Background sync started at {time.time()}\n")
             sync_debug_log.write(f"Initial block height: {len(blockchain.chain)}\n")
             sync_debug_log.flush()
         except:
             pass
-        
+
         def background_sync_loop():
             """Periodically sync new blocks from the network"""
             sync_interval = 30  # Sync every 30 seconds
             discovery_interval = 90  # Re-discover peers every 90 seconds
             last_discovery = time.time()
-            
+
             while not sync_stop_event.is_set():
                 try:
                     # Perform a sync cycle every N seconds
-                    for _ in range(int(sync_interval / 2)):  # Check stop event more frequently
+                    for _ in range(
+                        int(sync_interval / 2)
+                    ):  # Check stop event more frequently
                         if sync_stop_event.is_set():
                             return
                         time.sleep(2)
-                    
+
                     current_height = len(blockchain.chain)
-                    
+
                     # Re-discover peers periodically
                     if time.time() - last_discovery > discovery_interval:
                         try:
                             if sync_debug_log:
-                                sync_debug_log.write(f"[{time.time()}] Re-discovering peers from bootstrap\n")
+                                sync_debug_log.write(
+                                    f"[{time.time()}] Re-discovering peers from bootstrap\n"
+                                )
                                 sync_debug_log.flush()
-                            
+
                             from .core.bootstrap_manager import get_bootstrap_registry
+
                             registry = get_bootstrap_registry()
-                            network = 'testnet' if testnet else None
-                            new_peers = registry.get_peer_list(limit=50, network=network)
-                            
+                            network = "testnet" if testnet else None
+                            new_peers = registry.get_peer_list(
+                                limit=50, network=network
+                            )
+
                             if new_peers:
                                 for p in new_peers:
-                                    addr = p.get('address')
-                                    port = int(p.get('port', 3142))
+                                    addr = p.get("address")
+                                    port = int(p.get("port", 3142))
                                     if addr:
                                         peer_id = f"bootstrap_{addr}:{port}"
                                         peer_discovery.add_peer(peer_id, addr, port)
                                         peer_discovery.mark_peer_connected(peer_id)
                                 if sync_debug_log:
-                                    sync_debug_log.write(f"[{time.time()}] Added {len(new_peers)} peers\n")
+                                    sync_debug_log.write(
+                                        f"[{time.time()}] Added {len(new_peers)} peers\n"
+                                    )
                                     sync_debug_log.flush()
-                            
+
                             last_discovery = time.time()
                         except Exception as e:
                             if sync_debug_log:
-                                sync_debug_log.write(f"[{time.time()}] Peer discovery error: {e}\n")
+                                sync_debug_log.write(
+                                    f"[{time.time()}] Peer discovery error: {e}\n"
+                                )
                                 sync_debug_log.flush()
-                    
+
                     # Only sync if we have peers
-                    if hasattr(p2p_sync, '_perform_sync_cycle'):
+                    if hasattr(p2p_sync, "_perform_sync_cycle"):
                         if sync_debug_log:
-                            sync_debug_log.write(f"[{time.time()}] Attempting sync from height {current_height}\n")
+                            sync_debug_log.write(
+                                f"[{time.time()}] Attempting sync from height {current_height}\n"
+                            )
                             sync_debug_log.flush()
-                        
+
                         p2p_sync._perform_sync_cycle()
-                        
+
                         new_height = len(blockchain.chain)
                         if new_height > current_height and sync_debug_log:
-                            sync_debug_log.write(f"[{time.time()}] ✅ Synced {new_height - current_height} blocks ({current_height} → {new_height})\n")
+                            sync_debug_log.write(
+                                f"[{time.time()}] ✅ Synced {new_height - current_height} blocks ({current_height} → {new_height})\n"
+                            )
                             sync_debug_log.flush()
                 except Exception as e:
                     # Log errors for debugging
                     if sync_debug_log:
                         sync_debug_log.write(f"[{time.time()}] Sync error: {str(e)}\n")
                         sync_debug_log.flush()
-        
+
         # Start the background sync thread
         sync_thread = threading.Thread(target=background_sync_loop, daemon=True)
         sync_thread.start()
-        
+
         try:
             dashboard.run()
         finally:
             # Signal sync thread to stop when dashboard exits
             sync_stop_event.set()
             sync_thread.join(timeout=2)
-        
+
     except KeyboardInterrupt:
         print_output("\nMonitor stopped")
     except Exception as e:
         print_error(f"Monitor error: {e}")
+
 
 @cli.command()
 def identity():
@@ -964,13 +1347,13 @@ def identity():
         table.add_column("Property", style="cyan", no_wrap=True)
         table.add_column("Value", style="magenta")
 
-        table.add_row("Hardware Model", hw_result['hardware_model'])
-        table.add_row("Serial Number", hw_result['serial_number'])
-        table.add_row("Device Role", role['role'].replace('_', ' ').title())
+        table.add_row("Hardware Model", hw_result["hardware_model"])
+        table.add_row("Serial Number", hw_result["serial_number"])
+        table.add_row("Device Role", role["role"].replace("_", " ").title())
         table.add_row("Verification Score", f"{role['verification_confidence']:.1%}")
         table.add_row("Hardware Fingerprint", fingerprint[:32] + "...")
 
-        capabilities = ", ".join(role['capabilities'])
+        capabilities = ", ".join(role["capabilities"])
         table.add_row("Capabilities", capabilities)
 
         console.print(table)
@@ -980,8 +1363,8 @@ def identity():
 
 
 @cli.command()
-@click.argument('wallet_name', required=False)
-@click.option('--testnet', is_flag=True, help='Use testnet network')
+@click.argument("wallet_name", required=False)
+@click.option("--testnet", is_flag=True, help="Use testnet network")
 def wallet(wallet_name, testnet):
     """Show wallet information and balance"""
     try:
@@ -994,7 +1377,8 @@ def wallet(wallet_name, testnet):
 
         # Adjust wallet directory for testnet
         import os
-        if testnet or os.environ.get('PISECURE_TESTNET') == '1':
+
+        if testnet or os.environ.get("PISECURE_TESTNET") == "1":
             wallet_dir = "/var/lib/pisecure-testnet/wallets"
         else:
             wallet_dir = "/var/lib/pisecure/wallets"
@@ -1004,7 +1388,7 @@ def wallet(wallet_name, testnet):
             wallet = SignWallet()
             wallet_data = wallet.load_wallet(wallet_name)
 
-            if 'error' in wallet_data:
+            if "error" in wallet_data:
                 console.print(f"[red]❌ Wallet not found: {wallet_name}[/red]")
                 return
 
@@ -1012,11 +1396,11 @@ def wallet(wallet_name, testnet):
             table.add_column("Property", style="cyan", no_wrap=True)
             table.add_column("Value", style="magenta")
 
-            table.add_row("Wallet ID", wallet_data.get('wallet_id', 'unknown'))
-            table.add_row("Name", wallet_data.get('name', 'unnamed'))
-            table.add_row("Address", wallet_data.get('address', 'unknown'))
+            table.add_row("Wallet ID", wallet_data.get("wallet_id", "unknown"))
+            table.add_row("Name", wallet_data.get("name", "unnamed"))
+            table.add_row("Address", wallet_data.get("address", "unknown"))
             table.add_row("Balance", f"{wallet_data.get('balance', 0):.2f}")
-            table.add_row("Created", time.ctime(wallet_data.get('created_at', 0)))
+            table.add_row("Created", time.ctime(wallet_data.get("created_at", 0)))
 
             console.print(table)
         else:
@@ -1026,7 +1410,9 @@ def wallet(wallet_name, testnet):
 
             if not wallets:
                 console.print("[yellow]📭 No wallets found[/yellow]")
-                console.print("[dim]Wallets are automatically created when you mine or receive tokens[/dim]")
+                console.print(
+                    "[dim]Wallets are automatically created when you mine or receive tokens[/dim]"
+                )
                 return
 
             table = Table(title="🏦 Available Wallets")
@@ -1037,13 +1423,13 @@ def wallet(wallet_name, testnet):
             table.add_column("Created", style="blue")
 
             for w in wallets:
-                created_time = time.ctime(w.get('created', 0))
+                created_time = time.ctime(w.get("created", 0))
                 table.add_row(
-                    w.get('id', 'unknown'),
-                    w.get('name', 'unnamed'),
-                    w.get('address', 'unknown'),
+                    w.get("id", "unknown"),
+                    w.get("name", "unnamed"),
+                    w.get("address", "unknown"),
                     f"{w.get('balance', 0):.2f}",
-                    created_time
+                    created_time,
                 )
 
             console.print(table)
@@ -1052,8 +1438,604 @@ def wallet(wallet_name, testnet):
         console.print(f"[red]❌ Wallet error: {e}[/red]")
 
 
+@cli.group()
+def entropy():
+    """Hardware entropy validation commands"""
+    pass
+
+
+@entropy.command("check")
+@click.option("--node-id", help="Node identifier (default: auto-detect from hardware)")
+@click.option("--bootstrap-url", help="Bootstrap server URL (default: auto-detect)")
+def entropy_check(node_id, bootstrap_url):
+    """Submit hardware entropy for immediate NIST validation"""
+    try:
+        from .core.entropy_client import get_entropy_client
+        from .core.hardware import HardwareVerifier
+        import socket
+
+        # Auto-detect node_id if not provided
+        if not node_id:
+            try:
+                verifier = HardwareVerifier()
+                node_id = verifier.get_hardware_id()
+            except Exception:
+                # Fallback to hostname
+                node_id = f"node-{socket.gethostname()}"
+
+        # Create entropy client
+        network = "testnet" if os.environ.get("PISECURE_TESTNET") == "1" else "mainnet"
+        client = get_entropy_client(
+            node_id=node_id, bootstrap_url=bootstrap_url, network=network
+        )
+
+        print_info(f"Submitting entropy from node: {node_id}")
+        print_info(f"Network: {network}")
+
+        # Submit entropy
+        result = client.submit_entropy()
+
+        if result:
+            # Display results
+            status_icon = "✅" if result.passed else "❌"
+            print_output(
+                f"\n{status_icon} Validation Result: {'PASSED' if result.passed else 'FAILED'}"
+            )
+
+            table = Table(title="Entropy Validation Results")
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", style="yellow")
+
+            table.add_row("Quality Score", f"{result.quality_score:.1f}/100")
+            table.add_row(
+                "Entropy Estimate", f"{result.entropy_estimate:.2f} bits/byte"
+            )
+            table.add_row("Reputation Impact", f"{result.reputation_impact:+.1f}")
+
+            # Quality rating
+            if result.is_excellent:
+                rating = "⭐⭐⭐ Excellent"
+            elif result.is_acceptable:
+                rating = "⭐⭐ Acceptable"
+            else:
+                rating = "⭐ Needs Attention"
+            table.add_row("Rating", rating)
+
+            console.print(table)
+
+            # Show test breakdown if failed
+            if not result.passed and result.tests:
+                print_output("\n📋 Test Breakdown:")
+                for test_name, test_data in result.tests.items():
+                    if isinstance(test_data, dict):
+                        passed = test_data.get("pass", True)
+                        status = "✓" if passed else "✗"
+                        desc = test_data.get("description", "")
+                        print_output(f"  {status} {test_name}: {desc}")
+
+            # Show recommendation
+            if result.recommendation:
+                print_warning(f"\n💡 Recommendation: {result.recommendation}")
+
+            # Show history stats if available
+            if result.total_samples > 1:
+                print_output(f"\n📈 Historical Stats:")
+                print_output(f"  Total Samples: {result.total_samples}")
+                print_output(f"  Pass Rate: {result.pass_rate * 100:.1f}%")
+                print_output(f"  Average Quality: {result.avg_quality:.1f}")
+        else:
+            print_error("Entropy submission failed (bootstrap server unreachable)")
+            print_info("Check network connectivity or try again later")
+
+            # Show fallback local validation
+            entropy_bytes = client.read_hardware_entropy()
+            if entropy_bytes:
+                is_valid, quality = client.validate_local(entropy_bytes)
+                print_output(f"\n🔧 Local Validation (fallback):")
+                print_output(f"  Status: {'PASSED' if is_valid else 'FAILED'}")
+                print_output(f"  Quality Estimate: {quality:.1f}/100")
+
+    except Exception as e:
+        print_error(f"Entropy validation error: {e}")
+        import traceback
+
+        if os.environ.get("PISECURE_DEBUG"):
+            traceback.print_exc()
+
+
+@entropy.command("status")
+@click.option("--node-id", help="Node identifier")
+@click.option("--limit", default=10, help="Number of recent submissions to show")
+def entropy_status(node_id, limit):
+    """Show entropy submission history and statistics"""
+    try:
+        from .core.entropy_client import get_entropy_client
+        from .core.hardware import HardwareVerifier
+        import socket
+
+        # Auto-detect node_id
+        if not node_id:
+            try:
+                verifier = HardwareVerifier()
+                node_id = verifier.get_hardware_id()
+            except Exception:
+                node_id = f"node-{socket.gethostname()}"
+
+        # Get client
+        network = "testnet" if os.environ.get("PISECURE_TESTNET") == "1" else "mainnet"
+        client = get_entropy_client(node_id=node_id, network=network)
+
+        # Get client-side stats
+        stats = client.get_stats()
+
+        print_info(f"Entropy Status for Node: {node_id}")
+        print_info(f"Network: {network}\n")
+
+        # Display client stats
+        table = Table(title="Client Statistics")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="yellow")
+
+        table.add_row("Total Submissions", str(stats["submissions_total"]))
+        table.add_row("Passed", str(stats["submissions_passed"]))
+        table.add_row("Failed", str(stats["submissions_failed"]))
+        table.add_row("Pass Rate", f"{stats['pass_rate'] * 100:.1f}%")
+
+        if stats["last_submission"]:
+            table.add_row("Last Submission", time.ctime(stats["last_submission"]))
+        if stats["last_quality_score"]:
+            table.add_row("Last Quality", f"{stats['last_quality_score']:.1f}/100")
+
+        table.add_row("Cached (Pending Retry)", str(stats["cached_submissions"]))
+
+        console.print(table)
+
+        # Get history from bootstrap server
+        print_output("\n📜 Retrieving submission history from bootstrap...")
+        history = client.get_entropy_history(limit=limit)
+
+        if history:
+            summary = history.get("summary", {})
+            if summary:
+                print_output(f"\n📊 Bootstrap Server Summary:")
+                print_output(
+                    f"  Total Submissions: {history.get('total_submissions', 0)}"
+                )
+                print_output(f"  Pass Rate: {summary.get('pass_rate', 0) * 100:.1f}%")
+                print_output(f"  Average Quality: {summary.get('avg_quality', 0):.1f}")
+                print_output(f"  Trend: {summary.get('trend', 'unknown')}")
+
+            entries = history.get("entries", [])
+            if entries:
+                print_output(f"\n📋 Recent Submissions (last {len(entries)}):")
+                for i, entry in enumerate(entries, 1):
+                    status = "✓" if entry.get("validation_result") else "✗"
+                    quality = entry.get("quality_score", 0)
+                    timestamp = time.ctime(entry.get("timestamp", 0))
+                    print_output(
+                        f"  {i}. {status} Quality: {quality:.1f}, Time: {timestamp}"
+                    )
+        else:
+            print_warning("Could not retrieve history from bootstrap server")
+
+    except Exception as e:
+        print_error(f"Entropy status error: {e}")
+
+
+@entropy.command("submit")
+@click.option("--node-id", help="Node identifier")
+@click.option(
+    "--auto-register", is_flag=True, help="Auto-register node if not registered"
+)
+@click.option("--node-type", default="miner", help="Node type (miner/validator/relay)")
+@click.option("--wallet", help="Wallet address for rewards")
+def entropy_submit(node_id, auto_register, node_type, wallet):
+    """Manually submit entropy (with optional auto-registration)"""
+    try:
+        from .core.entropy_client import get_entropy_client
+        from .core.bootstrap_manager import get_node_registration
+        from .core.hardware import HardwareVerifier
+        import socket
+
+        # Auto-detect node_id
+        if not node_id:
+            try:
+                verifier = HardwareVerifier()
+                node_id = verifier.get_hardware_id()
+            except Exception:
+                node_id = f"node-{socket.gethostname()}"
+
+        network = "testnet" if os.environ.get("PISECURE_TESTNET") == "1" else "mainnet"
+
+        # Check if auto-registration requested
+        if auto_register:
+            print_info(f"Registering node: {node_id}")
+            registration = get_node_registration()
+
+            reg_result = registration.register_node(
+                node_id=node_id,
+                node_type=node_type,
+                wallet_address=wallet,
+                network=network,
+            )
+
+            if reg_result:
+                print_success("Node registered successfully")
+            else:
+                print_warning("Node registration failed, continuing with submission...")
+
+        # Submit entropy
+        client = get_entropy_client(node_id=node_id, network=network)
+        result = client.submit_entropy()
+
+        if result:
+            status = "✅ PASSED" if result.passed else "❌ FAILED"
+            print_output(f"\n{status}")
+            print_output(f"  Quality Score: {result.quality_score:.1f}/100")
+            print_output(f"  Entropy: {result.entropy_estimate:.2f} bits/byte")
+            print_output(f"  Reputation Impact: {result.reputation_impact:+.1f}")
+        else:
+            print_error("Submission failed")
+
+    except Exception as e:
+        print_error(f"Entropy submission error: {e}")
+
+
+@cli.command("reputation")
+@click.option("--node-id", help="Node identifier")
+def reputation(node_id):
+    """Show node reputation from bootstrap server"""
+    try:
+        from .core.entropy_client import get_entropy_client
+        from .core.hardware import HardwareVerifier
+        import socket
+
+        # Auto-detect node_id
+        if not node_id:
+            try:
+                verifier = HardwareVerifier()
+                node_id = verifier.get_hardware_id()
+            except Exception:
+                node_id = f"node-{socket.gethostname()}"
+
+        network = "testnet" if os.environ.get("PISECURE_TESTNET") == "1" else "mainnet"
+        client = get_entropy_client(node_id=node_id, network=network)
+
+        print_info(f"Querying reputation for node: {node_id}")
+        print_info(f"Network: {network}\n")
+
+        # Query reputation
+        rep_data = client.get_reputation()
+
+        if rep_data:
+            table = Table(title="🏆 Node Reputation")
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", style="yellow")
+
+            table.add_row("Node ID", rep_data.get("node_id", node_id))
+            table.add_row(
+                "Reputation Score", f"{rep_data.get('reputation_score', 0):.1f}"
+            )
+            table.add_row("Trust Level", rep_data.get("trust_level", "unknown"))
+            table.add_row(
+                "Network Standing", rep_data.get("network_standing", "unknown")
+            )
+            table.add_row("Incident Count", str(rep_data.get("incident_count", 0)))
+            table.add_row(
+                "Positive Contributions", str(rep_data.get("positive_contributions", 0))
+            )
+
+            console.print(table)
+
+            # Show entropy quality if available
+            entropy_qual = rep_data.get("entropy_quality", {})
+            if entropy_qual:
+                print_output("\n🔬 Entropy Quality:")
+                verified = (
+                    "✓ Verified" if entropy_qual.get("verified") else "✗ Not Verified"
+                )
+                print_output(f"  Status: {verified}")
+                print_output(
+                    f"  Quality Score: {entropy_qual.get('quality_score', 0):.1f}/100"
+                )
+
+                last_updated = entropy_qual.get("last_updated")
+                if last_updated:
+                    print_output(f"  Last Updated: {time.ctime(last_updated)}")
+        else:
+            print_error("Could not retrieve reputation")
+            print_info("Node may not be registered or bootstrap server unreachable")
+
+    except Exception as e:
+        print_error(f"Reputation query error: {e}")
+
+
+@cli.group()
+def ws():
+    """Bootstrap WebSocket real-time updates"""
+    pass
+
+
+@ws.command("listen")
+@click.option("--node-id", help="Node identifier")
+@click.argument("channels", nargs=-1, default=["nodes"])
+def ws_listen(node_id, channels):
+    """Listen to real-time bootstrap events via WebSocket
+
+    CHANNELS: nodes, threats, health, dex, rates (default: nodes)
+
+    Examples:
+        pisecure ws listen                                  # Listen to nodes only
+        pisecure ws listen nodes threats health            # Listen to multiple channels
+        pisecure ws listen --node-id miner-001 threats     # Custom node, threats channel
+    """
+    try:
+        from .core.bootstrap_websocket_client import get_bootstrap_websocket_client
+        from .core.hardware import HardwareVerifier
+        import socket as sock_module
+
+        # Auto-detect node_id
+        if not node_id:
+            try:
+                verifier = HardwareVerifier()
+                node_id = verifier.get_hardware_id()
+            except Exception:
+                node_id = f"node-{sock_module.gethostname()}"
+
+        network = "testnet" if os.environ.get("PISECURE_TESTNET") == "1" else "mainnet"
+
+        print_info(f"Connecting to bootstrap WebSocket...")
+        print_info(f"Node: {node_id}")
+        print_info(f"Network: {network}")
+        print_info(f"Channels: {', '.join(channels)}\n")
+
+        # Get WebSocket client
+        ws_client = get_bootstrap_websocket_client(node_id=node_id, network=network)
+
+        # Connect
+        if not ws_client.connect():
+            print_error("Failed to connect to bootstrap server")
+            return
+
+        print_success("✓ Connected to bootstrap server")
+
+        # Subscribe to channels
+        valid_channels = {"nodes", "threats", "health", "dex", "rates"}
+        for channel in channels:
+            if channel not in valid_channels:
+                print_warning(f"Unknown channel: {channel}")
+                continue
+
+            method_name = f"subscribe_{channel}"
+            if hasattr(ws_client, method_name):
+                getattr(ws_client, method_name)()
+
+        # Custom handlers for output
+        def handle_event(event_type):
+            def handler(data):
+                timestamp = time.ctime()
+                print_output(f"\n[{timestamp}] 📨 {event_type.upper()}")
+                for key, value in data.items():
+                    print_output(f"  {key}: {value}")
+
+            return handler
+
+        # Register handlers for key events
+        for event in [
+            "node_registered",
+            "threat_detected",
+            "health_update",
+            "pool_updated",
+            "quota_reset",
+        ]:
+            ws_client.register_handler(event, handle_event(event))
+
+        print_info("\nListening for events... (Press Ctrl+C to exit)")
+
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print_info("\n\nDisconnecting...")
+            ws_client.disconnect()
+            print_success("Disconnected")
+
+    except Exception as e:
+        print_error(f"WebSocket error: {e}")
+        import traceback
+
+        if os.environ.get("PISECURE_DEBUG"):
+            traceback.print_exc()
+
+
+@ws.command("stats")
+@click.option("--node-id", help="Node identifier")
+def ws_stats(node_id):
+    """Show WebSocket connection statistics"""
+    try:
+        from .core.bootstrap_websocket_client import get_bootstrap_websocket_client
+        from .core.hardware import HardwareVerifier
+        import socket as sock_module
+
+        # Auto-detect node_id
+        if not node_id:
+            try:
+                verifier = HardwareVerifier()
+                node_id = verifier.get_hardware_id()
+            except Exception:
+                node_id = f"node-{sock_module.gethostname()}"
+
+        network = "testnet" if os.environ.get("PISECURE_TESTNET") == "1" else "mainnet"
+
+        # Get WebSocket client
+        ws_client = get_bootstrap_websocket_client(node_id=node_id, network=network)
+
+        stats = ws_client.get_stats()
+
+        table = Table(title="📊 WebSocket Statistics")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="yellow")
+
+        table.add_row("Connected", "✓ Yes" if stats["connected"] else "✗ No")
+        table.add_row(
+            "Mode",
+            "WebSocket" if stats["use_websocket"] else "HTTP Fallback",
+        )
+        table.add_row("Node ID", stats["node_id"])
+        table.add_row("Network", stats["network"])
+        table.add_row("Messages Received", str(stats["messages_received"]))
+        table.add_row("Messages Sent", str(stats["messages_sent"]))
+
+        if stats["last_heartbeat"]:
+            last_hb = time.ctime(stats["last_heartbeat"])
+            table.add_row("Last Heartbeat", last_hb)
+
+        if stats["subscribed_channels"]:
+            table.add_row(
+                "Subscribed Channels", ", ".join(stats["subscribed_channels"])
+            )
+
+        table.add_row("Reconnect Attempts", str(stats["reconnect_attempts"]))
+
+        console.print(table)
+
+    except Exception as e:
+        print_error(f"Stats error: {e}")
+
+
+@ws.command("heartbeat")
+@click.option("--node-id", help="Node identifier")
+@click.option("--cpu", default=45.0, type=float, help="CPU usage %")
+@click.option("--memory", default=512, type=int, help="Memory MB")
+@click.option("--uptime", default=3600, type=int, help="Uptime seconds")
+@click.option("--hashrate", default=100.0, type=float, help="Hashrate H/s")
+def ws_heartbeat(node_id, cpu, memory, uptime, hashrate):
+    """Send heartbeat to bootstrap server"""
+    try:
+        from .core.bootstrap_websocket_client import get_bootstrap_websocket_client
+        from .core.hardware import HardwareVerifier
+        import socket as sock_module
+
+        # Auto-detect node_id
+        if not node_id:
+            try:
+                verifier = HardwareVerifier()
+                node_id = verifier.get_hardware_id()
+            except Exception:
+                node_id = f"node-{sock_module.gethostname()}"
+
+        network = "testnet" if os.environ.get("PISECURE_TESTNET") == "1" else "mainnet"
+
+        print_info(f"Sending heartbeat from {node_id}...")
+
+        # Get WebSocket client
+        ws_client = get_bootstrap_websocket_client(node_id=node_id, network=network)
+
+        # Connect
+        if not ws_client.connected:
+            if not ws_client.connect():
+                print_error("Failed to connect to bootstrap server")
+                return
+
+        # Send heartbeat
+        metrics = {
+            "cpu_usage": cpu,
+            "memory_mb": memory,
+            "uptime_seconds": uptime,
+            "hashrate": hashrate,
+        }
+
+        if ws_client.send_heartbeat(metrics):
+            print_success("✓ Heartbeat sent")
+            table = Table(title="❤️ Heartbeat Metrics")
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", style="yellow")
+
+            for key, value in metrics.items():
+                table.add_row(key.replace("_", " ").title(), str(value))
+
+            console.print(table)
+        else:
+            print_error("Failed to send heartbeat")
+
+        ws_client.disconnect()
+
+    except Exception as e:
+        print_error(f"Heartbeat error: {e}")
+
+
+@ws.command("threat")
+@click.option("--node-id", help="Node identifier")
+@click.option(
+    "--threat-type",
+    required=True,
+    help="Threat type: ddos_attack, suspicious_node, etc",
+)
+@click.option(
+    "--severity", default="high", help="Severity: low, medium, high, critical"
+)
+@click.option("--source", help="Threat source/IP")
+@click.option("--details", help="Threat details")
+def ws_threat(node_id, threat_type, severity, source, details):
+    """Report threat to bootstrap server"""
+    try:
+        from .core.bootstrap_websocket_client import get_bootstrap_websocket_client
+        from .core.hardware import HardwareVerifier
+        import socket as sock_module
+
+        # Auto-detect node_id
+        if not node_id:
+            try:
+                verifier = HardwareVerifier()
+                node_id = verifier.get_hardware_id()
+            except Exception:
+                node_id = f"node-{sock_module.gethostname()}"
+
+        network = "testnet" if os.environ.get("PISECURE_TESTNET") == "1" else "mainnet"
+
+        print_info(f"Reporting threat from {node_id}...")
+
+        # Get WebSocket client
+        ws_client = get_bootstrap_websocket_client(node_id=node_id, network=network)
+
+        # Connect
+        if not ws_client.connected:
+            if not ws_client.connect():
+                print_error("Failed to connect to bootstrap server")
+                return
+
+        # Report threat
+        threat_data = {
+            "threat_type": threat_type,
+            "severity": severity,
+        }
+
+        if source:
+            threat_data["source"] = source
+        if details:
+            threat_data["details"] = details
+
+        if ws_client.report_threat(threat_data):
+            print_success("✓ Threat reported")
+            table = Table(title="🚨 Threat Report")
+            table.add_column("Field", style="cyan")
+            table.add_column("Value", style="yellow")
+
+            for key, value in threat_data.items():
+                table.add_row(key.replace("_", " ").title(), str(value))
+
+            console.print(table)
+        else:
+            print_error("Failed to report threat")
+
+        ws_client.disconnect()
+
+    except Exception as e:
+        print_error(f"Threat report error: {e}")
+
+
 @cli.command()
-@click.argument('package_path', type=click.Path(exists=True))
+@click.argument("package_path", type=click.Path(exists=True))
 def verify_update(package_path):
     """Verify update package signature and integrity"""
     try:
@@ -1071,13 +2053,17 @@ def verify_update(package_path):
         # Verify package
         result = updater.verify_update(package_path, {})
 
-        if result['verified']:
-            manifest = result['manifest']
+        if result["verified"]:
+            manifest = result["manifest"]
             console.print("[green]✅ Package verification successful![/green]")
             console.print(f"📦 Version: {manifest.get('version', 'unknown')}")
             console.print(f"👤 Publisher: {manifest.get('publisher', 'unknown')}")
-            console.print(f"🎯 Target HW: {', '.join(manifest.get('target_hardware', ['any']))}")
-            console.print(f"📝 Description: {manifest.get('description', 'No description')}")
+            console.print(
+                f"🎯 Target HW: {', '.join(manifest.get('target_hardware', ['any']))}"
+            )
+            console.print(
+                f"📝 Description: {manifest.get('description', 'No description')}"
+            )
         else:
             console.print("[red]❌ Package verification failed[/red]")
             console.print(f"Error: {result.get('error', 'Unknown error')}")
@@ -1092,9 +2078,16 @@ def update():
     """Update system management commands"""
     pass
 
+
 @update.command()
-@click.option('--type', 'update_type', help='Filter by update type (critical, safe, compatible, breaking)')
-@click.option('--git', is_flag=True, help='Use direct GitHub updates instead of blockchain-based')
+@click.option(
+    "--type",
+    "update_type",
+    help="Filter by update type (critical, safe, compatible, breaking)",
+)
+@click.option(
+    "--git", is_flag=True, help="Use direct GitHub updates instead of blockchain-based"
+)
 def check(update_type, git):
     """Check for available software updates"""
     try:
@@ -1109,15 +2102,19 @@ def check(update_type, git):
 
             # Check Git status first
             git_status = git_updater.get_git_status()
-            if git_status.get('error'):
+            if git_status.get("error"):
                 console.print(f"[red]❌ Git status error: {git_status['error']}[/red]")
                 return
 
-            console.print(f"   Current commit: {git_status['current_commit'][:8] if git_status['current_commit'] else 'unknown'}")
+            console.print(
+                f"   Current commit: {git_status['current_commit'][:8] if git_status['current_commit'] else 'unknown'}"
+            )
             console.print(f"   Branch: {git_status['branch']}")
-            console.print(f"   Working directory: {'clean' if git_status['is_clean'] else 'modified'}")
+            console.print(
+                f"   Working directory: {'clean' if git_status['is_clean'] else 'modified'}"
+            )
 
-            if not git_status['github_accessible']:
+            if not git_status["github_accessible"]:
                 console.print("[yellow]⚠️  Cannot access GitHub API[/yellow]")
                 return
 
@@ -1125,42 +2122,60 @@ def check(update_type, git):
             available_updates = git_updater.check_git_updates()
 
             if not available_updates:
-                console.print("[green]✅ Your PiSecure installation is up to date with GitHub![/green]")
+                console.print(
+                    "[green]✅ Your PiSecure installation is up to date with GitHub![/green]"
+                )
                 return
 
-            console.print(f"\n[yellow]📦 Found {len(available_updates)} available Git update(s):[/yellow]\n")
+            console.print(
+                f"\n[yellow]📦 Found {len(available_updates)} available Git update(s):[/yellow]\n"
+            )
 
             # Display updates
             for update in available_updates[-5:]:  # Show latest 5
-                update_type_display = update.get('type', 'unknown').upper()
-                version = update.get('version', 'unknown')
-                description = update.get('description', 'No description')[:50]
-                commit_short = update.get('commit', '')[:8]
+                update_type_display = update.get("type", "unknown").upper()
+                version = update.get("version", "unknown")
+                description = update.get("description", "No description")[:50]
+                commit_short = update.get("commit", "")[:8]
 
                 # Color code by type
-                if update_type_display == 'CRITICAL':
+                if update_type_display == "CRITICAL":
                     type_color = "[red]"
-                elif update_type_display == 'SAFE':
+                elif update_type_display == "SAFE":
                     type_color = "[green]"
-                elif update_type_display == 'COMPATIBLE':
+                elif update_type_display == "COMPATIBLE":
                     type_color = "[yellow]"
                 else:
                     type_color = "[red]"
 
-                console.print(f"{type_color}• {version} ({commit_short}) - {description}[/{type_color.replace('[', '').replace(']', '')}]")
+                console.print(
+                    f"{type_color}• {version} ({commit_short}) - {description}[/{type_color.replace('[', '').replace(']', '')}]"
+                )
 
             if len(available_updates) > 5:
-                console.print(f"[dim]... and {len(available_updates) - 5} more older commits[/dim]")
+                console.print(
+                    f"[dim]... and {len(available_updates) - 5} more older commits[/dim]"
+                )
 
             # Recommendations
-            safe_updates = [u for u in available_updates if u.get('type') in ['critical', 'safe']]
+            safe_updates = [
+                u for u in available_updates if u.get("type") in ["critical", "safe"]
+            ]
             if safe_updates:
-                console.print(f"\n[green]✨ {len(safe_updates)} safe update(s) available[/green]")
-                console.print("[dim]Run 'pisecure update apply --git' to update to latest[/dim]")
+                console.print(
+                    f"\n[green]✨ {len(safe_updates)} safe update(s) available[/green]"
+                )
+                console.print(
+                    "[dim]Run 'pisecure update apply --git' to update to latest[/dim]"
+                )
 
-            breaking_updates = [u for u in available_updates if u.get('type') == 'breaking']
+            breaking_updates = [
+                u for u in available_updates if u.get("type") == "breaking"
+            ]
             if breaking_updates:
-                console.print(f"\n[red]⚠️  {len(breaking_updates)} breaking update(s) detected[/red]")
+                console.print(
+                    f"\n[red]⚠️  {len(breaking_updates)} breaking update(s) detected[/red]"
+                )
                 console.print("[dim]Use --force with apply command if needed[/dim]")
 
         else:
@@ -1184,66 +2199,95 @@ def check(update_type, git):
             available_updates = updater.check_for_updates(current_version)
 
             if not available_updates:
-                console.print("[green]✅ Your PiSecure installation is up to date![/green]")
+                console.print(
+                    "[green]✅ Your PiSecure installation is up to date![/green]"
+                )
                 return
 
             # Filter by type if requested
             if update_type:
                 try:
                     type_filter = UpdateType(update_type.lower())
-                    available_updates = [u for u in available_updates if u.get('type') == type_filter.value]
+                    available_updates = [
+                        u
+                        for u in available_updates
+                        if u.get("type") == type_filter.value
+                    ]
                 except ValueError:
                     console.print(f"[red]❌ Invalid update type: {update_type}[/red]")
-                    console.print("[dim]Valid types: critical, safe, compatible, breaking[/dim]")
+                    console.print(
+                        "[dim]Valid types: critical, safe, compatible, breaking[/dim]"
+                    )
                     return
 
-            console.print(f"\n[yellow]📦 Found {len(available_updates)} available update(s):[/yellow]\n")
+            console.print(
+                f"\n[yellow]📦 Found {len(available_updates)} available update(s):[/yellow]\n"
+            )
 
             # Display updates
             for update in available_updates[:5]:  # Show latest 5
-                update_type_display = update.get('type', 'unknown').upper()
-                version = update.get('version', 'unknown')
-                description = update.get('description', 'No description')[:60]
+                update_type_display = update.get("type", "unknown").upper()
+                version = update.get("version", "unknown")
+                description = update.get("description", "No description")[:60]
 
                 # Color code by type
-                if update_type_display == 'CRITICAL':
+                if update_type_display == "CRITICAL":
                     type_color = "[red]"
-                elif update_type_display == 'SAFE':
+                elif update_type_display == "SAFE":
                     type_color = "[green]"
-                elif update_type_display == 'COMPATIBLE':
+                elif update_type_display == "COMPATIBLE":
                     type_color = "[yellow]"
                 else:
                     type_color = "[red]"
 
-                console.print(f"{type_color}• {version} - {description}[/{type_color.replace('[', '').replace(']', '')}]")
+                console.print(
+                    f"{type_color}• {version} - {description}[/{type_color.replace('[', '').replace(']', '')}]"
+                )
 
             if len(available_updates) > 5:
                 console.print(f"[dim]... and {len(available_updates) - 5} more[/dim]")
 
             # Recommendations
-            critical_updates = [u for u in available_updates if u.get('type') == 'critical']
+            critical_updates = [
+                u for u in available_updates if u.get("type") == "critical"
+            ]
             if critical_updates:
-                console.print(f"\n[red]🚨 {len(critical_updates)} critical update(s) available![/red]")
-                console.print("[dim]Run 'pisecure update apply' to install immediately[/dim]")
+                console.print(
+                    f"\n[red]🚨 {len(critical_updates)} critical update(s) available![/red]"
+                )
+                console.print(
+                    "[dim]Run 'pisecure update apply' to install immediately[/dim]"
+                )
 
-            safe_updates = [u for u in available_updates if u.get('type') == 'safe']
+            safe_updates = [u for u in available_updates if u.get("type") == "safe"]
             if safe_updates and not critical_updates:
-                console.print(f"\n[green]✨ {len(safe_updates)} safe update(s) available[/green]")
+                console.print(
+                    f"\n[green]✨ {len(safe_updates)} safe update(s) available[/green]"
+                )
                 console.print("[dim]Run 'pisecure update apply' to install[/dim]")
 
-            breaking_updates = [u for u in available_updates if u.get('type') == 'breaking']
+            breaking_updates = [
+                u for u in available_updates if u.get("type") == "breaking"
+            ]
             if breaking_updates:
-                console.print(f"\n[red]⚠️  {len(breaking_updates)} breaking update(s) require network coordination[/red]")
-                console.print("[dim]These may change consensus rules and need community approval[/dim]")
+                console.print(
+                    f"\n[red]⚠️  {len(breaking_updates)} breaking update(s) require network coordination[/red]"
+                )
+                console.print(
+                    "[dim]These may change consensus rules and need community approval[/dim]"
+                )
 
     except Exception as e:
         console.print(f"[red]❌ Update check failed: {e}[/red]")
 
+
 @update.command()
-@click.argument('version', required=False)
-@click.option('--force', is_flag=True, help='Force application (skip safety checks)')
-@click.option('--skip-backup', is_flag=True, help='Skip backup creation (not recommended)')
-@click.option('--git', is_flag=True, help='Apply Git-based update to specific commit')
+@click.argument("version", required=False)
+@click.option("--force", is_flag=True, help="Force application (skip safety checks)")
+@click.option(
+    "--skip-backup", is_flag=True, help="Skip backup creation (not recommended)"
+)
+@click.option("--git", is_flag=True, help="Apply Git-based update to specific commit")
 def apply(version, force, skip_backup, git):
     """Apply available software updates"""
     try:
@@ -1258,13 +2302,15 @@ def apply(version, force, skip_backup, git):
 
             # Check Git status first
             git_status = git_updater.get_git_status()
-            if git_status.get('error'):
+            if git_status.get("error"):
                 console.print(f"[red]❌ Git status error: {git_status['error']}[/red]")
                 return
 
-            console.print(f"   Current commit: {git_status['current_commit'][:8] if git_status['current_commit'] else 'unknown'}")
+            console.print(
+                f"   Current commit: {git_status['current_commit'][:8] if git_status['current_commit'] else 'unknown'}"
+            )
 
-            if not git_status['github_accessible']:
+            if not git_status["github_accessible"]:
                 console.print("[yellow]⚠️  Cannot access GitHub API[/yellow]")
                 return
 
@@ -1280,29 +2326,39 @@ def apply(version, force, skip_backup, git):
             if version:
                 # Find specific commit
                 for update in available_updates:
-                    if update.get('commit', '').startswith(version) or update.get('version', '').endswith(version):
-                        target_commit = update.get('commit')
+                    if update.get("commit", "").startswith(version) or update.get(
+                        "version", ""
+                    ).endswith(version):
+                        target_commit = update.get("commit")
                         break
                 if not target_commit:
-                    console.print(f"[red]❌ Commit {version} not found in available updates[/red]")
+                    console.print(
+                        f"[red]❌ Commit {version} not found in available updates[/red]"
+                    )
                     return
             else:
                 # Apply latest safe update
-                safe_updates = [u for u in available_updates if u.get('type') in ['critical', 'safe']]
+                safe_updates = [
+                    u
+                    for u in available_updates
+                    if u.get("type") in ["critical", "safe"]
+                ]
                 if safe_updates:
-                    target_commit = safe_updates[0].get('commit')
+                    target_commit = safe_updates[0].get("commit")
                 else:
                     console.print("[yellow]⚠️  No safe Git updates available[/yellow]")
                     console.print("[dim]Use --force to apply latest anyway[/dim]")
                     if not force:
                         return
-                    target_commit = available_updates[0].get('commit')
+                    target_commit = available_updates[0].get("commit")
 
             console.print(f"   Target commit: {target_commit[:8]}")
 
             # Safety check for breaking changes
-            update_info = next((u for u in available_updates if u.get('commit') == target_commit), {})
-            if update_info.get('type') == 'breaking' and not force:
+            update_info = next(
+                (u for u in available_updates if u.get("commit") == target_commit), {}
+            )
+            if update_info.get("type") == "breaking" and not force:
                 console.print("[red]⚠️  This commit contains breaking changes[/red]")
                 console.print("[dim]Use --force to apply anyway[/dim]")
                 return
@@ -1310,17 +2366,19 @@ def apply(version, force, skip_backup, git):
             # Apply Git update
             apply_result = git_updater.apply_git_update(target_commit, force=force)
 
-            if apply_result['success']:
+            if apply_result["success"]:
                 console.print("[green]✅ Git update applied successfully![/green]")
                 console.print(f"   New commit: {apply_result['commit'][:8]}")
                 console.print(f"   Version: {apply_result['version']}")
 
-                if apply_result.get('services_restarted'):
+                if apply_result.get("services_restarted"):
                     console.print("[green]✅ Services restarted[/green]")
                 else:
                     console.print("[yellow]🔄 Service restart recommended[/yellow]")
             else:
-                console.print(f"[red]❌ Git update failed: {apply_result.get('error', 'Unknown error')}[/red]")
+                console.print(
+                    f"[red]❌ Git update failed: {apply_result.get('error', 'Unknown error')}[/red]"
+                )
 
         else:
             # Blockchain-based updates (original system)
@@ -1344,7 +2402,9 @@ def apply(version, force, skip_backup, git):
             available_updates = updater.check_for_updates(current_version)
 
             if not available_updates:
-                console.print("[green]✅ No updates available - already up to date![/green]")
+                console.print(
+                    "[green]✅ No updates available - already up to date![/green]"
+                )
                 return
 
             # Select update to apply
@@ -1352,38 +2412,54 @@ def apply(version, force, skip_backup, git):
             if version:
                 # Find specific version
                 for update in available_updates:
-                    if update.get('version') == version:
+                    if update.get("version") == version:
                         target_update = update
                         break
                 if not target_update:
-                    console.print(f"[red]❌ Version {version} not found in available updates[/red]")
+                    console.print(
+                        f"[red]❌ Version {version} not found in available updates[/red]"
+                    )
                     return
             else:
                 # Apply latest safe update
-                safe_updates = [u for u in available_updates if u.get('type') in ['critical', 'safe']]
+                safe_updates = [
+                    u
+                    for u in available_updates
+                    if u.get("type") in ["critical", "safe"]
+                ]
                 if safe_updates:
                     target_update = safe_updates[0]  # Latest safe update
                 else:
                     console.print("[yellow]⚠️  No safe updates available[/yellow]")
-                    console.print("[dim]Use --version to specify a specific update[/dim]")
+                    console.print(
+                        "[dim]Use --version to specify a specific update[/dim]"
+                    )
                     return
 
-            update_version = target_update.get('version')
-            update_type = target_update.get('type', 'unknown')
+            update_version = target_update.get("version")
+            update_type = target_update.get("type", "unknown")
 
             console.print(f"   Target update: {update_version}")
             console.print(f"   Update type: {update_type.upper()}")
 
             # Safety check for non-critical updates
-            if not force and update_type not in ['critical']:
-                console.print(f"\n[yellow]⚠️  This is a {update_type.upper()} update[/yellow]")
+            if not force and update_type not in ["critical"]:
+                console.print(
+                    f"\n[yellow]⚠️  This is a {update_type.upper()} update[/yellow]"
+                )
 
-                if update_type == 'breaking':
-                    console.print("[red]Breaking updates may change consensus rules[/red]")
-                    console.print("[red]Network coordination required - do not apply without community approval[/red]")
+                if update_type == "breaking":
+                    console.print(
+                        "[red]Breaking updates may change consensus rules[/red]"
+                    )
+                    console.print(
+                        "[red]Network coordination required - do not apply without community approval[/red]"
+                    )
                     return
-                elif update_type == 'compatible':
-                    console.print("[yellow]Compatible updates may require testing[/yellow]")
+                elif update_type == "compatible":
+                    console.print(
+                        "[yellow]Compatible updates may require testing[/yellow]"
+                    )
                     if not click.confirm("Continue with update?", default=False):
                         console.print("[dim]Update cancelled[/dim]")
                         return
@@ -1392,25 +2468,31 @@ def apply(version, force, skip_backup, git):
             console.print("[dim]Downloading update...[/dim]")
             download_result = updater.download_update(target_update)
 
-            if not download_result['success']:
-                console.print(f"[red]❌ Download failed: {download_result['error']}[/red]")
+            if not download_result["success"]:
+                console.print(
+                    f"[red]❌ Download failed: {download_result['error']}[/red]"
+                )
                 return
 
-            package_path = download_result['local_path']
+            package_path = download_result["local_path"]
 
             # Verify update
             console.print("[dim]Verifying update...[/dim]")
             verify_result = updater.verify_update(package_path, target_update)
 
-            if not verify_result['verified']:
-                console.print(f"[red]❌ Verification failed: {verify_result.get('error')}[/red]")
+            if not verify_result["verified"]:
+                console.print(
+                    f"[red]❌ Verification failed: {verify_result.get('error')}[/red]"
+                )
                 return
 
-            manifest = verify_result['manifest']
+            manifest = verify_result["manifest"]
 
             # Additional safety check using classifier
-            changed_files = manifest.get('changed_files', [])
-            is_safe, safety_reason = classifier.verify_update_safety(manifest, changed_files)
+            changed_files = manifest.get("changed_files", [])
+            is_safe, safety_reason = classifier.verify_update_safety(
+                manifest, changed_files
+            )
 
             if not is_safe and not force:
                 console.print(f"[red]❌ Safety check failed: {safety_reason}[/red]")
@@ -1423,33 +2505,44 @@ def apply(version, force, skip_backup, git):
             apply_result = updater.apply_update(
                 package_path,
                 manifest,
-                progress_callback=lambda current, total: console.print(f"[dim]Installing... {current}/{total} files[/dim]")
+                progress_callback=lambda current, total: console.print(
+                    f"[dim]Installing... {current}/{total} files[/dim]"
+                ),
             )
 
-            if apply_result['success']:
+            if apply_result["success"]:
                 console.print("[green]✅ Update applied successfully![/green]")
                 console.print(f"   New version: {apply_result['version']}")
                 console.print(f"   Backup ID: {apply_result['backup_id']}")
 
                 # Check if restart needed
-                if manifest.get('restart_required', True):
+                if manifest.get("restart_required", True):
                     console.print("[yellow]🔄 System restart recommended[/yellow]")
                     if click.confirm("Restart services now?", default=False):
                         # Restart services
                         import subprocess
+
                         try:
-                            subprocess.run(['sudo', 'systemctl', 'restart', 'pisecure*'], shell=True, check=True)
+                            subprocess.run(
+                                ["sudo", "systemctl", "restart", "pisecure*"],
+                                shell=True,
+                                check=True,
+                            )
                             console.print("[green]✅ Services restarted[/green]")
                         except Exception as e:
                             console.print(f"[red]❌ Service restart failed: {e}[/red]")
                             console.print("[dim]Manual restart may be required[/dim]")
             else:
-                console.print(f"[red]❌ Update failed: {apply_result.get('error', 'Unknown error')}[/red]")
+                console.print(
+                    f"[red]❌ Update failed: {apply_result.get('error', 'Unknown error')}[/red]"
+                )
 
                 # Check if rollback was attempted
-                if apply_result.get('rollback_attempted'):
-                    console.print("[yellow]⚠️  Automatic rollback was attempted[/yellow]")
-                    if not apply_result.get('rollback_attempted'):
+                if apply_result.get("rollback_attempted"):
+                    console.print(
+                        "[yellow]⚠️  Automatic rollback was attempted[/yellow]"
+                    )
+                    if not apply_result.get("rollback_attempted"):
                         console.print("[red]Manual intervention may be required[/red]")
 
     except Exception as e:
@@ -1483,7 +2576,8 @@ def update_status():
 
         # Last update check
         import time
-        last_check = time.ctime(status.get('last_update_check', 0))
+
+        last_check = time.ctime(status.get("last_update_check", 0))
         console.print(f"[cyan]Last Update Check:[/cyan] {last_check}")
 
         # Recent update history
@@ -1491,33 +2585,41 @@ def update_status():
         if history:
             console.print(f"\n[cyan]Recent Updates:[/cyan]")
             for entry in history[-3:]:  # Last 3 updates
-                event_type = entry.get('event_type', 'unknown')
-                version = entry.get('version', 'unknown')
-                timestamp = time.ctime(entry.get('timestamp', 0))
+                event_type = entry.get("event_type", "unknown")
+                version = entry.get("version", "unknown")
+                timestamp = time.ctime(entry.get("timestamp", 0))
 
-                if event_type == 'applied':
+                if event_type == "applied":
                     console.print(f"   ✅ {version} - Applied on {timestamp}")
-                elif event_type == 'rolled_back':
+                elif event_type == "rolled_back":
                     console.print(f"   🔄 {version} - Rolled back on {timestamp}")
                 else:
-                    console.print(f"   • {version} - {event_type.title()} on {timestamp}")
+                    console.print(
+                        f"   • {version} - {event_type.title()} on {timestamp}"
+                    )
 
         # Update recommendations
-        if status['available_updates'] > 0:
-            console.print(f"\n[yellow]💡 {status['available_updates']} update(s) available[/yellow]")
+        if status["available_updates"] > 0:
+            console.print(
+                f"\n[yellow]💡 {status['available_updates']} update(s) available[/yellow]"
+            )
             console.print("[dim]Run 'pisecure update check' for details[/dim]")
-            console.print("[dim]Run 'pisecure update apply' to install safe updates[/dim]")
+            console.print(
+                "[dim]Run 'pisecure update apply' to install safe updates[/dim]"
+            )
 
-        if status['backups_count'] == 0:
+        if status["backups_count"] == 0:
             console.print(f"\n[yellow]⚠️  No update backups available[/yellow]")
-            console.print("[dim]Consider creating a manual backup before major updates[/dim]")
+            console.print(
+                "[dim]Consider creating a manual backup before major updates[/dim]"
+            )
 
     except Exception as e:
         console.print(f"[red]❌ Update status check failed: {e}[/red]")
 
 
 @cli.command()
-@click.argument('version', required=False)
+@click.argument("version", required=False)
 def update_rollback(version):
     """Rollback to previous version"""
     try:
@@ -1535,25 +2637,34 @@ def update_rollback(version):
         else:
             console.print("[blue]🔄 Rolling back to latest backup[/blue]")
 
-        if not click.confirm("This will revert system changes. Continue?", default=False):
+        if not click.confirm(
+            "This will revert system changes. Continue?", default=False
+        ):
             console.print("[dim]Rollback cancelled[/dim]")
             return
 
         result = updater.rollback_update(version)
 
-        if result['success']:
+        if result["success"]:
             console.print("[green]✅ Rollback completed successfully![/green]")
             console.print("[yellow]🔄 System restart recommended[/yellow]")
 
             if click.confirm("Restart services now?", default=False):
                 import subprocess
+
                 try:
-                    subprocess.run(['sudo', 'systemctl', 'restart', 'pisecure*'], shell=True, check=True)
+                    subprocess.run(
+                        ["sudo", "systemctl", "restart", "pisecure*"],
+                        shell=True,
+                        check=True,
+                    )
                     console.print("[green]✅ Services restarted[/green]")
                 except Exception as e:
                     console.print(f"[red]❌ Service restart failed: {e}[/red]")
         else:
-            console.print(f"[red]❌ Rollback failed: {result.get('error', 'Unknown error')}[/red]")
+            console.print(
+                f"[red]❌ Rollback failed: {result.get('error', 'Unknown error')}[/red]"
+            )
 
     except Exception as e:
         console.print(f"[red]❌ Rollback failed: {e}[/red]")
@@ -1583,16 +2694,17 @@ def update_history():
 
         for entry in reversed(history[-10:]):  # Show last 10 entries
             import time
-            timestamp = time.ctime(entry.get('timestamp', 0))
-            event_type = entry.get('event_type', 'unknown')
-            version = entry.get('version', 'unknown')
 
-            if event_type == 'applied':
+            timestamp = time.ctime(entry.get("timestamp", 0))
+            event_type = entry.get("event_type", "unknown")
+            version = entry.get("version", "unknown")
+
+            if event_type == "applied":
                 console.print(f"✅ {timestamp} - Applied {version}")
-            elif event_type == 'rolled_back':
-                error = entry.get('error', 'Unknown reason')
+            elif event_type == "rolled_back":
+                error = entry.get("error", "Unknown reason")
                 console.print(f"🔄 {timestamp} - Rolled back {version} ({error})")
-            elif event_type == 'manual_rollback':
+            elif event_type == "manual_rollback":
                 console.print(f"🔄 {timestamp} - Manual rollback to {version}")
             else:
                 console.print(f"• {timestamp} - {event_type.title()} {version}")
@@ -1610,7 +2722,9 @@ def update_emergency_rollback():
         console.print("[red]Only use in case of critical system failure[/red]")
         console.print()
 
-        if not click.confirm("Are you sure you want to perform emergency rollback?", default=False):
+        if not click.confirm(
+            "Are you sure you want to perform emergency rollback?", default=False
+        ):
             console.print("[dim]Emergency rollback cancelled[/dim]")
             return
 
@@ -1627,11 +2741,13 @@ def update_emergency_rollback():
 
         result = updater.emergency_rollback()
 
-        if result['success']:
+        if result["success"]:
             console.print("[green]✅ Emergency rollback completed[/green]")
             console.print("[yellow]🔄 System restart required[/yellow]")
         else:
-            console.print(f"[red]❌ Emergency rollback failed: {result.get('error', 'Unknown error')}[/red]")
+            console.print(
+                f"[red]❌ Emergency rollback failed: {result.get('error', 'Unknown error')}[/red]"
+            )
             console.print("[red]Manual system recovery may be required[/red]")
 
     except Exception as e:
@@ -1647,6 +2763,7 @@ def update():
 
     # Call the apply command
     from click.testing import CliRunner
+
     runner = CliRunner()
     result = runner.invoke(update_apply, [])
 
@@ -1657,10 +2774,20 @@ def update():
 
 
 @cli.command()
-@click.argument('backup_path', type=click.Path())
-@click.option('--wallet', help='Wallet ID to backup (default: current wallet)')
-@click.option('--include-private-key', is_flag=True, help='Include encrypted private key in backup')
-@click.option('--password', prompt=True, hide_input=True, confirmation_prompt=True, help='Password for private key encryption')
+@click.argument("backup_path", type=click.Path())
+@click.option("--wallet", help="Wallet ID to backup (default: current wallet)")
+@click.option(
+    "--include-private-key",
+    is_flag=True,
+    help="Include encrypted private key in backup",
+)
+@click.option(
+    "--password",
+    prompt=True,
+    hide_input=True,
+    confirmation_prompt=True,
+    help="Password for private key encryption",
+)
 def backup_wallet(backup_path, wallet, include_private_key, password):
     """Create encrypted wallet backup with private key"""
     try:
@@ -1675,7 +2802,7 @@ def backup_wallet(backup_path, wallet, include_private_key, password):
             # Backup specific wallet
             wallet_instance = SignWallet()
             wallet_data = wallet_instance.load_wallet(wallet)
-            if 'error' in wallet_data:
+            if "error" in wallet_data:
                 console.print(f"[red]❌ Wallet not found: {wallet}[/red]")
                 return
 
@@ -1698,17 +2825,25 @@ def backup_wallet(backup_path, wallet, include_private_key, password):
             return
 
         # Create backup
-        result = wallet_instance.create_wallet_backup(backup_path, password if include_private_key else None)
+        result = wallet_instance.create_wallet_backup(
+            backup_path, password if include_private_key else None
+        )
 
-        if result['success']:
+        if result["success"]:
             console.print("[green]✅ Wallet backup created successfully![/green]")
             console.print(f"   📁 Backup file: {result['export_path']}")
             console.print(f"   📊 File size: {result['file_size']} bytes")
-            console.print(f"   🔑 Private key included: {'✅ Yes (encrypted)' if result.get('includes_private_key') else '❌ No'}")
+            console.print(
+                f"   🔑 Private key included: {'✅ Yes (encrypted)' if result.get('includes_private_key') else '❌ No'}"
+            )
 
             if include_private_key:
-                console.print("[yellow]⚠️  Remember your password - it's required to restore the private key![/yellow]")
-                console.print("[dim]Store this backup securely - it contains your wallet credentials[/dim]")
+                console.print(
+                    "[yellow]⚠️  Remember your password - it's required to restore the private key![/yellow]"
+                )
+                console.print(
+                    "[dim]Store this backup securely - it contains your wallet credentials[/dim]"
+                )
         else:
             console.print(f"[red]❌ Backup failed: {result['error']}[/red]")
 
@@ -1717,9 +2852,14 @@ def backup_wallet(backup_path, wallet, include_private_key, password):
 
 
 @cli.command()
-@click.argument('backup_path', type=click.Path(exists=True))
-@click.option('--wallet-name', help='Name for restored wallet (optional)')
-@click.option('--password', prompt=True, hide_input=True, help='Password for private key decryption')
+@click.argument("backup_path", type=click.Path(exists=True))
+@click.option("--wallet-name", help="Name for restored wallet (optional)")
+@click.option(
+    "--password",
+    prompt=True,
+    hide_input=True,
+    help="Password for private key decryption",
+)
 def restore_wallet(backup_path, wallet_name, password):
     """Restore wallet from encrypted backup"""
     try:
@@ -1734,14 +2874,16 @@ def restore_wallet(backup_path, wallet_name, password):
 
         # Check if backup contains private key
         try:
-            with open(backup_path, 'r') as f:
+            with open(backup_path, "r") as f:
                 backup_data = json.load(f)
 
-            has_private_key = 'encrypted_private_key' in backup_data
-            wallet_id = backup_data.get('wallet_id', 'unknown')
+            has_private_key = "encrypted_private_key" in backup_data
+            wallet_id = backup_data.get("wallet_id", "unknown")
 
             console.print(f"   👛 Wallet ID: {wallet_id}")
-            console.print(f"   🔑 Private key included: {'✅ Yes' if has_private_key else '❌ No'}")
+            console.print(
+                f"   🔑 Private key included: {'✅ Yes' if has_private_key else '❌ No'}"
+            )
 
             if has_private_key and not password:
                 console.print("[red]❌ Password required to decrypt private key[/red]")
@@ -1755,25 +2897,32 @@ def restore_wallet(backup_path, wallet_name, password):
         wallet_instance = SignWallet()
 
         # Restore from backup
-        result = wallet_instance.restore_wallet_backup(backup_path, password if has_private_key else None)
+        result = wallet_instance.restore_wallet_backup(
+            backup_path, password if has_private_key else None
+        )
 
-        if result['success']:
+        if result["success"]:
             console.print("[green]✅ Wallet restored successfully![/green]")
             console.print(f"   👛 Wallet ID: {result['wallet_id']}")
             console.print(f"   🏦 Address: {result['address']}")
-            console.print(f"   🔑 Private key restored: {'✅ Yes' if result.get('private_key_restored') else '❌ No'}")
+            console.print(
+                f"   🔑 Private key restored: {'✅ Yes' if result.get('private_key_restored') else '❌ No'}"
+            )
 
             # Rename wallet if requested
-            if wallet_name and wallet_name != result['wallet_id']:
+            if wallet_name and wallet_name != result["wallet_id"]:
                 console.print(f"[blue]🔄 Renaming wallet to: {wallet_name}[/blue]")
                 # Load the restored wallet and update name
-                restored_wallet = SignWallet(f"/var/lib/pisecure/wallets/{result['wallet_id']}.json")
-                restored_wallet.wallet_data['wallet_id'] = wallet_name
-                restored_wallet.wallet_data['name'] = wallet_name
+                restored_wallet = SignWallet(
+                    f"/var/lib/pisecure/wallets/{result['wallet_id']}.json"
+                )
+                restored_wallet.wallet_data["wallet_id"] = wallet_name
+                restored_wallet.wallet_data["name"] = wallet_name
                 restored_wallet._save_wallet()
 
                 # Rename files
                 import shutil
+
                 old_json = f"/var/lib/pisecure/wallets/{result['wallet_id']}.json"
                 new_json = f"/var/lib/pisecure/wallets/{wallet_name}.json"
                 old_pem = f"/var/lib/pisecure/wallets/keys/{result['wallet_id']}.pem"
@@ -1793,8 +2942,8 @@ def restore_wallet(backup_path, wallet_name, password):
 
 
 @cli.command()
-@click.argument('backup_path', type=click.Path())
-@click.option('--wallet', help='Wallet ID to export (default: current wallet)')
+@click.argument("backup_path", type=click.Path())
+@click.option("--wallet", help="Wallet ID to export (default: current wallet)")
 def export_wallet(backup_path, wallet):
     """Export wallet metadata (without private key)"""
     try:
@@ -1815,11 +2964,13 @@ def export_wallet(backup_path, wallet):
 
         result = wallet_instance.export_wallet(backup_path, include_private_key=False)
 
-        if result['success']:
+        if result["success"]:
             console.print("[green]✅ Wallet metadata exported successfully![/green]")
             console.print(f"   📁 Export file: {result['export_path']}")
             console.print(f"   📊 File size: {result['file_size']} bytes")
-            console.print("[yellow]⚠️  Private key NOT included - use 'backup-wallet' for full backup[/yellow]")
+            console.print(
+                "[yellow]⚠️  Private key NOT included - use 'backup-wallet' for full backup[/yellow]"
+            )
         else:
             console.print(f"[red]❌ Export failed: {result['error']}[/red]")
 
@@ -1828,8 +2979,8 @@ def export_wallet(backup_path, wallet):
 
 
 @cli.command()
-@click.argument('backup_path', type=click.Path(exists=True))
-@click.option('--wallet-name', help='Name for imported wallet (optional)')
+@click.argument("backup_path", type=click.Path(exists=True))
+@click.option("--wallet-name", help="Name for imported wallet (optional)")
 def import_wallet(backup_path, wallet_name):
     """Import wallet metadata (without private key)"""
     try:
@@ -1843,20 +2994,24 @@ def import_wallet(backup_path, wallet_name):
         wallet_instance = SignWallet()
         result = wallet_instance.import_wallet(backup_path)
 
-        if result['success']:
+        if result["success"]:
             console.print("[green]✅ Wallet metadata imported successfully![/green]")
             console.print(f"   👛 Wallet ID: {result['wallet_id']}")
             console.print(f"   🏦 Address: {result['address']}")
-            console.print(f"   🔑 Private key restored: {'✅ Yes' if result.get('private_key_restored') else '❌ No'}")
+            console.print(
+                f"   🔑 Private key restored: {'✅ Yes' if result.get('private_key_restored') else '❌ No'}"
+            )
 
-            if wallet_name and wallet_name != result['wallet_id']:
+            if wallet_name and wallet_name != result["wallet_id"]:
                 # Rename imported wallet
-                wallet_instance.wallet_data['wallet_id'] = wallet_name
-                wallet_instance.wallet_data['name'] = wallet_name
+                wallet_instance.wallet_data["wallet_id"] = wallet_name
+                wallet_instance.wallet_data["name"] = wallet_name
                 wallet_instance._save_wallet()
                 console.print(f"[green]✅ Wallet renamed to: {wallet_name}[/green]")
 
-            console.print("[yellow]⚠️  If this backup included a private key, use 'restore-wallet' instead[/yellow]")
+            console.print(
+                "[yellow]⚠️  If this backup included a private key, use 'restore-wallet' instead[/yellow]"
+            )
         else:
             console.print(f"[red]❌ Import failed: {result['error']}[/red]")
 
@@ -1865,7 +3020,7 @@ def import_wallet(backup_path, wallet_name):
 
 
 @cli.command()
-@click.option('--wallet', help='Wallet ID to sync (default: all wallets)')
+@click.option("--wallet", help="Wallet ID to sync (default: all wallets)")
 def sync_wallet(wallet):
     """Sync wallet balance with blockchain state"""
     try:
@@ -1879,10 +3034,11 @@ def sync_wallet(wallet):
             # Sync specific wallet
             try:
                 from .core.wallet import SignWallet
+
                 wallet_file = f"/var/lib/pisecure/wallets/{wallet}.json"
                 wallet_instance = SignWallet(wallet_file)
 
-                if 'error' in wallet_instance.wallet_data:
+                if "error" in wallet_instance.wallet_data:
                     console.print(f"[red]❌ Wallet not found: {wallet}[/red]")
                     return
 
@@ -1890,7 +3046,7 @@ def sync_wallet(wallet):
                 blockchain_balance = blockchain.get_wallet_balance(address)
 
                 # Update wallet balance
-                wallet_instance.wallet_data['balance'] = blockchain_balance
+                wallet_instance.wallet_data["balance"] = blockchain_balance
                 wallet_instance._save_wallet()
 
                 console.print(f"[green]✅ Synced wallet {wallet}[/green]")
@@ -1914,29 +3070,35 @@ def sync_wallet(wallet):
                 total_balance = 0.0
 
                 for wallet_file in os.listdir(wallet_dir):
-                    if wallet_file.endswith('.json'):
+                    if wallet_file.endswith(".json"):
                         try:
                             wallet_path = os.path.join(wallet_dir, wallet_file)
                             temp_wallet = SignWallet(wallet_path)
 
-                            if 'error' not in temp_wallet.wallet_data:
+                            if "error" not in temp_wallet.wallet_data:
                                 address = temp_wallet.get_address()
-                                blockchain_balance = blockchain.get_wallet_balance(address)
+                                blockchain_balance = blockchain.get_wallet_balance(
+                                    address
+                                )
 
                                 # Update balance
-                                temp_wallet.wallet_data['balance'] = blockchain_balance
+                                temp_wallet.wallet_data["balance"] = blockchain_balance
                                 temp_wallet._save_wallet()
 
                                 synced_count += 1
                                 total_balance += blockchain_balance
 
-                                console.print(f"   ✅ {temp_wallet.get_wallet_id()}: {blockchain_balance:.2f} tokens")
+                                console.print(
+                                    f"   ✅ {temp_wallet.get_wallet_id()}: {blockchain_balance:.2f} tokens"
+                                )
 
                         except Exception as e:
                             console.print(f"   ⚠️ Skipped {wallet_file}: {e}")
 
                 console.print(f"\n[green]✅ Synced {synced_count} wallets[/green]")
-                console.print(f"   💰 Total balance across all wallets: {total_balance:.2f} tokens")
+                console.print(
+                    f"   💰 Total balance across all wallets: {total_balance:.2f} tokens"
+                )
 
             except Exception as e:
                 console.print(f"[red]❌ Failed to sync wallets: {e}[/red]")
@@ -1946,7 +3108,7 @@ def sync_wallet(wallet):
 
 
 @cli.command()
-@click.option('--wallet', help='Wallet ID to show (default: current wallet)')
+@click.option("--wallet", help="Wallet ID to show (default: current wallet)")
 def wallet_info(wallet):
     """Show detailed wallet information"""
     try:
@@ -1972,18 +3134,25 @@ def wallet_info(wallet):
         console.print("=" * 40)
 
         console.print(f"[cyan]Wallet ID:[/cyan] {wallet_id}")
-        console.print(f"[cyan]Name:[/cyan] {wallet_instance.wallet_data.get('name', 'Unnamed')}")
+        console.print(
+            f"[cyan]Name:[/cyan] {wallet_instance.wallet_data.get('name', 'Unnamed')}"
+        )
         console.print(f"[cyan]Address:[/cyan] {wallet_instance.get_address()}")
-        console.print(f"[cyan]Balance:[/cyan] {wallet_instance.get_balance():.2f} tokens")
+        console.print(
+            f"[cyan]Balance:[/cyan] {wallet_instance.get_balance():.2f} tokens"
+        )
 
         # Check if private key exists
         key_file = wallet_instance.keys_dir / f"{wallet_id}.pem"
         has_private_key = key_file.exists()
-        console.print(f"[cyan]Private Key:[/cyan] {'✅ Available' if has_private_key else '❌ Not found'}")
+        console.print(
+            f"[cyan]Private Key:[/cyan] {'✅ Available' if has_private_key else '❌ Not found'}"
+        )
 
-        created_at = wallet_instance.wallet_data.get('created_at', 0)
+        created_at = wallet_instance.wallet_data.get("created_at", 0)
         if created_at:
             import time
+
             console.print(f"[cyan]Created:[/cyan] {time.ctime(created_at)}")
 
         # Transaction count
@@ -1997,22 +3166,32 @@ def wallet_info(wallet):
 
         console.print()
         console.print("[green]💡 Wallet Commands:[/green]")
-        console.print("  Backup (with private key): pisecure backup-wallet /path/to/backup.json --include-private-key")
+        console.print(
+            "  Backup (with private key): pisecure backup-wallet /path/to/backup.json --include-private-key"
+        )
         console.print("  Restore: pisecure restore-wallet /path/to/backup.json")
-        console.print("  Export metadata only: pisecure export-wallet /path/to/export.json")
+        console.print(
+            "  Export metadata only: pisecure export-wallet /path/to/export.json"
+        )
 
     except Exception as e:
         console.print(f"[red]❌ Wallet info error: {e}[/red]")
 
 
 @cli.command()
-@click.option('--host', default='0.0.0.0', help='Host to bind to (default: 0.0.0.0)')
-@click.option('--port', type=int, default=3142, help='Port to listen on (default: 3142)')
-@click.option('--ssl-enabled', type=click.Choice(['auto', 'force', 'disable']), default='auto',
-              help='SSL mode: auto (smart detection), force (require SSL), disable (HTTP only)')
-@click.option('--ssl-cert', help='Path to SSL certificate file (.pem)')
-@click.option('--ssl-key', help='Path to SSL private key file (.key)')
-@click.option('--debug', is_flag=True, help='Enable debug mode')
+@click.option("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
+@click.option(
+    "--port", type=int, default=3142, help="Port to listen on (default: 3142)"
+)
+@click.option(
+    "--ssl-enabled",
+    type=click.Choice(["auto", "force", "disable"]),
+    default="auto",
+    help="SSL mode: auto (smart detection), force (require SSL), disable (HTTP only)",
+)
+@click.option("--ssl-cert", help="Path to SSL certificate file (.pem)")
+@click.option("--ssl-key", help="Path to SSL private key file (.key)")
+@click.option("--debug", is_flag=True, help="Enable debug mode")
 def server(host, port, ssl_enabled, ssl_cert, ssl_key, debug):
     """Start the PiSecure API server with automatic SSL detection"""
     try:
@@ -2029,28 +3208,38 @@ def server(host, port, ssl_enabled, ssl_cert, ssl_key, debug):
         console.print(f"   Port: {port}")
         console.print(f"   SSL Mode: {ssl_enabled}")
 
-        if ssl_enabled == 'auto':
-            console.print("[dim]   SSL Detection: Automatic (recommended for most users)[/dim]")
-            console.print("[dim]     - HTTP for local development (localhost/127.0.0.1)[/dim]")
+        if ssl_enabled == "auto":
+            console.print(
+                "[dim]   SSL Detection: Automatic (recommended for most users)[/dim]"
+            )
+            console.print(
+                "[dim]     - HTTP for local development (localhost/127.0.0.1)[/dim]"
+            )
             console.print("[dim]     - HTTPS for public access or when required[/dim]")
-        elif ssl_enabled == 'force':
+        elif ssl_enabled == "force":
             console.print("[dim]   SSL Mode: Forced HTTPS[/dim]")
-            console.print("[dim]     - Server will fail to start without SSL certificate[/dim]")
-        elif ssl_enabled == 'disable':
+            console.print(
+                "[dim]     - Server will fail to start without SSL certificate[/dim]"
+            )
+        elif ssl_enabled == "disable":
             console.print("[dim]   SSL Mode: HTTP only[/dim]")
             console.print("[dim]     - No SSL/TLS encryption[/dim]")
 
         if ssl_cert and ssl_key:
             console.print(f"   SSL Certificate: {ssl_cert}")
             console.print(f"   SSL Key: {ssl_key}")
-        elif ssl_enabled in ['auto', 'force']:
-            console.print("[dim]   SSL Certificate: Auto-generated (self-signed for development)[/dim]")
+        elif ssl_enabled in ["auto", "force"]:
+            console.print(
+                "[dim]   SSL Certificate: Auto-generated (self-signed for development)[/dim]"
+            )
 
         console.print()
 
         # Create and start the API server
         api = BlockchainAPI(host=host, port=port)
-        api.run(debug=debug, ssl_enabled=ssl_enabled, ssl_cert=ssl_cert, ssl_key=ssl_key)
+        api.run(
+            debug=debug, ssl_enabled=ssl_enabled, ssl_cert=ssl_cert, ssl_key=ssl_key
+        )
 
     except Exception as e:
         console.print(f"[red]❌ Failed to start API server: {e}[/red]")
@@ -2066,13 +3255,10 @@ def server(host, port, ssl_enabled, ssl_cert, ssl_key, debug):
 cli.add_command(update)
 
 
-
-
-
 def main():
     """Main entry point for the CLI"""
     cli()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
