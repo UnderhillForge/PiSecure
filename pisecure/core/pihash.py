@@ -22,7 +22,10 @@ from typing import Dict, Any, Optional, Tuple
 
 
 def count_zero_bits(hash_hex: str) -> int:
-    """Count zero bits in a 256-bit hash hex string.
+    """Count LEADING zero bits in a 256-bit hash hex string.
+
+    This counts consecutive zero bits from the start (most significant bits),
+    not total zero bits. This is the correct difficulty metric.
 
     Returns 0 if the input is not valid hex.
     """
@@ -31,12 +34,16 @@ def count_zero_bits(hash_hex: str) -> int:
     except ValueError:
         return 0
 
-    # SHA256/PiHash outputs 256-bit digests; zeros are the complement of set bits
-    return 256 - value.bit_count()
+    # Count leading zeros by finding the position of the first 1 bit
+    # In a 256-bit value, this is (256 - bit_length())
+    if value == 0:
+        return 256  # All zeros
+
+    return 256 - value.bit_length()
 
 
 def hash_meets_zero_bits(hash_hex: str, target_zero_bits: int) -> bool:
-    """Check if a hash has at least the requested number of zero bits."""
+    """Check if a hash has at least the requested number of LEADING zero bits."""
     return count_zero_bits(hash_hex) >= target_zero_bits
 
 
@@ -69,7 +76,9 @@ class PiHash:
         self.hardware_verified = False
         self.hardware_fingerprint = {}
 
-    def compute(self, data: bytes, nonce: int, hardware_fingerprint: Optional[Dict] = None) -> str:
+    def compute(
+        self, data: bytes, nonce: int, hardware_fingerprint: Optional[Dict] = None
+    ) -> str:
         """
         Compute PiHash digest
 
@@ -114,23 +123,23 @@ class PiHash:
         """
         try:
             fingerprint = {
-                'cpu_serial': self._get_cpu_serial(),
-                'hardware_model': self._get_hardware_model(),
-                'mac_address': self._get_mac_address(),
-                'memory_info': self._get_memory_info(),
-                'hardware_rng': self._get_hardware_rng(32),
-                'timestamp': int(time.time())
+                "cpu_serial": self._get_cpu_serial(),
+                "hardware_model": self._get_hardware_model(),
+                "mac_address": self._get_mac_address(),
+                "memory_info": self._get_memory_info(),
+                "hardware_rng": self._get_hardware_rng(32),
+                "timestamp": int(time.time()),
             }
 
             # Generate unique hardware ID
             hw_id_data = (
-                str(fingerprint['cpu_serial']) +
-                fingerprint['hardware_model'] +
-                fingerprint['mac_address'] +
-                str(fingerprint['memory_info']['total'])
+                str(fingerprint["cpu_serial"])
+                + fingerprint["hardware_model"]
+                + fingerprint["mac_address"]
+                + str(fingerprint["memory_info"]["total"])
             ).encode()
 
-            fingerprint['unique_id'] = hashlib.sha256(hw_id_data).hexdigest()[:16]
+            fingerprint["unique_id"] = hashlib.sha256(hw_id_data).hexdigest()[:16]
 
             return fingerprint
 
@@ -149,22 +158,24 @@ class PiHash:
         """
         try:
             # Check for Raspberry Pi specific indicators
-            model = fingerprint.get('hardware_model', '').lower()
-            if 'raspberry pi' not in model:
+            model = fingerprint.get("hardware_model", "").lower()
+            if "raspberry pi" not in model:
                 return False
 
             # Verify CPU serial exists and is valid
-            serial = fingerprint.get('cpu_serial')
+            serial = fingerprint.get("cpu_serial")
             if not serial or len(str(serial)) < 8:
                 return False
 
             # Check memory is reasonable for Pi (1GB - 16GB)
-            memory_mb = fingerprint.get('memory_info', {}).get('total', 0) / (1024 * 1024)
+            memory_mb = fingerprint.get("memory_info", {}).get("total", 0) / (
+                1024 * 1024
+            )
             if memory_mb < 1024 or memory_mb > 16384:  # 1GB - 16GB range
                 return False
 
             # Verify hardware RNG is available
-            if 'hardware_rng' not in fingerprint:
+            if "hardware_rng" not in fingerprint:
                 return False
 
             self.hardware_verified = True
@@ -177,13 +188,13 @@ class PiHash:
     def _get_cpu_serial(self) -> str:
         """Get Raspberry Pi CPU serial number"""
         try:
-            with open('/proc/cpuinfo', 'r') as f:
+            with open("/proc/cpuinfo", "r") as f:
                 for line in f:
-                    if line.startswith('Serial'):
-                        return line.split(':')[1].strip()
+                    if line.startswith("Serial"):
+                        return line.split(":")[1].strip()
             # Fallback to device tree
-            with open('/proc/device-tree/serial-number', 'rb') as f:
-                serial = f.read().decode('ascii').rstrip('\x00')
+            with open("/proc/device-tree/serial-number", "rb") as f:
+                serial = f.read().decode("ascii").rstrip("\x00")
                 return serial
         except Exception:
             raise ValueError("Cannot read CPU serial")
@@ -191,13 +202,13 @@ class PiHash:
     def _get_hardware_model(self) -> str:
         """Get Raspberry Pi model information"""
         try:
-            with open('/proc/cpuinfo', 'r') as f:
+            with open("/proc/cpuinfo", "r") as f:
                 for line in f:
-                    if line.startswith('Model'):
-                        return line.split(':')[1].strip()
+                    if line.startswith("Model"):
+                        return line.split(":")[1].strip()
             # Fallback
-            with open('/proc/device-tree/model', 'rb') as f:
-                model = f.read().decode('ascii').rstrip('\x00')
+            with open("/proc/device-tree/model", "rb") as f:
+                model = f.read().decode("ascii").rstrip("\x00")
                 return model
         except Exception:
             return "Unknown Raspberry Pi Model"
@@ -206,14 +217,17 @@ class PiHash:
         """Get primary network interface MAC address"""
         try:
             import subprocess
-            result = subprocess.run(['cat', '/sys/class/net/eth0/address'],
-                                  capture_output=True, text=True)
+
+            result = subprocess.run(
+                ["cat", "/sys/class/net/eth0/address"], capture_output=True, text=True
+            )
             if result.returncode == 0:
                 return result.stdout.strip()
 
             # Try wlan0
-            result = subprocess.run(['cat', '/sys/class/net/wlan0/address'],
-                                  capture_output=True, text=True)
+            result = subprocess.run(
+                ["cat", "/sys/class/net/wlan0/address"], capture_output=True, text=True
+            )
             if result.returncode == 0:
                 return result.stdout.strip()
 
@@ -224,22 +238,27 @@ class PiHash:
     def _get_memory_info(self) -> Dict[str, int]:
         """Get system memory information"""
         try:
-            with open('/proc/meminfo', 'r') as f:
+            with open("/proc/meminfo", "r") as f:
                 mem_info = {}
                 for line in f:
-                    if line.startswith('MemTotal'):
-                        mem_info['total'] = int(line.split()[1]) * 1024  # Convert to bytes
-                    elif line.startswith('MemAvailable'):
-                        mem_info['available'] = int(line.split()[1]) * 1024
+                    if line.startswith("MemTotal"):
+                        mem_info["total"] = (
+                            int(line.split()[1]) * 1024
+                        )  # Convert to bytes
+                    elif line.startswith("MemAvailable"):
+                        mem_info["available"] = int(line.split()[1]) * 1024
                 return mem_info
         except Exception:
-            return {'total': 2 * 1024 * 1024 * 1024, 'available': 1 * 1024 * 1024 * 1024}  # 2GB fallback
+            return {
+                "total": 2 * 1024 * 1024 * 1024,
+                "available": 1 * 1024 * 1024 * 1024,
+            }  # 2GB fallback
 
     def _get_hardware_rng(self, bytes_needed: int) -> bytes:
         """Get random bytes from hardware RNG"""
         try:
             # Try hardware RNG (Pi 3+)
-            with open('/dev/hwrng', 'rb') as f:
+            with open("/dev/hwrng", "rb") as f:
                 return f.read(bytes_needed)
         except Exception:
             # Fallback to software RNG seeded with hardware data
@@ -265,14 +284,14 @@ class PiHash:
             Hardware-integrated hash bytes
         """
         # Combine block data, nonce, and hardware fingerprint
-        hw_data = data + struct.pack('<Q', nonce)  # Pack nonce as uint64
+        hw_data = data + struct.pack("<Q", nonce)  # Pack nonce as uint64
 
         # Add hardware-specific elements
-        hw_data += fingerprint['unique_id'].encode()
-        hw_data += fingerprint['hardware_rng']
+        hw_data += fingerprint["unique_id"].encode()
+        hw_data += fingerprint["hardware_rng"]
 
         # CPU serial as salt
-        serial_bytes = str(fingerprint['cpu_serial']).encode()
+        serial_bytes = str(fingerprint["cpu_serial"]).encode()
         hw_data += serial_bytes
 
         # Create initial hash
@@ -294,10 +313,12 @@ class PiHash:
         try:
             pid = os.getpid()
             uid = os.getuid()
-            memory_total = self.hardware_fingerprint.get('memory_info', {}).get('total', 2*1024*1024*1024)
+            memory_total = self.hardware_fingerprint.get("memory_info", {}).get(
+                "total", 2 * 1024 * 1024 * 1024
+            )
 
             for i in range(pattern_size):
-                pattern[i] = ((pid + uid + memory_total + i) % 256)
+                pattern[i] = (pid + uid + memory_total + i) % 256
         except Exception:
             # Fallback pattern
             for i in range(pattern_size):
@@ -318,7 +339,7 @@ class PiHash:
         # Fill memory buffer quickly
         for i in range(0, len(memory_buffer), 32):
             # Create 32-byte chunks (SHA256 output size)
-            chunk_data = hw_hash + struct.pack('<Q', nonce) + struct.pack('<Q', i)
+            chunk_data = hw_hash + struct.pack("<Q", nonce) + struct.pack("<Q", i)
             chunk_hash = hashlib.sha256(chunk_data).digest()
 
             # Fill memory with hash data (32 bytes at a time)
@@ -349,7 +370,7 @@ class PiHash:
                 # Custom ARM-style operations
                 mixed = (a + b + c) & 0xFF
                 mixed = ((mixed * 7) + 3) & 0xFF  # Multiplication common in ARM
-                mixed ^= (mixed >> 4)  # Bit operations
+                mixed ^= mixed >> 4  # Bit operations
 
                 hash_state[i] = mixed
 
@@ -364,7 +385,7 @@ class PiHash:
         for i in range(0, len(state), 4):
             if i + 3 < len(state):
                 # SIMD-like operations on 4 bytes
-                a, b, c, d = state[i:i+4]
+                a, b, c, d = state[i : i + 4]
 
                 # ARM-style register operations
                 a = (a + b) & 0xFF
@@ -373,7 +394,7 @@ class PiHash:
                 b = (b + c) & 0xFF
                 d = (d + a) & 0xFF
 
-                state[i:i+4] = [a, b, c, d]
+                state[i : i + 4] = [a, b, c, d]
 
         return state
 
@@ -386,7 +407,7 @@ class PiHash:
         """
         try:
             # Check for NPU device (placeholder for Pi 6)
-            return os.path.exists('/dev/npu') or os.path.exists('/dev/accel0')
+            return os.path.exists("/dev/npu") or os.path.exists("/dev/accel0")
         except Exception:
             return False
 
@@ -408,8 +429,12 @@ class PiHash:
         """Check if a hash meets the zero-bit difficulty target."""
         return hash_meets_zero_bits(hash_hex, target_zero_bits)
 
-    def find_nonce(self, block_data: bytes, difficulty: int,
-                   hardware_fingerprint: Optional[Dict] = None) -> Tuple[int, str]:
+    def find_nonce(
+        self,
+        block_data: bytes,
+        difficulty: int,
+        hardware_fingerprint: Optional[Dict] = None,
+    ) -> Tuple[int, str]:
         """
         Find nonce that meets difficulty requirement
 
@@ -436,9 +461,13 @@ class PiHash:
 
 
 # Convenience functions
-def compute_pihash(data: bytes, nonce: int = 0,
-                  hardware_fingerprint: Optional[Dict] = None,
-                  rounds: int = 8, memory_mb: int = 256) -> str:
+def compute_pihash(
+    data: bytes,
+    nonce: int = 0,
+    hardware_fingerprint: Optional[Dict] = None,
+    rounds: int = 8,
+    memory_mb: int = 256,
+) -> str:
     """
     Convenience function to compute PiHash
 
@@ -456,9 +485,14 @@ def compute_pihash(data: bytes, nonce: int = 0,
     return pihash.compute(data, nonce, hardware_fingerprint)
 
 
-def verify_pihash(data: bytes, nonce: int, expected_hash: str,
-                 hardware_fingerprint: Optional[Dict] = None,
-                 rounds: int = 8, memory_mb: int = 256) -> bool:
+def verify_pihash(
+    data: bytes,
+    nonce: int,
+    expected_hash: str,
+    hardware_fingerprint: Optional[Dict] = None,
+    rounds: int = 8,
+    memory_mb: int = 256,
+) -> bool:
     """
     Verify a PiHash computation
 
