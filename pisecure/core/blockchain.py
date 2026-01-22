@@ -1458,6 +1458,9 @@ class SignChain:
 
                 print(f"✅ Loaded blockchain with {len(self.chain)} blocks from JSON")
 
+                # CRITICAL: Validate chain integrity - remove corrupted blocks
+                self._repair_chain_if_corrupted()
+
             except Exception as e:
                 print(f"❌ Failed to load blockchain: {e}")
                 self.chain = [self.create_genesis_block()]
@@ -1503,11 +1506,41 @@ class SignChain:
                 f"✅ Loaded blockchain with {len(self.chain)} blocks from hybrid storage"
             )
 
+            # CRITICAL: Validate chain integrity - remove corrupted blocks
+            self._repair_chain_if_corrupted()
+
         except Exception as e:
             print(f"❌ Failed to load from hybrid storage: {e}")
             # Fallback to JSON loading
             self.use_hybrid_storage = False
             self._load_chain_from_json()
+
+    def _repair_chain_if_corrupted(self):
+        """Repair blockchain by removing corrupted blocks after the break point."""
+        # Check chain integrity
+        for i in range(1, len(self.chain)):
+            current = self.chain[i]
+            previous = self.chain[i - 1]
+
+            # If chain link is broken, truncate chain and remove corrupted blocks
+            if current.previous_hash != previous.hash:
+                print(
+                    f"⚠️ CHAIN CORRUPTION DETECTED: Block {i} has invalid previous hash"
+                )
+                print(f"   Previous block hash:     {previous.hash[:32]}...")
+                print(f"   Current block previous:  {current.previous_hash[:32]}...")
+                print(
+                    f"   Removing {len(self.chain) - i} corrupted blocks (keeping first {i} blocks)"
+                )
+
+                # Truncate chain to last valid block
+                self.chain = self.chain[:i]
+
+                # Save the repaired chain
+                self.save_chain()
+
+                print(f"✅ Chain repaired: Now {len(self.chain)} valid blocks")
+                return
 
     def save_chain(self):
         """Save blockchain to file or hybrid storage"""
