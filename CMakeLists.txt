@@ -35,6 +35,13 @@ pybind11_add_module(pisecure_cpp_hw
     cpp/hw/hw_verifier.cpp
 )
 
+# PiHash mining module (hardware-sealed verification)
+pybind11_add_module(pisecure_cpp_pihash
+    cpp/bindings/pybind_pihash.cpp
+    cpp/hw/pihash.cpp
+    cpp/crypto/sha256.cpp
+)
+
 
 # Optional: enable SIMD/ARM optimizations
 if (UNIX AND NOT APPLE)
@@ -62,6 +69,9 @@ set_target_properties(pisecure_cpp_pow PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pisecure"
 )
 set_target_properties(pisecure_cpp_hw PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pisecure"
+)
+set_target_properties(pisecure_cpp_pihash PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pisecure"
 )
 
