@@ -1,4 +1,5 @@
 #include "pihash.h"
+#include "videocore_mailbox.h"
 #include "../crypto/sha256.h"
 #include <algorithm>
 #include <sstream>
@@ -132,6 +133,11 @@ int PiHash::CountLeadingZeroBits(const std::string& hash_hex) {
 HardwareFingerprint PiHash::GetHardwareFingerprint() {
     HardwareFingerprint fp;
     
+    // TEMP: Skip VideoCore for now - focusing on basic functionality
+    // TODO: Safely integrate VideoCore mailbox verification once segfault is resolved
+    
+    // Use file-based verification
+    
     // Get CPU serial from /proc/cpuinfo
     std::ifstream cpuinfo("/proc/cpuinfo");
     std::string line;
@@ -193,18 +199,17 @@ HardwareFingerprint PiHash::GetHardwareFingerprint() {
         fp.memory_total = 2ULL * 1024 * 1024 * 1024;  // 2GB fallback
     }
     
-    // MAC address - set to empty for now (simplified)
+    // MAC address - not used with new VideoCore-based verification
     fp.mac_address = "00:00:00:00:00:00";
     
     // Get hardware RNG (32 bytes)
+    fp.hardware_rng.resize(32);
     std::ifstream hwrng("/dev/hwrng", std::ios::binary);
     if (hwrng.good()) {
-        fp.hardware_rng.resize(32);
         hwrng.read(reinterpret_cast<char*>(fp.hardware_rng.data()), 32);
         hwrng.close();
     } else {
         // Fallback: use system entropy
-        fp.hardware_rng.resize(32);
         std::srand(static_cast<unsigned>(std::time(nullptr)));
         for (int i = 0; i < 32; i++) {
             fp.hardware_rng[i] = std::rand() % 256;
@@ -235,7 +240,10 @@ bool PiHash::VerifyHardware(const HardwareFingerprint& fingerprint) {
 // This function is compiled into the binary and intentionally obscured
 // to prevent reverse-engineering and spoofing attacks.
 bool PiHash::_VerifyHardwareInternal(const HardwareFingerprint& fp) {
-    // Check for Raspberry Pi markers (SEALED IN BINARY)
+    // TEMP: Skip VideoCore verification for now
+    // TODO: Safely integrate VideoCore once segfault is resolved
+    
+    // Check for Raspberry Pi markers in device tree
     const std::string& model = fp.hardware_model;
     
     // Model validation (case-insensitive)

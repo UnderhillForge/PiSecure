@@ -39,6 +39,7 @@ pybind11_add_module(pisecure_cpp_hw
 pybind11_add_module(pisecure_cpp_pihash
     cpp/bindings/pybind_pihash.cpp
     cpp/hw/pihash.cpp
+    cpp/hw/videocore_mailbox.cpp
     cpp/crypto/sha256.cpp
 )
 
