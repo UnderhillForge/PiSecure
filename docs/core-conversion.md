@@ -3,17 +3,23 @@
 This document outlines our migration of PiSecure’s crypto-critical paths from Python to C++, drawing architectural inspiration from Bitcoin Core’s `CSHA256`, `uint256`, `arith_uint256`, and `pow.cpp`. We will not copy code; we adopt patterns and interfaces for safety, performance, and maintainability on Raspberry Pi hardware.
 
 ## Goals
-- Secure, constant-time hashing and proof-of-work checks.
+- **SHA-256 for validation only** (transaction/block hashing, merkle trees, non-mining tasks).
+- **PiHash remains the exclusive mining algorithm** (hardware-verified, Pi-only, non-negotiable).
+- Secure, constant-time hashing and proof-of-work checks using PiHash.
 - Overflow-safe 256-bit arithmetic and byte-oriented `uint256` storage.
-- Pi hardware verification module that yields a hardware token for mining.
+- Pi hardware verification module that yields a hardware token mixed into PiHash mining.
 - Clean pybind11 bindings to incrementally replace Python hot paths.
 - ARM/NEON-aware performance on Pi 0→5; graceful fallbacks elsewhere.
 
 ## High-Value Inspiration (from Bitcoin Core)
-- **SHA-256 context (`CSHA256`)**: Incremental, no dynamic allocation, batch hashing.
+- **SHA-256 context (`CSHA256`)**: Incremental, no dynamic allocation, for validation/block construction (NOT mining).
 - **`uint256`**: 32-byte opaque storage for hashes, hex/bytes conversions.
 - **`arith_uint256`**: Limb-based 256-bit arithmetic (shifts, compact difficulty encoding).
 - **`pow.cpp`**: Target comparison via `hash <= target` (avoids per-iteration hex/int conversions).
+
+**Critical Separation**:
+- **SHA-256**: Used only for non-mining (transaction hashing, merkle trees, block header assembly).
+- **PiHash**: The ONLY mining algorithm; hardware-verified, Pi-exclusive, includes hardware token in hash computation.
 
 ## PiSecure C++ Modules and APIs
 
@@ -23,8 +29,10 @@ This document outlines our migration of PiSecure’s crypto-critical paths from 
   - `void sha256(const uint8_t* in, size_t len, uint8_t out[32]);`
   - `void sha256d64(uint8_t* out, const uint8_t* in, size_t blocks);` (batch double-SHA for mining)
   - ARM/NEON/SHA2-accelerated `Transform` path with runtime feature detection.
-- `pihash.h/.cpp`
-  - Glue to mix Pi hardware token and memory-hard steps, producing final PoW hash.
+- `pihash.h/.cpp` (Mining-exclusive)
+  - **STRICT**: PiHash is the ONLY mining algorithm on Pi hardware.
+  - Multi-stage pipeline: hardware token seed → memory-hard mix → CPU-optimized finalize → leading-zero verification.
+  - Hardware token (SoC serial, OTP, timing fingerprint) is cryptographically bound to hash; no offline mining possible.
 
 ### consensus/
 - `uint256.h/.cpp`
@@ -56,16 +64,19 @@ This document outlines our migration of PiSecure’s crypto-critical paths from 
   - Zero-copy buffers, GIL release in hot loops.
 
 ## Proof-of-Work Strategy
-- Store difficulty as `Big256 target` (compact or derived from leading zeros).
+- **PiHash mining loop**: header || nonce || hardware_token → PiHash (multi-stage) → leading-zero count → compare.
+- Store difficulty as `Big256 target` (derived from leading-zero count).
 - Compare using `hash <= target` in constant time (limb-wise, fixed-iteration).
 - Keep existing leading-zeros difficulty short-term; add compact encoding for future retarget rules.
-- Hash pipeline: `header || nonce || hw_token` → `Sha256Ctx` (or `sha256d64`) → `Blob256` → compare.
+- **SHA-256 is NOT used in mining**; only for validation (transaction/block digests).
 
-## SHA-256 Strategy
+## SHA-256 Strategy (Validation Only)
 - Incremental context (`Sha256Ctx`) with stack fields; no heap in hot paths.
-- Batch double-SHA (`sha256d64`) for mining throughput.
+- Used for: transaction digests, merkle tree construction, block header assembly.
+- **NOT used in mining** (PiHash is mining-exclusive).
+- Batch double-SHA (`sha256d64`) for non-mining throughput (merkle tree computation, bulk validation).
 - Runtime ARM acceleration: SHA2 extensions where available; NEON intrinsics fallback.
-- Midstate support for fixed headers.
+- Midstate support for fixed headers (validation paths).
 
 ## Hardware Verifier (Pi-only Enforcement)
 - Detect SoC base (BCM2708/2709/2710/2711/2712) → `mmap` select ranges.
@@ -81,13 +92,14 @@ This document outlines our migration of PiSecure’s crypto-critical paths from 
 - Release GIL in hashing/PoW loops.
 
 ## Migration Plan (Stepwise)
-1. Replace Python `count_zero_bits` and `hashlib.sha256()` in validation with C++ (`leading_zero_bits`, `sha256`).
-2. Introduce `check_pow()` using `Blob256`/`Big256`; compare `hash <= target` (constant-time).
-3. Update nonce search loop to use `sha256d64`/midstate; keep Python orchestration initially.
-4. Integrate HardwareVerifier to produce `hardware_token` mixed into mining hash; keep mock mode for non-Pi.
-5. Expand to full validator path; add compact difficulty adapters.
-6. Benchmarks: throughput (hashes/sec), latency (entropy read), correctness (vectors), Pi 0→5.
-7. Package (CMake + scikit-build); CI with sanitizers and fuzzers.
+1. **Non-mining crypto**: Replace Python SHA-256 calls in transaction/block hashing with C++ (`sha256`, `Sha256Ctx`).
+2. Replace Python `count_zero_bits` and leading-zero validation with C++ (`leading_zero_bits`).
+3. Introduce `check_pow()` using `Blob256`/`Big256`; compare `hash <= target` (constant-time).
+4. Integrate HardwareVerifier to produce `hardware_token` mixed into PiHash mining (C++ PiHash implementation).
+5. Replace Python PiHash nonce loop with C++ PiHash (multi-stage) + hardware token binding.
+6. Expand to full validator path; add compact difficulty adapters.
+7. Benchmarks: throughput (hashes/sec for SHA-256 validation, PiHash nonces), latency (entropy read), Pi 0→5.
+8. Package (CMake + scikit-build); CI with sanitizers and fuzzers.
 
 ## Testing & Security Checklist
 - Constant-time big-int comparisons; branchless inner loops.
