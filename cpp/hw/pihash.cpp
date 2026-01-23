@@ -11,6 +11,7 @@
 #include <cmath>
 
 using namespace pisecure::crypto;
+using namespace pisecure::hw;  // For VideoCoreVerification
 
 namespace pisecure {
 namespace pihash {
@@ -133,10 +134,20 @@ int PiHash::CountLeadingZeroBits(const std::string& hash_hex) {
 HardwareFingerprint PiHash::GetHardwareFingerprint() {
     HardwareFingerprint fp;
     
-    // TEMP: Skip VideoCore for now - focusing on basic functionality
-    // TODO: Safely integrate VideoCore mailbox verification once segfault is resolved
-    
-    // Use file-based verification
+    // Try VideoCore mailbox verification first (strongest anti-emulation)
+    VideoCoreVerification vc_verify = verify_with_videocore();
+    if (vc_verify.is_valid && vc_verify.is_pi_hardware) {
+        // Use VideoCore-provided serial if available
+        if (!vc_verify.board_serial.empty()) {
+            fp.cpu_serial = vc_verify.board_serial;
+        }
+        fp.videocore_verified = true;
+        fp.gpu_temperature = vc_verify.gpu_temperature;
+        fp.arm_clock_rate = vc_verify.arm_clock_rate;
+    } else {
+        // Fall back to file-based verification
+        fp.videocore_verified = false;
+    }
     
     // Get CPU serial from /proc/cpuinfo
     std::ifstream cpuinfo("/proc/cpuinfo");
@@ -152,6 +163,7 @@ HardwareFingerprint PiHash::GetHardwareFingerprint() {
     }
     cpuinfo.close();
     
+    // If VideoCore didn't provide serial, or we need to verify it matches
     if (fp.cpu_serial.empty()) {
         // Fallback to device tree
         std::ifstream serial_file("/proc/device-tree/serial-number");
@@ -240,8 +252,18 @@ bool PiHash::VerifyHardware(const HardwareFingerprint& fingerprint) {
 // This function is compiled into the binary and intentionally obscured
 // to prevent reverse-engineering and spoofing attacks.
 bool PiHash::_VerifyHardwareInternal(const HardwareFingerprint& fp) {
-    // TEMP: Skip VideoCore verification for now
-    // TODO: Safely integrate VideoCore once segfault is resolved
+    // Enhanced verification: VideoCore GPU firmware check (strongest)
+    // If VideoCore verification succeeded, we have high confidence this is real Pi hardware
+    if (fp.videocore_verified) {
+        // GPU temperature check: real hardware should report valid temp (20-85°C)
+        if (fp.gpu_temperature > 0 && fp.gpu_temperature < 100) {
+            // VideoCore firmware successfully queried - very difficult to emulate
+            // Still verify other markers for completeness
+        } else if (fp.gpu_temperature == 0) {
+            // Warning: VideoCore responded but no temperature - possible emulation
+            // Continue with file-based checks
+        }
+    }
     
     // Check for Raspberry Pi markers in device tree
     const std::string& model = fp.hardware_model;

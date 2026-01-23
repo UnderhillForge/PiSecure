@@ -29,6 +29,13 @@ struct HardwareFingerprint {
     std::vector<uint8_t> hardware_rng;
     std::string unique_id;
     uint64_t timestamp;
+    
+    // VideoCore GPU firmware verification (enhanced anti-emulation)
+    bool videocore_verified = false;
+    uint32_t gpu_temperature = 0;
+    uint32_t arm_clock_rate = 0;
+    uint32_t throttling_status = 0;
+    std::string firmware_revision;
 };
 
 class PiHash {
