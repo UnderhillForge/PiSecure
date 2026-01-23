@@ -39,6 +39,10 @@ Sha256Ctx& Sha256Ctx::reset() {
 }
 
 Sha256Ctx& Sha256Ctx::write(const uint8_t* data, size_t len) {
+    if (!data && len > 0) {
+        return *this;
+    }
+    
     while (len > 0) {
         size_t space = 64 - buffer_len_;
         size_t chunk = (len < space) ? len : space;
@@ -106,10 +110,11 @@ void Sha256Ctx::Transform(const uint8_t* block) {
 }
 
 void Sha256Ctx::finalize(uint8_t out[32]) {
-    // Padding
-    uint8_t pad[64];
+    // Padding - need buffer for worst case: 64 bytes padding + 8 bytes length = 72 total
+    uint8_t pad[72];  // FIXED: Was 64, causing buffer overflow when padlen=64
     uint64_t bits = bytes_ * 8;
     size_t padlen = (bytes_ % 64 < 56) ? (56 - bytes_ % 64) : (120 - bytes_ % 64);
+    
     
     pad[0] = 0x80;
     std::memset(pad + 1, 0, padlen - 1);
