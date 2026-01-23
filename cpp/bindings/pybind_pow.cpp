@@ -31,7 +31,15 @@ PYBIND11_MODULE(pisecure_cpp_pow, m) {
         .def_readwrite("negative", &CompactDecoded::negative)
         .def_readwrite("overflow", &CompactDecoded::overflow)
         .def("__repr__", [](const CompactDecoded& c) {
-            return "<CompactDecoded target=" + c.target.to_hex() + 
+            uint8_t bytes[32];
+            c.target.to_bytes(bytes);
+            std::string hex;
+            for (int i = 31; i >= 0; i--) {
+                char buf[3];
+                snprintf(buf, sizeof(buf), "%02x", bytes[i]);
+                hex += buf;
+            }
+            return "<CompactDecoded target=" + hex + 
                    " negative=" + std::string(c.negative ? "true" : "false") + 
                    " overflow=" + std::string(c.overflow ? "true" : "false") + ">";
         });

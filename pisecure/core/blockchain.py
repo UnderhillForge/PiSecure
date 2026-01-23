@@ -749,6 +749,9 @@ class SignBlock:
         algorithm: str = "pihash",
         precomputed_hash: str = None,
         challenge_response: Dict = None,
+        validators: List[str] = None,
+        validation_count: int = None,
+        validation_timestamp: float = None,
     ):
         self.index = index
         self.transactions = transactions
@@ -763,9 +766,14 @@ class SignBlock:
         )  # ChallengeResponse dict with ZK proof
 
         # Byzantine validation tracking
-        self.validators = set()  # Set of node IDs that validated
-        self.validation_count = 0  # Number of validators who validated (0-5+)
-        self.validation_timestamp = None  # When first validated
+        self.validators = set(validators or [])  # Set of node IDs that validated
+        if validation_count is None:
+            self.validation_count = len(self.validators)
+        else:
+            self.validation_count = validation_count
+
+        # When first validated (network-provided or local)
+        self.validation_timestamp = validation_timestamp
 
         # Cache PiHash instance to avoid re-initialization on every hash calculation
         self._pihash_instance = None

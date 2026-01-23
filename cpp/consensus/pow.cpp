@@ -186,7 +186,8 @@ CompactDecoded decode_compact(uint32_t nbits) {
 Big256 get_pow_limit() {
     // PiSecure PoW limit: generous initial limit
     // Can be tuned per network (mainnet/testnet)
-    Big256 limit = Big256::from_compact(0x207fffff, false, false).target;
+    bool neg = false, overflow = false;
+    Big256 limit = Big256::from_compact(0x207fffff, neg, overflow);
     return limit;
 }
 

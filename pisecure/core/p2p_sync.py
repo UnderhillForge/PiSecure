@@ -542,6 +542,14 @@ class P2PSyncManager:
                         f"📛 First block is not genesis (index={block_data.get('index')})"
                     )
                     return False
+
+                # Genesis previous_hash must be empty/None/'genesis'
+                genesis_prev = block_data.get("previous_hash")
+                if genesis_prev not in ("", None, "genesis"):
+                    self.logger.warning(
+                        "📛 Genesis block has unexpected previous_hash value"
+                    )
+                    return False
                 self.logger.info(
                     f"✅ Genesis block accepted (hash: {block_data.get('hash', 'N/A')[:16]}...)"
                 )
@@ -581,6 +589,8 @@ class P2PSyncManager:
         """Switch to a new blockchain with Byzantine validation tracking"""
         self.logger.info(f"🔄 Switching to new chain with {len(new_chain)} blocks")
 
+        previous_length = len(self.blockchain.chain)
+
         try:
             # Convert dict blocks to SignBlock objects with validation metadata
             from .blockchain import SignBlock
@@ -617,13 +627,20 @@ class P2PSyncManager:
             # Replace the blockchain
             self.blockchain.chain = sign_blocks
 
+            # Track known blocks for propagation and duplication checks
+            for block_data in new_chain:
+                block_hash = block_data.get("hash")
+                if block_hash:
+                    self.known_blocks.add(block_hash)
+
             # Save to disk
             self.blockchain.save_chain()
 
             self.logger.info(
                 f"✅ Chain switched successfully - now at {len(self.blockchain.chain)} blocks"
             )
-            self.sync_stats["blocks_synced"] += len(new_chain)
+            delta_blocks = max(0, len(new_chain) - previous_length)
+            self.sync_stats["blocks_synced"] += delta_blocks
 
         except Exception as e:
             self.logger.error(f"❌ Failed to switch chain: {e}")
@@ -1247,6 +1264,20 @@ class BlockPropagator:
             "block_height": block_data.get("index"),
             "timestamp": time.time(),
         }
+
+    def _update_propagation_time(self, new_time: float):
+        """Update rolling average propagation time for propagations."""
+        propagated = self.propagation_stats["blocks_propagated"]
+        if propagated <= 0:
+            # Avoid division by zero; initialize with the first measurement
+            self.propagation_stats["propagation_time_avg"] = new_time
+            return
+
+        current_avg = self.propagation_stats["propagation_time_avg"]
+        # Simple moving average using count
+        self.propagation_stats["propagation_time_avg"] = (
+            (current_avg * (propagated - 1)) + new_time
+        ) / propagated
 
     def _send_to_peer(self, peer_id: str, message: Dict):
         """Send message to peer using P2PSyncManager's hybrid method."""
