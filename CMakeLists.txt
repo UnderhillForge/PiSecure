@@ -29,6 +29,13 @@ pybind11_add_module(pisecure_cpp_pow
     cpp/consensus/uint256.cpp
 )
 
+# Hardware verification module (Pi-specific)
+pybind11_add_module(pisecure_cpp_hw
+    cpp/bindings/pybind_hw_verifier.cpp
+    cpp/hw/hw_verifier.cpp
+)
+
+
 # Optional: enable SIMD/ARM optimizations
 if (UNIX AND NOT APPLE)
     # Linux: detect ARM and enable NEON/SHA2 where available
@@ -52,6 +59,9 @@ set_target_properties(pisecure_cpp_consensus PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pisecure"
 )
 set_target_properties(pisecure_cpp_pow PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pisecure"
+)
+set_target_properties(pisecure_cpp_hw PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pisecure"
 )
 
