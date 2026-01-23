@@ -18,6 +18,15 @@ pybind11_add_module(pisecure_cpp_consensus
     cpp/bindings/pybind_consensus.cpp
     cpp/consensus/uint256.cpp
     cpp/consensus/arith_uint256.cpp
+    cpp/consensus/pow.cpp
+)
+
+# PoW module (Proof-of-Work logic)
+pybind11_add_module(pisecure_cpp_pow
+    cpp/bindings/pybind_pow.cpp
+    cpp/consensus/pow.cpp
+    cpp/consensus/arith_uint256.cpp
+    cpp/consensus/uint256.cpp
 )
 
 # Optional: enable SIMD/ARM optimizations
@@ -40,6 +49,9 @@ set_target_properties(pisecure_cpp_crypto PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pisecure"
 )
 set_target_properties(pisecure_cpp_consensus PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pisecure"
+)
+set_target_properties(pisecure_cpp_pow PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pisecure"
 )
 
