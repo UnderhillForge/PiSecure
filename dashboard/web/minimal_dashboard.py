@@ -1582,13 +1582,13 @@ def wallet_dashboard():
     try:
         # Import wallet functionality
         try:
-            from pisecure.core.wallet import SignWallet
+            from pisecure.core.wallet_v2 import PiSecureWallet, WalletManager # SignWallet
             from pisecure.core.blockchain import SignChain
         except ImportError:
             # Fallback imports
             import sys
             sys.path.append('/opt/pisecure')
-            from pisecure.core.wallet import SignWallet
+            from pisecure.core.wallet_v2 import PiSecureWallet, WalletManager # SignWallet
             from pisecure.core.blockchain import SignChain
 
         # Get wallet data
@@ -1614,7 +1614,7 @@ def wallet_dashboard():
 def get_wallets():
     """API endpoint to get wallet list"""
     try:
-        from pisecure.core.wallet import SignWallet
+        from pisecure.core.wallet_v2 import PiSecureWallet, WalletManager # SignWallet
         wallet = SignWallet()
         wallets = wallet.list_wallets()
         return {'wallets': wallets}
@@ -1625,7 +1625,7 @@ def get_wallets():
 def get_wallet_details(wallet_name):
     """API endpoint to get specific wallet details"""
     try:
-        from pisecure.core.wallet import SignWallet
+        from pisecure.core.wallet_v2 import PiSecureWallet, WalletManager # SignWallet
         wallet = SignWallet()
         wallet_data = wallet.load_wallet(wallet_name)
         if 'error' in wallet_data:
@@ -1638,7 +1638,7 @@ def get_wallet_details(wallet_name):
 def create_wallet():
     """API endpoint to create new wallet"""
     try:
-        from pisecure.core.wallet import SignWallet
+        from pisecure.core.wallet_v2 import PiSecureWallet, WalletManager # SignWallet
         import secrets
 
         wallet_name = request.form.get('wallet_name', f'wallet_{secrets.token_hex(4)}')
@@ -1663,7 +1663,7 @@ def create_wallet():
 def transfer_tokens():
     """API endpoint to transfer tokens"""
     try:
-        from pisecure.core.wallet import SignWallet
+        from pisecure.core.wallet_v2 import PiSecureWallet, WalletManager # SignWallet
 
         recipient = request.form.get('recipient')
         amount = float(request.form.get('amount', 0))
@@ -1691,7 +1691,7 @@ def transfer_tokens():
 def backup_wallet():
     """API endpoint to backup wallet"""
     try:
-        from pisecure.core.wallet import SignWallet
+        from pisecure.core.wallet_v2 import PiSecureWallet, WalletManager # SignWallet
         import os
 
         wallet_name = request.form.get('wallet_name')
@@ -1737,7 +1737,7 @@ def backup_wallet():
 def restore_wallet():
     """API endpoint to restore wallet from backup"""
     try:
-        from pisecure.core.wallet import SignWallet
+        from pisecure.core.wallet_v2 import PiSecureWallet, WalletManager # SignWallet
         import os
 
         backup_data = request.form.get('backup_data')

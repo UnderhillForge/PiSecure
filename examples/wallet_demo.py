@@ -14,7 +14,7 @@ import os
 # Add PiSecure to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from pisecure.core.wallet import SignWallet
+from pisecure.core.wallet_v2 import PiSecureWallet, WalletManager # SignWallet
 from pisecure.core.blockchain import SignChain
 
 

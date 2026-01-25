@@ -37,7 +37,7 @@ import secrets
 
 # PiSecure imports
 from ..core.blockchain import SignChain
-from ..core.wallet import SignWallet
+from ..core.wallet_v2 import PiSecureWallet, WalletManager # SignWallet
 from ..core.nat_traversal import node_discovery
 from ..network.discovery import PeerDiscovery
 from ..core.p2p_sync import P2PSyncManager

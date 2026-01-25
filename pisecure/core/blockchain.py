@@ -34,11 +34,23 @@ try:
 except ImportError:
     HYBRID_STORAGE_AVAILABLE = False
 
-# Import PiHash for hardware-verified mining
+# Import PiHash for hardware-verified mining (C++ mandatory)
 try:
-    from .pihash import PiHash, compute_pihash, hash_meets_zero_bits, count_zero_bits
+    # C++ backend (required): compute and core class
+    from pisecure.kernel.pihash_cpp import (
+        PiHash as PiHashCpp,
+        compute_pihash as compute_pihash_cpp,
+        is_pihash_available,
+    )
 
-    PIHASH_AVAILABLE = True
+    # Python helpers (difficulty/counting only)
+    from pisecure.kernel.pihash import (
+        hash_meets_zero_bits,
+        count_zero_bits,
+        PiHash as PiHashPy,
+    )
+
+    PIHASH_AVAILABLE = is_pihash_available()
 except ImportError:
     PIHASH_AVAILABLE = False
 
@@ -755,6 +767,7 @@ class SignBlock:
         validators: List[str] = None,
         validation_count: int = None,
         validation_timestamp: float = None,
+        hardware_proof: Dict = None,
     ):
         self.index = index
         self.transactions = transactions
@@ -768,6 +781,10 @@ class SignBlock:
             challenge_response or {}
         )  # ChallengeResponse dict with ZK proof
 
+        # Hardware Verification Proof (VideoCore + Pi markers)
+        # Included by miners, validated by all nodes (cross-platform)
+        self.hardware_proof = hardware_proof or {}
+
         # Byzantine validation tracking
         self.validators = set(validators or [])  # Set of node IDs that validated
         if validation_count is None:
@@ -778,16 +795,15 @@ class SignBlock:
         # When first validated (network-provided or local)
         self.validation_timestamp = validation_timestamp
 
-        # Cache PiHash instance to avoid re-initialization on every hash calculation
+        # Cache PiHash (Python) instance for hardware fingerprint only
         self._pihash_instance = None
         if (
             not os.environ.get("PISECURE_VALIDATE_ONLY") == "1"
             and algorithm == "pihash"
         ):
             try:
-                from .pihash import PiHash
-
-                self._pihash_instance = PiHash()
+                # Use Python PiHash solely to gather hardware fingerprint data
+                self._pihash_instance = PiHashPy()
             except Exception:
                 pass
 
@@ -848,19 +864,17 @@ class SignBlock:
                 "Only Raspberry Pi hardware with PiSecure software can mine blocks."
             )
 
-        # PiHash is mandatory - no fallbacks allowed
+        # PiHash (C++) is mandatory - no fallbacks allowed
         if not PIHASH_AVAILABLE:
             raise ValueError(
                 "CRITICAL: PiHash library not available. "
                 "PiSecure requires PiHash for all mining operations."
             )
-
         try:
             # Use cached PiHash instance to avoid re-initialization
             if self._pihash_instance is None:
-                from .pihash import PiHash
-
-                self._pihash_instance = PiHash()
+                # Instantiate Python helper for hardware fingerprint only
+                self._pihash_instance = PiHashPy()
 
             pihash = self._pihash_instance
             hw_fingerprint = pihash._get_hardware_fingerprint()
@@ -872,10 +886,53 @@ class SignBlock:
                     "PiSecure mining requires verified Raspberry Pi hardware."
                 )
 
-            # Compute PiHash with hardware verification
-            from .pihash import compute_pihash
+            # Compute PiHash via mandatory C++ backend (hardware verification internal)
 
-            return compute_pihash(block_string.encode(), self.nonce, hw_fingerprint)
+            # Capture hardware proof for network validation (cross-platform)
+            # This allows validators on Mac/Windows/Linux to verify Pi authenticity
+            # Include additional VideoCore mailbox-derived fields that are hard to emulate
+            mac_addr = hw_fingerprint.get("mac_address", "") or ""
+            mac_oui = ""
+            try:
+                parts = mac_addr.lower().split(":")
+                if len(parts) >= 3:
+                    mac_oui = ":".join(parts[:3])
+            except Exception:
+                mac_oui = ""
+
+            self.hardware_proof = {
+                "videocore_verified": hw_fingerprint.get("videocore_verified", False),
+                "gpu_temperature": hw_fingerprint.get("gpu_temperature", 0),
+                # Optional second reading to detect static/fake temps
+                "gpu_temperature2": hw_fingerprint.get("gpu_temperature2", None),
+                # Measured clocks (Hz)
+                "arm_clock_rate": hw_fingerprint.get("arm_clock_rate", 0),
+                "vc_core_clock_rate": hw_fingerprint.get(
+                    "vc_core_clock_rate", hw_fingerprint.get("core_clock_rate", 0)
+                ),
+                # Throttling/under-voltage status bitfield (mailbox tag 0x0003000A)
+                "throttling_status": hw_fingerprint.get("throttling_status", None),
+                # Core voltage (mV or V depending on firmware; store raw)
+                "core_voltage": hw_fingerprint.get("core_voltage", None),
+                # Board revision (mailbox tag 0x00010002)
+                "board_revision": hw_fingerprint.get("board_revision", None),
+                # Firmware revision/build info (mailbox tag 0x00000001)
+                "firmware_revision": hw_fingerprint.get("firmware_revision", None),
+                # MAC OUI prefix for Raspberry Pi devices
+                "mac_oui": mac_oui,
+                # Privacy: hash only CPU serial
+                "cpu_serial_hash": sha256_hex(hw_fingerprint.get("cpu_serial", ""))[
+                    :16
+                ],
+                "hardware_model": hw_fingerprint.get("hardware_model", "Unknown"),
+                "proof_timestamp": hw_fingerprint.get("timestamp", time.time()),
+                "mining_algorithm": "pihash",
+                # Optional basic entropy sample from hwrng
+                "entropy_hex": hw_fingerprint.get("entropy_hex", None),
+            }
+
+            # C++ compute does not require explicit fingerprint parameter
+            return compute_pihash_cpp(block_string.encode(), self.nonce)
 
         except Exception as e:
             # No fallbacks - PiHash failure prevents block creation
@@ -1285,6 +1342,10 @@ class SignBlock:
         # Include Phase 1: Mining Challenge System
         if self.challenge_response:
             block_dict["challenge_response"] = self.challenge_response
+
+        # Include Hardware Proof (for cross-platform validation)
+        if hasattr(self, "hardware_proof") and self.hardware_proof:
+            block_dict["hardware_proof"] = self.hardware_proof
 
         return block_dict
 
@@ -1890,7 +1951,7 @@ class SignChain:
 
             # Fallback: check if wallet exists locally
             try:
-                from .wallet import SignWallet
+                from .wallet_v2 import PiSecureWallet
 
                 wallet = SignWallet()
                 wallet_data = wallet.load_wallet(wallet_address)
@@ -2071,7 +2132,13 @@ class SignChain:
         if validator_node_id in self.validator_rewards_per_block[block_index]:
             return None
 
-        reward_amount = 0.5
+        # Calculate percentage-based reward (1% of block reward distributed among validators)
+        from pisecure.common.config import Config
+
+        block_reward = Config.MINE_BLOCK_REWARD
+        total_validator_pool = block_reward * Config.VALIDATOR_REWARDS_PERCENTAGE
+        validator_count = block.validation_count if block.validation_count > 0 else 1
+        reward_amount = total_validator_pool / validator_count
 
         reward_tx = {
             "type": "validation_reward",

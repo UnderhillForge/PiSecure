@@ -868,7 +868,144 @@ Export wallet public information.
 
 ---
 
-## 3. PiNS (Pi Name System) API
+## 3. Wallet Management API (v2)
+
+**Note:** PiSecure Wallet v2 replaces the old wallet system with Bitcoin Core best practices.
+See `pisecure/core/wallet_v2.py` for implementation.
+
+### Wallet v2 Features
+- HD Wallet with BIP32-style derivation
+- UTXO tracking and coin selection algorithms
+- Proper encryption (Fernet + PBKDF2)
+- Watch-only wallet mode
+- Address book management
+- Fee estimation
+- SQLite database backend
+- PiNS integration
+
+### CLI Commands (pswallet_v2.py)
+
+#### Create Wallet
+```bash
+python scripts/pswallet_v2.py create wallet_name --passphrase "secure_pass"
+```
+
+#### Generate New Address
+```bash
+python scripts/pswallet_v2.py getnewaddress wallet_name --label "Savings"
+```
+
+#### Get Balance
+```bash
+python scripts/pswallet_v2.py getbalance wallet_name
+```
+
+#### Send Transaction
+```bash
+python scripts/pswallet_v2.py send wallet_name recipient_address amount --fee-rate 0.0001
+```
+
+#### Manage Address Book
+```bash
+python scripts/pswallet_v2.py addlabel wallet_name address label
+python scripts/pswallet_v2.py getlabel wallet_name address
+```
+
+#### List Unspent Outputs
+```bash
+python scripts/pswallet_v2.py listunspent wallet_name --minconf 1
+```
+
+#### Wallet Encryption
+```bash
+python scripts/pswallet_v2.py encrypt wallet_name passphrase
+python scripts/pswallet_v2.py unlock wallet_name passphrase
+```
+
+#### Backup
+```bash
+python scripts/pswallet_v2.py backup wallet_name /path/to/backup.db
+```
+
+#### Wallet Info
+```bash
+python scripts/pswallet_v2.py info wallet_name
+```
+
+---
+
+## 4. PiNS (Pi Name System) API
+
+**Note:** PiNS is now integrated with Wallet v2. Use CLI commands for PiNS operations.
+
+### PiNS CLI Commands
+
+#### Check Name Availability
+```bash
+python scripts/pswallet_v2.py checkname wallet_name "alice"
+```
+
+**Output:**
+```
+✅ Name 'alice.pisecure' is available!
+   Registration fee: 5 tokens
+   Estimated confirmation: 600 seconds
+```
+
+#### Register PiNS Name
+```bash
+python scripts/pswallet_v2.py registername wallet_name "alice" --years 2
+```
+
+**Output:**
+```
+✅ Name 'alice.pisecure' registered successfully!
+   Address: <wallet_address>
+   Registered: <timestamp>
+   Expires: <timestamp>
+   Fee paid: 10 tokens
+   Status: pending_mining
+```
+
+#### Resolve PiNS Name to Address
+```bash
+python scripts/pswallet_v2.py resolvename wallet_name "alice"
+```
+
+**Output:**
+```
+✅ Name 'alice.pisecure' resolves to:
+   Address: <wallet_address>
+   Registered: <timestamp>
+   Expires: <timestamp>
+   Years remaining: 1.9
+```
+
+#### List Wallet PiNS Names
+```bash
+python scripts/pswallet_v2.py listnames wallet_name
+```
+
+**Output:**
+```
+PiNS names owned by this wallet:
+  ✅ alice.pisecure
+     Status: active
+     Years remaining: 1.9
+  ✅ bob.pisecure
+     Status: active
+     Years remaining: 0.5
+```
+
+### PiNS Features
+- Name registration with expiration (configurable years)
+- Name resolution to wallet address
+- Automatic expiration tracking
+- Reserved name list (foundation, genesis, admin, system, pisecure)
+- Support for alphanumeric, hyphens, and underscores
+- Integrated with wallet UTXO system
+
+### REST API Endpoints (Legacy)
 
 #### GET /names/check/{name}
 Check if name is available.
@@ -882,6 +1019,7 @@ Check if name is available.
   "estimated_confirmation": 600
 }
 ```
+````
 
 #### GET /names/{name}
 Resolve name to address.

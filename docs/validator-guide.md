@@ -87,7 +87,60 @@ print(f"Challenge valid: {is_valid}")  # True/False on any platform
 
 ---
 
-## Running a Validator Node
+## Validator Rewards
+
+### Reward Structure
+- **Percentage-Based**: 1% of block reward distributed among validators (configurable)
+- **Example**: 50 314ST block with 5 validators = 0.1 314ST per validator
+- **Instant Accumulation**: Rewards accumulate in real-time as blocks confirm
+
+### Python Validators (pisecure)
+Rewards automatically tracked in blockchain:
+```bash
+# Check validator rewards
+pisecure wallet validator-rewards --wallet-id YOUR_WALLET
+
+# View reward history
+pswallet validator-history YOUR_WALLET --limit 50
+```
+
+### C++ Daemon Validators (pisecured)
+Rewards accumulate in a persistent "bucket" that survives reboots:
+
+```bash
+# Start pisecured with validator rewards (enabled by default)
+pisecured --validate-only
+
+# Check bucket balance
+./validator-bucket balance
+
+# View reward history
+./validator-bucket history --limit 20
+
+# View detailed statistics
+./validator-bucket stats
+
+# Configure auto-sweep to a linked wallet
+./validator-bucket auto-sweep YOUR_WALLET 0.5
+```
+
+### Bucket Features
+- **Persistent Storage**: JSON file survives reboots (`~/.pisecure/validator_bucket.json`)
+- **Automatic Backups**: `.bak` file created on each save
+- **Thread-Safe**: Safe for concurrent access
+- **Detailed History**: Last 100 rewards tracked with full metadata
+
+### Configuration
+```bash
+# Disable validator rewards
+pisecured --no-validator-rewards
+
+# Custom percentage (default 1%)
+pisecured --validator-rewards-percentage 0.02  # 2%
+
+# Custom bucket location
+pisecured --validator-bucket /custom/path/bucket.json
+```
 
 ### Quick Start (Any Platform)
 

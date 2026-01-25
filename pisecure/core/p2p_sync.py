@@ -32,6 +32,36 @@ from ..network.discovery import PeerDiscovery
 
 logger = logging.getLogger(__name__)
 
+# Centralized hardware proof thresholds/prefixes for easy updates
+# Revision prefixes and OUIs are based on Raspberry Pi docs:
+# https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#board-revisions
+# https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/ethernet/broadcom/bcmgenet.c (OUI references)
+HARDWARE_PROOF_LIMITS = {
+    "temp_min_c": 20,
+    "temp_max_c": 100,
+    "temp_variance_max_c": 6,
+    "proof_time_skew_sec": 300,
+    "arm_clock_range_hz": (800_000_000, 3_000_000_000),
+    "vc_clock_range_hz": (300_000_000, 900_000_000),
+    "core_voltage_range_v": (0.9, 1.4),
+}
+
+REVISION_PREFIXES = (
+    "a0",  # Pi 3 family
+    "b0",  # Some Pi 4 variants
+    "c0",  # Pi 4/5 variants
+    "d0",  # Pi 5 variants
+    "902120",  # Pi Zero 2 W exact code
+)
+
+MAC_OUI_PREFIXES = (
+    "b8:27:eb",
+    "dc:a6:32",
+    "e4:5f:01",
+)
+
+THROTTLING_STUB_VALUES = (0x0, 0x50000)
+
 
 class P2PSyncManager:
     """
@@ -446,8 +476,215 @@ class P2PSyncManager:
             )
             return False
 
+        # CROSS-PLATFORM HARDWARE PROOF VALIDATION
+        # Only required for PiHash-mined blocks. Legacy/test blocks may omit.
+        algorithm = block_data.get("algorithm", "legacy")
+        if algorithm == "pihash" and not self._validate_hardware_proof(block_data):
+            self.logger.debug(
+                f"❌ Hardware proof validation failed at index {block_data.get('index')}"
+            )
+            return False
+
         self.logger.debug(
-            f"✅ Block {block_data.get('index')} passed PoW check ({actual_bits} bits)"
+            f"✅ Block {block_data.get('index')} passed all validations ({actual_bits} bits, hardware proof valid)"
+        )
+        return True
+
+    def _validate_hardware_proof(self, block_data: Dict) -> bool:
+        """
+        Validate hardware proof in block (CROSS-PLATFORM)
+
+        This validation works on ANY platform (Mac/Windows/Linux/Pi)!
+        - Miners (Pi only) CREATE the proof using VideoCore
+        - Validators (any platform) CHECK the proof exists and meets criteria
+
+        No Pi hardware required for validation!
+        """
+        hardware_proof = block_data.get("hardware_proof")
+
+        # Genesis block (index 0) doesn't require hardware proof
+        if block_data.get("index", 0) == 0:
+            return True
+
+        # For blocks after genesis, hardware proof is required
+        if not hardware_proof:
+            self.logger.debug("❌ Missing hardware_proof field")
+            return False
+
+        # Check 1: VideoCore verification flag
+        # Real Pi hardware will have videocore_verified=True
+        if not hardware_proof.get("videocore_verified", False):
+            self.logger.debug("❌ VideoCore not verified (not mined on real Pi)")
+            return False
+
+        # Check 2: GPU temperature in reasonable range
+        limits = HARDWARE_PROOF_LIMITS
+        gpu_temp = hardware_proof.get("gpu_temperature", 0)
+        if gpu_temp < limits["temp_min_c"] or gpu_temp > limits["temp_max_c"]:
+            self.logger.debug(
+                f"❌ Invalid GPU temperature: {gpu_temp}°C (expected {limits['temp_min_c']}-{limits['temp_max_c']})"
+            )
+            return False
+        # Optional second reading: require small variance under load
+        gpu_temp2 = hardware_proof.get("gpu_temperature2")
+        if gpu_temp2 is not None:
+            if abs(float(gpu_temp2) - float(gpu_temp)) > limits["temp_variance_max_c"]:
+                self.logger.debug(
+                    f"❌ GPU temp variance too high: {gpu_temp} vs {gpu_temp2}"
+                )
+                return False
+
+        # Check 3: Proof timestamp is recent (within 5 minutes of block timestamp)
+        proof_ts = hardware_proof.get("proof_timestamp", 0)
+        block_ts = block_data.get("timestamp", 0)
+        if abs(proof_ts - block_ts) > limits["proof_time_skew_sec"]:
+            self.logger.debug(
+                f"❌ Proof timestamp mismatch: {abs(proof_ts - block_ts)}s"
+            )
+            return False
+
+        # Check 4: CPU serial hash exists (privacy: we only store hash, not actual serial)
+        if not hardware_proof.get("cpu_serial_hash"):
+            self.logger.debug("❌ Missing CPU serial hash")
+            return False
+
+        # Check 5: Hardware model mentions "Raspberry Pi"
+        model = hardware_proof.get("hardware_model", "")
+        if "Raspberry Pi" not in model and "raspberry pi" not in model.lower():
+            self.logger.debug(f"❌ Invalid hardware model: {model}")
+            return False
+
+        # High-impact checks: throttling bitfield, board revision, measured clocks
+        # Throttling/under-voltage state (mailbox tag 0x0003000A)
+        thr = hardware_proof.get("throttling_status")
+        if thr is not None:
+            try:
+                thr_val = int(thr)
+                # Reject common emulator stubs
+                if thr_val in THROTTLING_STUB_VALUES:
+                    self.logger.debug(
+                        f"❌ Throttling status looks stubbed: 0x{thr_val:05x}"
+                    )
+                    return False
+
+                # If temp > 70°C, expect current/historical throttling bits
+                def _bit_set(v: int, b: int) -> bool:
+                    return (v & (1 << b)) != 0
+
+                if gpu_temp >= 70:
+                    if not (_bit_set(thr_val, 2) or _bit_set(thr_val, 16)):
+                        self.logger.debug(
+                            "❌ High temp without throttling evidence (bits 2/16)"
+                        )
+                        return False
+                # Under-voltage bits (0 and 18) should not both be set persistently
+                # We only have a snapshot; if both set, warn but don't hard-reject
+                if _bit_set(thr_val, 0) and _bit_set(thr_val, 18):
+                    self.logger.debug("⚠️ Under-voltage detected and occurred flags set")
+            except Exception:
+                # If unreadable, continue with other checks
+                pass
+
+        # Board revision whitelist (mailbox tag 0x00010002)
+        rev = hardware_proof.get("board_revision")
+        if rev:
+            try:
+                # Normalize to lowercase hex string
+                rev_str = str(rev).lower().strip()
+                if rev_str.startswith("0x"):
+                    rev_str = rev_str[2:]
+                # Minimal whitelist/prefixes (extendable)
+                if not (
+                    rev_str.startswith(REVISION_PREFIXES)
+                    or rev_str in REVISION_PREFIXES
+                ):
+                    self.logger.debug(f"❌ Unknown board revision: {rev}")
+                    return False
+            except Exception:
+                return False
+
+        # Measured clock rates
+        arm_hz = hardware_proof.get("arm_clock_rate", 0) or 0
+        vc_hz = hardware_proof.get("vc_core_clock_rate", 0) or 0
+        try:
+            arm_hz = int(arm_hz)
+            vc_hz = int(vc_hz)
+        except Exception:
+            arm_hz = 0
+            vc_hz = 0
+
+        arm_min, arm_max = limits["arm_clock_range_hz"]
+        vc_min, vc_max = limits["vc_clock_range_hz"]
+        if not (arm_min <= arm_hz <= arm_max):
+            self.logger.debug(f"❌ ARM clock out of range: {arm_hz} Hz")
+            return False
+        if vc_hz and not (vc_min <= vc_hz <= vc_max):
+            self.logger.debug(f"❌ VC core clock out of range: {vc_hz} Hz")
+            return False
+        # If throttling indicates frequency cap, allow lower than max
+        # Otherwise, ensure not maxed at unrealistic constant values (e.g., 0 or extreme)
+
+        # Core voltage (raw: V or mV)
+        core_v = hardware_proof.get("core_voltage")
+        if core_v is not None:
+            try:
+                v = float(core_v)
+                # If value looks like mV, convert to V
+                if v > 10:
+                    v = v / 1000.0
+                v_min, v_max = limits["core_voltage_range_v"]
+                if not (v_min <= v <= v_max):
+                    self.logger.debug(f"❌ Core voltage out of range: {v:.3f} V")
+                    return False
+            except Exception:
+                # Non-numeric; reject
+                self.logger.debug("❌ Core voltage not numeric")
+                return False
+
+        # Firmware revision recency check (if date embedded)
+        fw = hardware_proof.get("firmware_revision") or ""
+        if isinstance(fw, str) and fw:
+            # Try to extract a year number and require >= 2023
+            import re
+
+            years = re.findall(r"20\d{2}", fw)
+            if years:
+                try:
+                    if max(int(y) for y in years) < 2023:
+                        self.logger.debug("❌ Firmware too old (<2023)")
+                        return False
+                except Exception:
+                    pass
+
+        # MAC address OUI prefixes
+        mac_oui = (hardware_proof.get("mac_oui") or "").lower()
+        if mac_oui:
+            if not any(mac_oui.startswith(p) for p in MAC_OUI_PREFIXES):
+                self.logger.debug(f"❌ MAC OUI not recognized: {mac_oui}")
+                return False
+
+        # Optional entropy sanity check
+        ent_hex = hardware_proof.get("entropy_hex")
+        if ent_hex and isinstance(ent_hex, str):
+            try:
+                # Must be exactly 64 hex chars (32 bytes)
+                if len(ent_hex) != 64:
+                    self.logger.debug("❌ Entropy hex length invalid")
+                    return False
+                b = bytes.fromhex(ent_hex)
+                if not b or all(x == 0 for x in b):
+                    self.logger.debug("❌ Entropy bytes are empty/zeroed")
+                    return False
+                if len(set(b)) < 8:
+                    self.logger.debug("❌ Entropy shows low variability")
+                    return False
+            except Exception:
+                self.logger.debug("❌ Entropy hex parsing failed")
+                return False
+
+        # All checks passed!
+        self.logger.debug(
+            f"✅ Hardware proof valid: VideoCore verified, {gpu_temp}°C, model={model}, arm={arm_hz}Hz, vc={vc_hz}Hz"
         )
         return True
 

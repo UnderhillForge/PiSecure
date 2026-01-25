@@ -61,7 +61,11 @@ pisecure server
 
 ### Start Mining (Raspberry Pi Required)
 ```bash
+# Python CLI (built-in)
 pisecure mine --wallet your_wallet_address
+
+# C++ High-Performance Miner (recommended)
+psminer -w your_wallet_address -t 4
 ```
 
 ### Run Validator (Any Platform)
@@ -107,6 +111,16 @@ balance = await client.get_wallet_balance("address")
 - ✅ **Raspberry Pi optimized** - efficient performance on resource-constrained devices
 
 ---
+
+## 📚 Documentation
+
+- **[Complete Documentation Index](docs/README_DOCS_INDEX.md)** - Full documentation guide
+- **[Detailed README](README_detailed.md)** - Comprehensive feature documentation
+- **[psminer C++ Miner](cpp/psminer/README.md)** - High-performance mining client
+- **[API Documentation](docs/api-documentation.txt)** - REST API reference
+- **[Getting Started](docs/getting-started.md)** - Quick start tutorial
+- **[Validator Guide](docs/validator-guide.md)** - Run validators and earn rewards
+- **[Network Setup](docs/network-setup.md)** - Multi-node configuration
 
 **Ready to build secure IoT applications?** [Get started with PiSecure!](README_detailed.md)
 

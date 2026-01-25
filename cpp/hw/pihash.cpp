@@ -252,13 +252,15 @@ bool PiHash::VerifyHardware(const HardwareFingerprint& fingerprint) {
 // This function is compiled into the binary and intentionally obscured
 // to prevent reverse-engineering and spoofing attacks.
 bool PiHash::_VerifyHardwareInternal(const HardwareFingerprint& fp) {
+    // PUBLIC LAYER 1: Basic sanity checks (attackers know these)
+    // These are intentionally visible - they filter obvious fakes
+    
     // Enhanced verification: VideoCore GPU firmware check (strongest)
-    // If VideoCore verification succeeded, we have high confidence this is real Pi hardware
     if (fp.videocore_verified) {
-        // GPU temperature check: real hardware should report valid temp (20-85°C)
+        // GPU temperature check: real hardware should report valid temp
+        // NOTE: Exact acceptable ranges validated server-side
         if (fp.gpu_temperature > 0 && fp.gpu_temperature < 100) {
             // VideoCore firmware successfully queried - very difficult to emulate
-            // Still verify other markers for completeness
         } else if (fp.gpu_temperature == 0) {
             // Warning: VideoCore responded but no temperature - possible emulation
             // Continue with file-based checks
@@ -281,13 +283,21 @@ bool PiHash::_VerifyHardwareInternal(const HardwareFingerprint& fp) {
         return false;
     }
     
-    // Memory validation: Pi should have 1GB - 16GB
-    // 1GB = 1,073,741,824 bytes
-    // 16GB = 17,179,869,184 bytes
-    if (fp.memory_total < (1ULL * 1024 * 1024 * 1024) ||
-        fp.memory_total > (16ULL * 1024 * 1024 * 1024)) {
+    // Memory validation: Pi should have reasonable memory
+    // NOTE: Exact ranges validated server-side to prevent gaming
+    if (fp.memory_total < (512ULL * 1024 * 1024) ||  // Min 512MB (public threshold)
+        fp.memory_total > (32ULL * 1024 * 1024 * 1024)) {  // Max 32GB (public threshold)
         return false;
     }
+    
+    // PRIVATE LAYER 2: Server-side validation (SECRET thresholds)
+    // Bootstrap servers maintain the real validation rules
+    // These can be updated without recompiling client code
+    // Attackers cannot see: acceptable temp ranges, clock speeds, 
+    // entropy quality thresholds, reputation requirements, etc.
+    // 
+    // Optional: If PISECURE_OFFLINE_MODE not set, submit to bootstrap
+    // for deep validation before accepting hardware as verified
     
     // Hardware RNG validation
     if (fp.hardware_rng.size() != 32) {

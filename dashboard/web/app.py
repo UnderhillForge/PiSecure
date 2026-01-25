@@ -29,7 +29,7 @@ import requests
 
 # PiSecure imports
 from core.blockchain import SignChain
-from core.wallet import SignWallet
+from core.wallet_v2 import PiSecureWallet, WalletManager
 from core.network import DecentralizedPeerDiscovery
 
 
