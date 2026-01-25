@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PiSecure Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔐 PiSecure Node Dashboard</h1>
+            <nav>
+                <a href="/" class="active">Dashboard</a>
+                <a href="/mining">Mining</a>
+                <a href="/network">Network</a>
+                <a href="/blockchain">Blockchain</a>
+                <a href="/wallets">Wallets</a>
+                <a href="/system">System</a>
+                <a href="/monitoring">Monitoring</a>
+                <a href="/security">Security</a>
+            </nav>
+            <div class="status-indicator" id="connection-status">
+                <span class="status-dot" id="status-dot"></span>
+                <span id="status-text">Connecting...</span>
+            </div>
+        </header>
+
+        <main>
+            <!-- System Overview -->
+            <section class="card">
+                <h2>System Status</h2>
+                <div class="metrics-grid">
+                    <div class="metric">
+                        <span class="label">CPU</span>
+                        <span class="value" id="cpu-percent">0%</span>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="cpu-bar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <span class="label">Memory</span>
+                        <span class="value" id="memory-percent">0%</span>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="memory-bar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <span class="label">Disk</span>
+                        <span class="value" id="disk-percent">0%</span>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="disk-bar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <span class="label">Temperature</span>
+                        <span class="value" id="temperature">--°C</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Blockchain Status -->
+            <section class="card">
+                <h2>Blockchain Status</h2>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="status-label">Blocks</span>
+                        <span class="status-value" id="block-count">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Pending TX</span>
+                        <span class="status-value" id="pending-tx">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Difficulty</span>
+                        <span class="status-value" id="difficulty">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Chain Valid</span>
+                        <span class="status-value" id="chain-valid">
+                            <span class="status-indicator" id="valid-indicator">❓</span>
+                        </span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Mining Status -->
+            <section class="card">
+                <h2>Mining Status</h2>
+                <div class="mining-grid">
+                    <div class="mining-metric">
+                        <span class="mining-label">Status</span>
+                        <span class="mining-value" id="mining-status">Unknown</span>
+                    </div>
+                    <div class="mining-metric">
+                        <span class="mining-label">Hashrate</span>
+                        <span class="mining-value" id="hashrate">0 MH/s</span>
+                    </div>
+                    <div class="mining-metric">
+                        <span class="mining-label">Blocks Found</span>
+                        <span class="mining-value" id="blocks-found">0</span>
+                    </div>
+                    <div class="mining-metric">
+                        <span class="mining-label">Uptime</span>
+                        <span class="mining-value" id="mining-uptime">0m</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Network Status -->
+            <section class="card">
+                <h2>Network Status</h2>
+                <div class="network-grid">
+                    <div class="network-metric">
+                        <span class="network-label">Connected Peers</span>
+                        <span class="network-value" id="connected-peers">0</span>
+                    </div>
+                    <div class="network-metric">
+                        <span class="network-label">Known Peers</span>
+                        <span class="network-value" id="known-peers">0</span>
+                    </div>
+                    <div class="network-metric">
+                        <span class="network-label">Sync Progress</span>
+                        <span class="network-value" id="sync-progress">--</span>
+                    </div>
+                    <div class="network-metric">
+                        <span class="network-label">Network Health</span>
+                        <span class="network-value" id="network-health">--</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Recent Activity -->
+            <section class="card">
+                <h2>Recent Blocks</h2>
+                <div class="activity-list" id="recent-blocks">
+                    <div class="activity-item">
+                        <span class="activity-time">Loading...</span>
+                        <span class="activity-desc">Initializing blockchain data</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Performance Charts -->
+            <section class="card">
+                <h2>Performance</h2>
+                <div class="chart-container">
+                    <canvas id="performanceChart" width="400" height="200"></canvas>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

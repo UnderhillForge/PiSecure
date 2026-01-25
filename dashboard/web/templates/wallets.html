@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PiSecure Wallets</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔐 PiSecure Wallets</h1>
+            <nav>
+                <a href="/">Dashboard</a>
+                <a href="/mining">Mining</a>
+                <a href="/network">Network</a>
+                <a href="/blockchain">Blockchain</a>
+                <a href="/wallets" class="active">Wallets</a>
+                <a href="/system">System</a>
+            </nav>
+            <div class="status-indicator" id="connection-status">
+                <span class="status-dot" id="status-dot"></span>
+                <span id="status-text">Connecting...</span>
+            </div>
+        </header>
+
+        <main>
+            <!-- Wallet Management -->
+            <section class="card">
+                <h2>Wallet Management</h2>
+                <div class="wallet-management">
+                    <div class="wallet-section">
+                        <h3>Create New Wallet</h3>
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px;">
+                                <input type="radio" name="name-option" value="manual" checked onchange="toggleNameInput()"> Manual Name
+                            </label>
+                            <input type="text" id="new-wallet-name" placeholder="Enter wallet name" style="width: 100%; padding: 10px; margin-bottom: 10px;">
+                            <label style="display: block;">
+                                <input type="radio" name="name-option" value="auto" onchange="toggleNameInput()"> Auto-Generate Name (e.g., pi-raspberry-abc123)
+                            </label>
+                        </div>
+                        <button onclick="createWallet()" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px;">Create Wallet</button>
+                    </div>
+
+                    <div class="wallet-section">
+                        <h3>Import Wallet</h3>
+                        <input type="file" id="import-file" accept=".dat" style="margin-bottom: 10px;">
+                        <button onclick="importWallet()" style="padding: 10px 20px; background: #17a2b8; color: white; border: none; border-radius: 4px;">Import Wallet</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Wallet Lookup -->
+            <section class="card">
+                <h2>Wallet Lookup</h2>
+                <div class="wallet-lookup">
+                    <input type="text" id="wallet-address" placeholder="Enter wallet address" style="width: 100%; padding: 10px; margin-bottom: 10px;">
+                    <button onclick="lookupWallet()" style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px;">Lookup Wallet</button>
+                </div>
+            </section>
+
+            <!-- Wallet Balance -->
+            <section class="card" id="balance-section" style="display: none;">
+                <h2>Wallet Balance</h2>
+                <div class="metric">
+                    <span class="label">Address</span>
+                    <span class="value" id="wallet-display-address">-</span>
+                </div>
+                <div class="metric">
+                    <span class="label">Balance</span>
+                    <span class="value" id="wallet-balance">0.00 PiTokens</span>
+                </div>
+            </section>
+
+            <!-- Transaction History -->
+            <section class="card" id="transactions-section" style="display: none;">
+                <h2>Transaction History</h2>
+                <div id="transactions-list">
+                    <p>Loading transactions...</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        const socket = io();
+        let currentWalletAddress = null;
+
+        // Socket.IO connection status
+        socket.on('connect', function() {
+            document.getElementById('status-dot').className = 'status-dot connected';
+            document.getElementById('status-text').textContent = 'Connected';
+        });
+
+        socket.on('disconnect', function() {
+            document.getElementById('status-dot').className = 'status-dot disconnected';
+            document.getElementById('status-text').textContent = 'Disconnected';
+        });
+
+        socket.on('status', function(data) {
+            console.log('Status:', data);
+        });
+
+        function lookupWallet() {
+            const address = document.getElementById('wallet-address').value.trim();
+            if (!address) {
+                alert('Please enter a wallet address');
+                return;
+            }
+
+            currentWalletAddress = address;
+            loadWalletData(address);
+        }
+
+        function createWallet() {
+            const nameOption = document.querySelector('input[name="name-option"]:checked').value;
+            let name = '';
+            let autoGenerate = false;
+
+            if (nameOption === 'manual') {
+                name = document.getElementById('new-wallet-name').value.trim();
+                if (!name) {
+                    alert('Please enter a wallet name');
+                    return;
+                }
+            } else {
+                autoGenerate = true;
+            }
+
+            fetch('/api/wallets/create', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ name: name, auto_generate: autoGenerate })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+
+                const generatedNote = data.auto_generated ? `\n\nAuto-generated name: ${data.name}` : '';
+                alert(`Wallet created successfully!${generatedNote}\n\nWallet ID: ${data.wallet_id}\nAddress: ${data.address}`);
+                document.getElementById('new-wallet-name').value = '';
+                loadWallets(); // Refresh wallet list
+            })
+            .catch(error => {
+                console.error('Error creating wallet:', error);
+                alert('Error creating wallet');
+            });
+        }
+
+        function toggleNameInput() {
+            const nameOption = document.querySelector('input[name="name-option"]:checked').value;
+            const nameInput = document.getElementById('new-wallet-name');
+
+            if (nameOption === 'auto') {
+                nameInput.disabled = true;
+                nameInput.placeholder = 'Name will be auto-generated';
+                nameInput.style.backgroundColor = '#f8f9fa';
+            } else {
+                nameInput.disabled = false;
+                nameInput.placeholder = 'Enter wallet name';
+                nameInput.style.backgroundColor = '';
+            }
+        }
+
+        function loadWallets() {
+            fetch('/api/wallets/list')
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    document.getElementById('wallets-list').innerHTML = '<p>Error loading wallets</p>';
+                    return;
+                }
+
+                displayWallets(data.wallets);
+            })
+            .catch(error => {
+                console.error('Error loading wallets:', error);
+                document.getElementById('wallets-list').innerHTML = '<p>Error loading wallets</p>';
+            });
+        }
+
+        function displayWallets(wallets) {
+            const container = document.getElementById('wallets-list');
+
+            if (!wallets || wallets.length === 0) {
+                container.innerHTML = '<p>No wallets found. Create your first wallet above.</p>';
+                return;
+            }
+
+            let html = '<div class="wallets-table">';
+            html += '<div class="wallet-header">';
+            html += '<span>Name</span>';
+            html += '<span>ID</span>';
+            html += '<span>Address</span>';
+            html += '<span>Balance</span>';
+            html += '<span>Actions</span>';
+            html += '</div>';
+
+            wallets.forEach(wallet => {
+                const coldStorageClass = wallet.cold_storage ? 'cold-storage' : '';
+                const coldStorageText = wallet.cold_storage ? ' (Cold Storage)' : '';
+                const coldBtnText = wallet.cold_storage ? 'Restore' : 'Cold Storage';
+
+                html += '<div class="wallet-row ' + coldStorageClass + '">';
+                html += `<span>${wallet.name}${coldStorageText}</span>`;
+                html += `<span>${wallet.id}</span>`;
+                html += `<span>${wallet.address}</span>`;
+                html += `<span>${wallet.balance} PiTokens</span>`;
+                html += '<span class="wallet-actions">';
+                if (!wallet.cold_storage) {
+                    html += `<button onclick="backupWallet('${wallet.id}')" class="action-btn backup-btn">Backup</button>`;
+                }
+                html += `<button onclick="coldStorage('${wallet.id}', ${wallet.cold_storage})" class="action-btn cold-btn">${coldBtnText}</button>`;
+                html += `<button onclick="selectWallet('${wallet.address}')" class="action-btn select-btn">Select</button>`;
+                html += '</span>';
+                html += '</div>';
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function backupWallet(walletId) {
+            // Trigger download of wallet backup
+            window.location.href = `/api/wallets/export/${walletId}`;
+        }
+
+        function coldStorage(walletId, isCold = false) {
+            if (isCold) {
+                // Restore from cold storage
+                if (confirm('Restore wallet from cold storage? This will make the wallet available for transactions again.')) {
+                    fetch(`/api/wallets/cold-storage/${walletId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ action: 'restore' })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            alert('Error: ' + data.error);
+                        } else {
+                            alert('Wallet restored from cold storage.');
+                            loadWallets(); // Refresh wallet list
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error restoring from cold storage:', error);
+                        alert('Error restoring wallet from cold storage');
+                    });
+                }
+            } else {
+                // Export to cold storage
+                if (confirm('Move wallet to cold storage? This will export the wallet with private keys and mark it as non-tradeable until restored.')) {
+                    fetch(`/api/wallets/cold-storage/${walletId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ action: 'export' })
+                    })
+                    .then(response => {
+                        if (response.ok) {
+                            // File download will be triggered
+                            alert('Wallet moved to cold storage. Download the backup file and store it securely offline.');
+                            loadWallets(); // Refresh wallet list
+                        } else {
+                            return response.json().then(data => {
+                                throw new Error(data.error || 'Cold storage export failed');
+                            });
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error with cold storage:', error);
+                        alert('Error: ' + error.message);
+                    });
+                }
+            }
+        }
+
+        function importWallet() {
+            const fileInput = document.getElementById('import-file');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Please select a wallet backup file (.dat)');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/api/wallets/import', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+
+                alert(`Wallet imported successfully!\n\nWallet ID: ${data.wallet_id}\nAddress: ${data.address}`);
+                fileInput.value = ''; // Clear file input
+                loadWallets(); // Refresh wallet list
+            })
+            .catch(error => {
+                console.error('Error importing wallet:', error);
+                alert('Error importing wallet');
+            });
+        }
+
+        function loadWalletData(address) {
+            // Load balance
+            fetch(`/api/wallet/balance?wallet_id=${encodeURIComponent(address)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Error: ' + data.error);
+                        return;
+                    }
+
+                    document.getElementById('wallet-display-address').textContent = address;
+                    document.getElementById('wallet-balance').textContent = data.balance + ' PiTokens';
+                    document.getElementById('balance-section').style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error loading balance:', error);
+                    alert('Error loading wallet balance');
+                });
+
+            // Load transactions
+            fetch(`/api/wallet/transactions?wallet_id=${encodeURIComponent(address)}&limit=20`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Error: ' + data.error);
+                        return;
+                    }
+
+                    displayTransactions(data.transactions);
+                    document.getElementById('transactions-section').style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error loading transactions:', error);
+                    document.getElementById('transactions-list').innerHTML = '<p>Error loading transactions</p>';
+                });
+        }
+
+        function displayTransactions(transactions) {
+            const container = document.getElementById('transactions-list');
+
+            if (!transactions || transactions.length === 0) {
+                container.innerHTML = '<p>No transactions found</p>';
+                return;
+            }
+
+            let html = '<div class="transactions-table">';
+            html += '<div class="transaction-header">';
+            html += '<span>Type</span>';
+            html += '<span>Direction</span>';
+            html += '<span>Amount</span>';
+            html += '<span>Block</span>';
+            html += '<span>Time</span>';
+            html += '</div>';
+
+            transactions.forEach(tx => {
+                const directionClass = tx.direction === 'incoming' ? 'incoming' : 'outgoing';
+                const directionSymbol = tx.direction === 'incoming' ? '↓' : '↑';
+                const timeString = tx.timestamp ? new Date(tx.timestamp * 1000).toLocaleString() : 'Unknown';
+
+                html += '<div class="transaction-row">';
+                html += `<span>${tx.type}</span>`;
+                html += `<span class="${directionClass}">${directionSymbol} ${tx.direction}</span>`;
+                html += `<span>${tx.amount} PiTokens</span>`;
+                html += `<span>#${tx.block_index}</span>`;
+                html += `<span>${timeString}</span>`;
+                html += '</div>';
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        // Load wallets on page load
+        window.onload = function() {
+            loadWallets();
+            toggleNameInput(); // Initialize name input state
+        };
+
+        // Allow Enter key to trigger lookup
+        document.getElementById('wallet-address').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                lookupWallet();
+            }
+        });
+    </script>
+
+    <style>
+        .wallet-management {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .wallet-section {
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+
+        .wallet-section h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .wallets-table {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .wallet-header {
+            background: #f8f9fa;
+            padding: 12px;
+            display: grid;
+            grid-template-columns: 2fr 1fr 2fr 1fr 2fr;
+            gap: 10px;
+            font-weight: bold;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .wallet-row {
+            padding: 12px;
+            display: grid;
+            grid-template-columns: 2fr 1fr 2fr 1fr 2fr;
+            gap: 10px;
+            border-bottom: 1px solid #eee;
+            align-items: center;
+        }
+
+        .wallet-row:hover {
+            background: #f8f9fa;
+        }
+
+        .wallet-actions {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+
+        .action-btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .backup-btn {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .backup-btn:hover {
+            background: #e0a800;
+        }
+
+        .cold-btn {
+            background: #dc3545;
+            color: white;
+        }
+
+        .cold-btn:hover {
+            background: #c82333;
+        }
+
+        .select-btn {
+            background: #007bff;
+            color: white;
+        }
+
+        .wallet-row.cold-storage {
+            background: #fff3cd;
+            opacity: 0.7;
+        }
+
+        .wallet-row.cold-storage:hover {
+            background: #ffeaa7;
+        }
+
+        .transactions-table {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .transaction-header {
+            background: #f8f9fa;
+            padding: 12px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr 2fr;
+            gap: 10px;
+            font-weight: bold;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .transaction-row {
+            padding: 12px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr 2fr;
+            gap: 10px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .transaction-row:hover {
+            background: #f8f9fa;
+        }
+
+        .incoming {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .outgoing {
+            color: #dc3545;
+            font-weight: bold;
+        }
+    </style>
+</body>
+</html>

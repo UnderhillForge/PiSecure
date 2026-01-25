@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PiSecure - Security Monitoring</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <style>
+        .security-status { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .threat-level { font-size: 2em; font-weight: bold; }
+        .threat-low { color: #4CAF50; }
+        .threat-medium { color: #FF9800; }
+        .threat-high { color: #F44336; }
+        .threat-critical { color: #9C27B0; }
+
+        .security-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .security-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .security-card h3 { margin-top: 0; color: #333; }
+
+        .attack-patterns { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .pattern-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .pattern-card h4 { margin-top: 0; color: #666; }
+
+        .threat-map { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .threat-region { display: inline-block; padding: 5px 10px; margin: 2px; border-radius: 15px; font-size: 0.9em; }
+
+        .security-logs { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .log-entry { padding: 10px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .log-entry:last-child { border-bottom: none; }
+        .log-timestamp { font-size: 0.9em; color: #666; }
+        .log-level { padding: 2px 8px; border-radius: 10px; font-size: 0.8em; font-weight: bold; }
+        .log-level.INFO { background: #2196F3; color: white; }
+        .log-level.WARNING { background: #FF9800; color: white; }
+        .log-level.ERROR { background: #F44336; color: white; }
+        .log-level.CRITICAL { background: #9C27B0; color: white; }
+
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .metric-chart { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+
+        .blocked-ips { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .ip-entry { padding: 8px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }
+        .ip-entry:last-child { border-bottom: none; }
+
+        .validation-errors { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .error-entry { padding: 10px; border-bottom: 1px solid #eee; }
+        .error-entry:last-child { border-bottom: none; }
+        .error-type { font-weight: bold; color: #F44336; }
+        .error-details { font-size: 0.9em; color: #666; margin-top: 5px; }
+
+        .status-healthy { background: #4CAF50; color: white; }
+        .status-warning { background: #FF9800; color: white; }
+        .status-critical { background: #F44336; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔒 PiSecure Security Monitoring</h1>
+            <nav>
+                <a href="/">Dashboard</a>
+                <a href="/mining">Mining</a>
+                <a href="/network">Network</a>
+                <a href="/blockchain">Blockchain</a>
+                <a href="/wallets">Wallets</a>
+                <a href="/system">System</a>
+                <a href="/monitoring">Monitoring</a>
+                <a href="/security" class="active">Security</a>
+            </nav>
+        </header>
+
+        <main>
+            <!-- Security Status Overview -->
+            <section class="security-status">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <h2>Security Status</h2>
+                        <div class="threat-level" id="threat-level">Loading...</div>
+                        <div id="threat-description">Analyzing security posture...</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 1.5em; margin-bottom: 10px;" id="uptime">00:00:00</div>
+                        <div style="color: rgba(255,255,255,0.8);">Security System Uptime</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Security Metrics Cards -->
+            <section class="security-cards">
+                <div class="security-card">
+                    <h3>Requests Analyzed</h3>
+                    <div style="font-size: 2em; font-weight: bold; color: #2196F3;" id="requests-analyzed">0</div>
+                    <div style="color: #666; margin-top: 5px;">Last 24 hours</div>
+                </div>
+                <div class="security-card">
+                    <h3>Threats Detected</h3>
+                    <div style="font-size: 2em; font-weight: bold; color: #FF9800;" id="threats-detected">0</div>
+                    <div style="color: #666; margin-top: 5px;">Active threats</div>
+                </div>
+                <div class="security-card">
+                    <h3>Requests Blocked</h3>
+                    <div style="font-size: 2em; font-weight: bold; color: #F44336;" id="requests-blocked">0</div>
+                    <div style="color: #666; margin-top: 5px;">Protection active</div>
+                </div>
+                <div class="security-card">
+                    <h3>False Positives</h3>
+                    <div style="font-size: 2em; font-weight: bold; color: #4CAF50;" id="false-positives">0%</div>
+                    <div style="color: #666; margin-top: 5px;">Accuracy rate</div>
+                </div>
+            </section>
+
+            <!-- Attack Pattern Analysis -->
+            <section class="attack-patterns">
+                <div class="pattern-card">
+                    <h4>Attack Patterns Detected</h4>
+                    <div id="attack-patterns">
+                        <div style="text-align: center; padding: 20px; color: #666;">Loading attack patterns...</div>
+                    </div>
+                </div>
+                <div class="pattern-card">
+                    <h4>Geographic Threat Analysis</h4>
+                    <div id="geographic-threats">
+                        <div style="text-align: center; padding: 20px; color: #666;">Loading geographic data...</div>
+                    </div>
+                </div>
+                <div class="pattern-card">
+                    <h4>User Agent Analysis</h4>
+                    <div id="user-agent-analysis">
+                        <div style="text-align: center; padding: 20px; color: #666;">Loading user agent data...</div>
+                    </div>
+                </div>
+                <div class="pattern-card">
+                    <h4>Request Timing Patterns</h4>
+                    <div id="timing-patterns">
+                        <div style="text-align: center; padding: 20px; color: #666;">Loading timing analysis...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Threat Intelligence Map -->
+            <section class="threat-map">
+                <h2>Global Threat Intelligence</h2>
+                <div id="threat-intelligence-map">
+                    <div style="text-align: center; padding: 20px; color: #666;">Loading threat intelligence...</div>
+                </div>
+            </section>
+
+            <!-- Security Metrics Charts -->
+            <section class="metrics-grid">
+                <div class="metric-chart">
+                    <h3>Threat Score Trend</h3>
+                    <canvas id="threatScoreChart" width="400" height="200"></canvas>
+                </div>
+                <div class="metric-chart">
+                    <h3>Request Blocking Rate</h3>
+                    <canvas id="blockingRateChart" width="400" height="200"></canvas>
+                </div>
+                <div class="metric-chart">
+                    <h3>Attack Pattern Distribution</h3>
+                    <canvas id="attackPatternChart" width="400" height="200"></canvas>
+                </div>
+                <div class="metric-chart">
+                    <h3>Response Time Impact</h3>
+                    <canvas id="responseTimeChart" width="400" height="200"></canvas>
+                </div>
+            </section>
+
+            <!-- Blocked IPs and Regions -->
+            <section class="blocked-ips">
+                <h2>Blocked IPs & Regions</h2>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div>
+                        <h3>Recently Blocked IPs</h3>
+                        <div id="blocked-ips-list">
+                            <div style="text-align: center; padding: 20px; color: #666;">No recently blocked IPs</div>
+                        </div>
+                    </div>
+                    <div>
+                        <h3>Blocked Regions</h3>
+                        <div id="blocked-regions-list">
+                            <div style="text-align: center; padding: 20px; color: #666;">No blocked regions</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Validation Errors -->
+            <section class="validation-errors">
+                <h2>Recent Validation Errors</h2>
+                <div id="validation-errors-list">
+                    <div style="text-align: center; padding: 20px; color: #666;">No recent validation errors</div>
+                </div>
+            </section>
+
+            <!-- Security Event Logs -->
+            <section class="security-logs">
+                <h2>Security Event Logs</h2>
+                <div id="security-logs-list">
+                    <div style="text-align: center; padding: 20px; color: #666;">Loading security logs...</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        // Initialize Socket.IO connection
+        const socket = io();
+
+        // Chart instances
+        let threatScoreChart, blockingRateChart, attackPatternChart, responseTimeChart;
+
+        // Data storage
+        let securityMetrics = {
+            threat_scores: [],
+            blocking_rates: [],
+            attack_patterns: {},
+            response_times: [],
+            timestamps: []
+        };
+
+        // Initialize charts
+        function initCharts() {
+            // Threat Score Trend
+            threatScoreChart = new Chart(
+                document.getElementById('threatScoreChart').getContext('2d'),
+                {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Average Threat Score',
+                            data: [],
+                            borderColor: '#F44336',
+                            backgroundColor: '#F4433620',
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { beginAtZero: true, max: 1.0 }
+                        }
+                    }
+                }
+            );
+
+            // Blocking Rate Chart
+            blockingRateChart = new Chart(
+                document.getElementById('blockingRateChart').getContext('2d'),
+                {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Blocking Rate (%)',
+                            data: [],
+                            borderColor: '#FF9800',
+                            backgroundColor: '#FF980020',
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { beginAtZero: true, max: 100 }
+                        }
+                    }
+                }
+            );
+
+            // Attack Pattern Distribution
+            attackPatternChart = new Chart(
+                document.getElementById('attackPatternChart').getContext('2d'),
+                {
+                    type: 'doughnut',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            data: [],
+                            backgroundColor: [
+                                '#F44336', '#FF9800', '#2196F3', '#4CAF50',
+                                '#9C27B0', '#00BCD4', '#8BC34A', '#FFC107'
+                            ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false
+                    }
+                }
+            );
+
+            // Response Time Impact
+            responseTimeChart = new Chart(
+                document.getElementById('responseTimeChart').getContext('2d'),
+                {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Response Time (ms)',
+                            data: [],
+                            borderColor: '#2196F3',
+                            backgroundColor: '#2196F320',
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { beginAtZero: true }
+                        }
+                    }
+                }
+            );
+        }
+
+        // Update security status
+        async function updateSecurityStatus() {
+            try {
+                // Get DDoS protection stats
+                const ddosResponse = await fetch('/api/security/ddos/stats');
+                const ddosStats = await ddosResponse.json();
+
+                // Get validation stats
+                const validationResponse = await fetch('/api/security/validation/stats');
+                const validationStats = await validationResponse.json();
+
+                // Update threat level
+                const threatLevel = calculateThreatLevel(ddosStats, validationStats);
+                updateThreatLevel(threatLevel);
+
+                // Update metrics cards
+                updateMetricsCards(ddosStats, validationStats);
+
+                // Update attack patterns
+                updateAttackPatterns(ddosStats);
+
+                // Update threat intelligence
+                updateThreatIntelligence(ddosStats);
+
+                // Update charts
+                updateSecurityCharts(ddosStats, validationStats);
+
+                // Update blocked entities
+                updateBlockedEntities(ddosStats);
+
+                // Update validation errors
+                updateValidationErrors(validationStats);
+
+                // Update security logs
+                updateSecurityLogs();
+
+            } catch (error) {
+                console.error('Failed to update security status:', error);
+            }
+        }
+
+        function calculateThreatLevel(ddosStats, validationStats) {
+            const blockedRequests = ddosStats.blocked_requests || 0;
+            const totalRequests = ddosStats.total_requests_analyzed || 1;
+            const blockRate = (blockedRequests / totalRequests) * 100;
+
+            const validationErrors = validationStats.total_errors || 0;
+            const totalValidations = validationStats.total_validations || 1;
+            const errorRate = (validationErrors / totalValidations) * 100;
+
+            const combinedRisk = (blockRate + errorRate) / 2;
+
+            if (combinedRisk < 1) return { level: 'low', description: 'Normal operation', color: 'threat-low' };
+            if (combinedRisk < 5) return { level: 'medium', description: 'Moderate threat activity', color: 'threat-medium' };
+            if (combinedRisk < 15) return { level: 'high', description: 'High threat activity detected', color: 'threat-high' };
+            return { level: 'critical', description: 'Critical threat level - immediate action required', color: 'threat-critical' };
+        }
+
+        function updateThreatLevel(threatLevel) {
+            const levelEl = document.getElementById('threat-level');
+            const descEl = document.getElementById('threat-description');
+
+            levelEl.textContent = threatLevel.level.toUpperCase();
+            levelEl.className = `threat-level ${threatLevel.color}`;
+            descEl.textContent = threatLevel.description;
+        }
+
+        function updateMetricsCards(ddosStats, validationStats) {
+            document.getElementById('requests-analyzed').textContent =
+                (ddosStats.total_requests_analyzed || 0).toLocaleString();
+
+            document.getElementById('threats-detected').textContent =
+                (ddosStats.suspicious_requests || 0).toLocaleString();
+
+            document.getElementById('requests-blocked').textContent =
+                (ddosStats.blocked_requests || 0).toLocaleString();
+
+            const falsePositives = ddosStats.false_positives || 0;
+            const totalBlocks = ddosStats.blocked_requests || 1;
+            const fpRate = totalBlocks > 0 ? ((falsePositives / totalBlocks) * 100).toFixed(1) : '0.0';
+            document.getElementById('false-positives').textContent = `${fpRate}%`;
+        }
+
+        function updateAttackPatterns(ddosStats) {
+            const patterns = ddosStats.attack_patterns || {};
+
+            // Update attack patterns display
+            const patternsEl = document.getElementById('attack-patterns');
+            patternsEl.innerHTML = '';
+
+            if (Object.keys(patterns).length === 0) {
+                patternsEl.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">No attack patterns detected</div>';
+                return;
+            }
+
+            Object.entries(patterns).forEach(([pattern, count]) => {
+                const patternEl = document.createElement('div');
+                patternEl.style.cssText = 'display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;';
+                patternEl.innerHTML = `
+                    <span>${pattern.replace(/_/g, ' ')}</span>
+                    <span style="font-weight: bold; color: #F44336;">${count}</span>
+                `;
+                patternsEl.appendChild(patternEl);
+            });
+
+            // Update geographic threats
+            const geoThreats = ddosStats.geographic_threats || {};
+            const geoEl = document.getElementById('geographic-threats');
+            geoEl.innerHTML = '';
+
+            Object.entries(geoThreats).forEach(([region, threat]) => {
+                const threatEl = document.createElement('div');
+                threatEl.style.cssText = 'display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;';
+                threatEl.innerHTML = `
+                    <span>${region.toUpperCase()}</span>
+                    <span style="font-weight: bold; color: ${threat > 0.7 ? '#F44336' : threat > 0.4 ? '#FF9800' : '#4CAF50'};">${(threat * 100).toFixed(0)}%</span>
+                `;
+                geoEl.appendChild(threatEl);
+            });
+
+            // Update user agent analysis
+            const uaAnalysis = ddosStats.user_agent_analysis || {};
+            const uaEl = document.getElementById('user-agent-analysis');
+            uaEl.innerHTML = '';
+
+            Object.entries(uaAnalysis).forEach(([agent, count]) => {
+                const uaEntry = document.createElement('div');
+                uaEntry.style.cssText = 'display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;';
+                uaEntry.innerHTML = `
+                    <span>${agent}</span>
+                    <span style="font-weight: bold; color: #2196F3;">${count}</span>
+                `;
+                uaEl.appendChild(uaEntry);
+            });
+
+            // Update timing patterns
+            const timingPatterns = ddosStats.timing_patterns || {};
+            const timingEl = document.getElementById('timing-patterns');
+            timingEl.innerHTML = '';
+
+            Object.entries(timingPatterns).forEach(([pattern, score]) => {
+                const timingEntry = document.createElement('div');
+                timingEntry.style.cssText = 'display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;';
+                timingEntry.innerHTML = `
+                    <span>${pattern.replace(/_/g, ' ')}</span>
+                    <span style="font-weight: bold; color: ${score > 0.8 ? '#F44336' : score > 0.5 ? '#FF9800' : '#4CAF50'};">${(score * 100).toFixed(0)}%</span>
+                `;
+                timingEl.appendChild(timingEntry);
+            });
+        }
+
+        function updateThreatIntelligence(ddosStats) {
+            const intelligence = ddosStats.threat_intelligence || {};
+            const tiEl = document.getElementById('threat-intelligence-map');
+
+            if (!intelligence.regions || intelligence.regions.length === 0) {
+                tiEl.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">No active threat intelligence</div>';
+                return;
+            }
+
+            tiEl.innerHTML = '';
+            intelligence.regions.forEach(region => {
+                const regionEl = document.createElement('span');
+                regionEl.className = `threat-region status-${region.threat_level}`;
+                regionEl.textContent = `${region.name}: ${region.threat_score}`;
+                tiEl.appendChild(regionEl);
+            });
+        }
+
+        function updateSecurityCharts(ddosStats, validationStats) {
+            const timestamp = new Date();
+
+            // Update threat score chart
+            securityMetrics.threat_scores.push({
+                x: timestamp,
+                y: ddosStats.average_threat_score || 0
+            });
+            if (securityMetrics.threat_scores.length > 60) {
+                securityMetrics.threat_scores.shift();
+            }
+            threatScoreChart.data.labels = securityMetrics.threat_scores.map(d => d.x);
+            threatScoreChart.data.datasets[0].data = securityMetrics.threat_scores.map(d => d.y);
+            threatScoreChart.update();
+
+            // Update blocking rate chart
+            const totalRequests = ddosStats.total_requests_analyzed || 1;
+            const blockedRequests = ddosStats.blocked_requests || 0;
+            const blockRate = (blockedRequests / totalRequests) * 100;
+
+            securityMetrics.blocking_rates.push({
+                x: timestamp,
+                y: blockRate
+            });
+            if (securityMetrics.blocking_rates.length > 60) {
+                securityMetrics.blocking_rates.shift();
+            }
+            blockingRateChart.data.labels = securityMetrics.blocking_rates.map(d => d.x);
+            blockingRateChart.data.datasets[0].data = securityMetrics.blocking_rates.map(d => d.y);
+            blockingRateChart.update();
+
+            // Update attack pattern chart
+            const patterns = ddosStats.attack_patterns || {};
+            attackPatternChart.data.labels = Object.keys(patterns);
+            attackPatternChart.data.datasets[0].data = Object.values(patterns);
+            attackPatternChart.update();
+
+            // Update response time chart
+            securityMetrics.response_times.push({
+                x: timestamp,
+                y: ddosStats.average_response_time_ms || 0
+            });
+            if (securityMetrics.response_times.length > 60) {
+                securityMetrics.response_times.shift();
+            }
+            responseTimeChart.data.labels = securityMetrics.response_times.map(d => d.x);
+            responseTimeChart.data.datasets[0].data = securityMetrics.response_times.map(d => d.y);
+            responseTimeChart.update();
+        }
+
+        function updateBlockedEntities(ddosStats) {
+            // Update blocked IPs
+            const blockedIPs = ddosStats.blocked_ips || [];
+            const ipListEl = document.getElementById('blocked-ips-list');
+
+            if (blockedIPs.length === 0) {
+                ipListEl.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">No blocked IPs</div>';
+            } else {
+                ipListEl.innerHTML = '';
+                blockedIPs.slice(0, 10).forEach(ip => {
+                    const ipEl = document.createElement('div');
+                    ipEl.className = 'ip-entry';
+                    ipEl.innerHTML = `
+                        <span>${ip.address}</span>
+                        <span style="color: #666; font-size: 0.9em;">${formatTime(ip.blocked_at)}</span>
+                    `;
+                    ipListEl.appendChild(ipEl);
+                });
+            }
+
+            // Update blocked regions
+            const blockedRegions = ddosStats.blocked_regions || [];
+            const regionListEl = document.getElementById('blocked-regions-list');
+
+            if (blockedRegions.length === 0) {
+                regionListEl.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">No blocked regions</div>';
+            } else {
+                regionListEl.innerHTML = '';
+                blockedRegions.forEach(region => {
+                    const regionEl = document.createElement('div');
+                    regionEl.className = 'ip-entry';
+                    regionEl.innerHTML = `
+                        <span>${region.name}</span>
+                        <span style="color: #666; font-size: 0.9em;">Threat: ${(region.threat_score * 100).toFixed(0)}%</span>
+                    `;
+                    regionListEl.appendChild(regionEl);
+                });
+            }
+        }
+
+        function updateValidationErrors(validationStats) {
+            const errors = validationStats.recent_errors || [];
+            const errorsEl = document.getElementById('validation-errors-list');
+
+            if (errors.length === 0) {
+                errorsEl.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">No recent validation errors</div>';
+                return;
+            }
+
+            errorsEl.innerHTML = '';
+            errors.slice(0, 10).forEach(error => {
+                const errorEl = document.createElement('div');
+                errorEl.className = 'error-entry';
+                errorEl.innerHTML = `
+                    <div class="error-type">${error.type}</div>
+                    <div>${error.message}</div>
+                    <div class="error-details">Endpoint: ${error.endpoint} | IP: ${error.client_ip} | Time: ${formatTime(error.timestamp)}</div>
+                `;
+                errorsEl.appendChild(errorEl);
+            });
+        }
+
+        function updateSecurityLogs() {
+            // This would typically fetch from a security log API
+            const logsEl = document.getElementById('security-logs-list');
+            logsEl.innerHTML = `
+                <div class="log-entry">
+                    <div>
+                        <div style="font-weight: bold;">DDoS Protection Initialized</div>
+                        <div style="color: #666; font-size: 0.9em;">Advanced threat detection system activated</div>
+                    </div>
+                    <div class="log-timestamp">${formatTime(Date.now() / 1000)}</div>
+                </div>
+                <div class="log-entry">
+                    <div>
+                        <div style="font-weight: bold;">Input Validation Active</div>
+                        <div style="color: #666; font-size: 0.9em;">JSON schema and sanitization filters enabled</div>
+                    </div>
+                    <div class="log-timestamp">${formatTime(Date.now() / 1000 - 60)}</div>
+                </div>
+            `;
+        }
+
+        // Utility functions
+        function formatTime(timestamp) {
+            return new Date(timestamp * 1000).toLocaleString();
+        }
+
+        // Initialize uptime counter
+        let securityStartTime = Date.now();
+        function updateUptime() {
+            const uptime = Date.now() - securityStartTime;
+            const hours = Math.floor(uptime / 3600000);
+            const minutes = Math.floor((uptime % 3600000) / 60000);
+            const seconds = Math.floor((uptime % 60000) / 1000);
+            document.getElementById('uptime').textContent =
+                `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        // Socket.IO event handlers
+        socket.on('connect', () => {
+            console.log('Connected to security dashboard');
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from security dashboard');
+        });
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            updateSecurityStatus();
+            updateUptime();
+
+            // Update every 30 seconds
+            setInterval(() => {
+                updateSecurityStatus();
+                updateUptime();
+            }, 30000);
+
+            // Update uptime every second
+            setInterval(updateUptime, 1000);
+        });
+    </script>
+</body>
+</html>

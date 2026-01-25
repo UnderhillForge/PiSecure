@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PiSecure - System Monitoring</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔍 PiSecure System Monitoring</h1>
+            <nav>
+                <a href="/">Dashboard</a>
+                <a href="/mining">Mining</a>
+                <a href="/network">Network</a>
+                <a href="/blockchain">Blockchain</a>
+                <a href="/wallets">Wallets</a>
+                <a href="/system">System</a>
+                <a href="/monitoring" class="active">Monitoring</a>
+            </nav>
+        </header>
+
+        <main>
+            <!-- Health Status Overview -->
+            <section class="health-overview">
+                <h2>System Health</h2>
+                <div class="health-cards">
+                    <div id="overall-health" class="health-card">
+                        <h3>Overall Status</h3>
+                        <div class="status-indicator" id="overall-status">Loading...</div>
+                    </div>
+                    <div class="health-card">
+                        <h3>Active Alerts</h3>
+                        <div class="alert-count" id="alert-count">0</div>
+                    </div>
+                    <div class="health-card">
+                        <h3>Monitoring Uptime</h3>
+                        <div id="uptime">Loading...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Health Checks -->
+            <section class="health-checks">
+                <h2>Health Checks</h2>
+                <div id="health-checks" class="checks-grid">
+                    <!-- Health checks will be populated by JavaScript -->
+                </div>
+            </section>
+
+            <!-- Metrics Charts -->
+            <section class="metrics-charts">
+                <h2>System Metrics (Last Hour)</h2>
+                <div class="charts-grid">
+                    <div class="chart-container">
+                        <canvas id="cpuChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="memoryChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="diskChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="networkChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Blockchain Metrics -->
+            <section class="blockchain-metrics">
+                <h2>Blockchain Metrics</h2>
+                <div class="charts-grid">
+                    <div class="chart-container">
+                        <canvas id="blockchainHeightChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="peersChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="pendingTxChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Recent Alerts -->
+            <section class="recent-alerts">
+                <h2>Recent Alerts</h2>
+                <div id="alerts-list" class="alerts-container">
+                    <!-- Alerts will be populated by JavaScript -->
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        // Initialize Socket.IO connection
+        const socket = io();
+
+        // Chart instances
+        let cpuChart, memoryChart, diskChart, networkChart;
+        let blockchainChart, peersChart, pendingTxChart;
+
+        // Data storage
+        let metricsHistory = [];
+        let alertsHistory = [];
+
+        // Initialize charts
+        function initCharts() {
+            const chartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    },
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'minute',
+                            displayFormats: {
+                                minute: 'HH:mm'
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            };
+
+            // System metrics charts
+            cpuChart = createChart('cpuChart', 'CPU Usage (%)', '#ff6384');
+            memoryChart = createChart('memoryChart', 'Memory Usage (%)', '#36a2eb');
+            diskChart = createChart('diskChart', 'Disk Usage (%)', '#ffce56');
+            networkChart = createChart('networkChart', 'Network Connections', '#4bc0c0');
+
+            // Blockchain charts
+            blockchainChart = createChart('blockchainHeightChart', 'Blockchain Height', '#9966ff');
+            peersChart = createChart('peersChart', 'Active Peers', '#ff9f40');
+            pendingTxChart = createChart('pendingTxChart', 'Pending Transactions', '#ff6384');
+        }
+
+        function createChart(canvasId, label, color) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            return new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: label,
+                        data: [],
+                        borderColor: color,
+                        backgroundColor: color + '20',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        },
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'minute',
+                                displayFormats: {
+                                    minute: 'HH:mm'
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+        }
+
+        // Update health status
+        async function updateHealthStatus() {
+            try {
+                const response = await fetch('/api/health');
+                const health = await response.json();
+
+                // Update overall status
+                const overallEl = document.getElementById('overall-status');
+                overallEl.textContent = health.overall.toUpperCase();
+                overallEl.className = `status-indicator status-${health.overall}`;
+
+                // Update health checks
+                const checksEl = document.getElementById('health-checks');
+                checksEl.innerHTML = '';
+
+                for (const [checkName, checkData] of Object.entries(health.checks)) {
+                    const checkEl = document.createElement('div');
+                    checkEl.className = `health-check status-${checkData.status}`;
+                    checkEl.innerHTML = `
+                        <h4>${checkName.replace(/_/g, ' ').toUpperCase()}</h4>
+                        <div class="check-value">${checkData.value || 'N/A'}</div>
+                        <div class="check-message">${checkData.message || checkData.status}</div>
+                    `;
+                    checksEl.appendChild(checkEl);
+                }
+
+            } catch (error) {
+                console.error('Failed to fetch health status:', error);
+            }
+        }
+
+        // Update metrics
+        async function updateMetrics() {
+            try {
+                const response = await fetch('/api/metrics?hours=1');
+                const metrics = await response.json();
+
+                if (metrics.error) return;
+
+                // Update uptime
+                document.getElementById('uptime').textContent =
+                    formatUptime(metrics.uptime_seconds || 0);
+
+                // Add to history
+                const timestamp = new Date();
+                metricsHistory.push({
+                    timestamp,
+                    cpu: metrics.cpu_percent || 0,
+                    memory: metrics.memory_percent || 0,
+                    disk: metrics.disk_usage_percent || 0,
+                    network: metrics.network_connections || 0,
+                    blockchain: metrics.blockchain_height || 0,
+                    peers: metrics.active_peers || 0,
+                    pendingTx: metrics.pending_transactions || 0
+                });
+
+                // Keep only last 60 points (5 minutes at 5-second intervals)
+                if (metricsHistory.length > 60) {
+                    metricsHistory.shift();
+                }
+
+                // Update charts
+                updateChart(cpuChart, metricsHistory.map(m => ({x: m.timestamp, y: m.cpu})));
+                updateChart(memoryChart, metricsHistory.map(m => ({x: m.timestamp, y: m.memory})));
+                updateChart(diskChart, metricsHistory.map(m => ({x: m.timestamp, y: m.disk})));
+                updateChart(networkChart, metricsHistory.map(m => ({x: m.timestamp, y: m.network})));
+                updateChart(blockchainChart, metricsHistory.map(m => ({x: m.timestamp, y: m.blockchain})));
+                updateChart(peersChart, metricsHistory.map(m => ({x: m.timestamp, y: m.peers})));
+                updateChart(pendingTxChart, metricsHistory.map(m => ({x: m.timestamp, y: m.pendingTx})));
+
+            } catch (error) {
+                console.error('Failed to fetch metrics:', error);
+            }
+        }
+
+        function updateChart(chart, data) {
+            chart.data.datasets[0].data = data;
+            chart.update('none'); // 'none' for better performance
+        }
+
+        // Update alerts
+        async function updateAlerts() {
+            try {
+                const response = await fetch('/api/alerts?hours=24');
+                const data = await response.json();
+
+                alertsHistory = data.alerts || [];
+                document.getElementById('alert-count').textContent = alertsHistory.length;
+
+                const alertsEl = document.getElementById('alerts-list');
+                alertsEl.innerHTML = '';
+
+                if (alertsHistory.length === 0) {
+                    alertsEl.innerHTML = '<p class="no-alerts">No recent alerts</p>';
+                    return;
+                }
+
+                alertsHistory.slice(0, 10).forEach(alert => {
+                    const alertEl = document.createElement('div');
+                    alertEl.className = `alert alert-${alert.level}`;
+                    alertEl.innerHTML = `
+                        <div class="alert-header">
+                            <span class="alert-level">${alert.level.toUpperCase()}</span>
+                            <span class="alert-time">${formatTime(alert.timestamp)}</span>
+                        </div>
+                        <div class="alert-component">${alert.component.replace(/_/g, ' ')}</div>
+                        <div class="alert-message">${alert.message}</div>
+                    `;
+                    alertsEl.appendChild(alertEl);
+                });
+
+            } catch (error) {
+                console.error('Failed to fetch alerts:', error);
+            }
+        }
+
+        // Utility functions
+        function formatUptime(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            return `${hours}h ${minutes}m`;
+        }
+
+        function formatTime(timestamp) {
+            return new Date(timestamp * 1000).toLocaleString();
+        }
+
+        // Socket.IO event handlers
+        socket.on('connect', () => {
+            console.log('Connected to dashboard');
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from dashboard');
+        });
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            updateHealthStatus();
+            updateMetrics();
+            updateAlerts();
+
+            // Update every 30 seconds
+            setInterval(() => {
+                updateHealthStatus();
+                updateMetrics();
+                updateAlerts();
+            }, 30000);
+        });
+    </script>
+</body>
+</html>
