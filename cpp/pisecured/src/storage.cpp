@@ -426,4 +426,104 @@ namespace pisecured
 
         return zero_bits >= static_cast<int>(difficulty);
     }
+
+    namespace
+    {
+        std::string utxo_key(const std::array<uint8_t, 32> &txid, uint32_t vout)
+        {
+            static const char *hexd = "0123456789abcdef";
+            std::string key(64, '0');
+            for (size_t i = 0; i < 32; ++i)
+            {
+                key[i * 2] = hexd[txid[i] >> 4];
+                key[i * 2 + 1] = hexd[txid[i] & 0x0f];
+            }
+            key.push_back(':');
+            key += std::to_string(vout);
+            return key;
+        }
+    }
+
+    bool Storage::has_tip() const
+    {
+        std::lock_guard<std::mutex> lock(io_mutex_);
+        return !height_to_hash_.empty();
+    }
+
+    uint32_t Storage::tip_difficulty() const
+    {
+        std::lock_guard<std::mutex> lock(io_mutex_);
+        if (height_to_hash_.empty())
+        {
+            return 0;
+        }
+        auto it = headers_cache_.find(best_block_hash_);
+        if (it == headers_cache_.end())
+        {
+            return 0;
+        }
+        return it->second.difficulty;
+    }
+
+    bool Storage::index_existing_block(uint64_t index, const BlockHeader &header)
+    {
+        std::lock_guard<std::mutex> lock(io_mutex_);
+        if (index >= next_index_)
+        {
+            return false;
+        }
+        hash_to_index_[header.hash] = index;
+        headers_cache_[header.hash] = header;
+        if (header.height >= height_to_hash_.size())
+        {
+            height_to_hash_.resize(static_cast<size_t>(header.height) + 1);
+        }
+        height_to_hash_[header.height] = header.hash;
+        if (header.height > best_height_ || best_block_hash_ == std::array<uint8_t, 32>{})
+        {
+            best_height_ = header.height;
+            best_block_hash_ = header.hash;
+        }
+        return true;
+    }
+
+    bool Storage::utxo_available(const std::array<uint8_t, 32> &txid, uint32_t vout, uint64_t &value) const
+    {
+        std::lock_guard<std::mutex> lock(utxo_mutex_);
+        auto it = utxo_.find(utxo_key(txid, vout));
+        if (it == utxo_.end())
+        {
+            return false;
+        }
+        value = it->second.first;
+        return true;
+    }
+
+    bool Storage::apply_utxos(const std::vector<UtxoSpend> &spends, const std::vector<UtxoCredit> &credits)
+    {
+        std::lock_guard<std::mutex> lock(utxo_mutex_);
+        for (const auto &spend : spends)
+        {
+            if (utxo_.find(utxo_key(spend.txid, spend.vout)) == utxo_.end())
+            {
+                return false;
+            }
+        }
+        for (const auto &credit : credits)
+        {
+            if (utxo_.find(utxo_key(credit.txid, credit.vout)) != utxo_.end())
+            {
+                return false;
+            }
+        }
+        for (const auto &spend : spends)
+        {
+            utxo_.erase(utxo_key(spend.txid, spend.vout));
+        }
+        for (const auto &credit : credits)
+        {
+            utxo_[utxo_key(credit.txid, credit.vout)] = {credit.value, credit.address};
+        }
+        return true;
+    }
 }

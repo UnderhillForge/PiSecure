@@ -36,7 +36,11 @@ except ImportError:
 @click.option(
     "--hybrid-storage/--no-hybrid-storage", default=True, help="Use hybrid storage"
 )
-@click.option("--mock-hardware", is_flag=True, help="Mock hardware verification")
+@click.option(
+    "--mock-hardware",
+    is_flag=True,
+    help="Rejected. pisecured does not fake Pi hardware.",
+)
 @click.pass_context
 def cli(ctx, testnet, validate_only, quiet, hybrid_storage, mock_hardware):
     """
@@ -44,6 +48,13 @@ def cli(ctx, testnet, validate_only, quiet, hybrid_storage, mock_hardware):
 
     Initialize the node with appropriate mode and configuration.
     """
+    mock_env = os.getenv("PISECURE_MOCK_HARDWARE", "").strip().lower()
+    if mock_hardware or mock_env in {"1", "true", "yes", "on"}:
+        raise click.UsageError(
+            "--mock-hardware and PISECURE_MOCK_HARDWARE are not allowed. "
+            "pisecured validates blocks; it does not fake Pi hardware."
+        )
+
     # Set environment variables for downstream components
     if testnet:
         os.environ["PISECURE_TESTNET"] = "1"
@@ -51,8 +62,6 @@ def cli(ctx, testnet, validate_only, quiet, hybrid_storage, mock_hardware):
         os.environ["PISECURE_VALIDATE_ONLY"] = "1"
     if quiet:
         os.environ["PISECURE_QUIET"] = "1"
-    if mock_hardware:
-        os.environ["PISECURE_MOCK_HARDWARE"] = "1"
     if not hybrid_storage:
         os.environ["PISECURE_NO_HYBRID_STORAGE"] = "1"
 
@@ -61,7 +70,7 @@ def cli(ctx, testnet, validate_only, quiet, hybrid_storage, mock_hardware):
     Config.VALIDATE_ONLY = validate_only
     Config.QUIET = quiet
     Config.USE_HYBRID_STORAGE = hybrid_storage
-    Config.MOCK_HARDWARE = mock_hardware
+    Config.MOCK_HARDWARE = False
 
     # Create context for all commands
     ctx.ensure_object(dict)
@@ -70,7 +79,7 @@ def cli(ctx, testnet, validate_only, quiet, hybrid_storage, mock_hardware):
     # Determine initialization mode
     if validate_only:
         mode = "validator"
-    elif mock_hardware or testnet:
+    elif testnet:
         mode = "testing"
     else:
         mode = "full_node"
@@ -88,7 +97,7 @@ def cli(ctx, testnet, validate_only, quiet, hybrid_storage, mock_hardware):
         scheduler=scheduler,
         testnet=testnet,
         validate_only=validate_only,
-        mock_hardware=mock_hardware,
+        mock_hardware=False,
         quiet=quiet,
         data_dir=Config.DATA_DIR,
         config_dir=Config.CONFIG_DIR,

@@ -1,4 +1,5 @@
 #include "pisecured/ws_server.hpp"
+#include "pisecured/chain_rpc.hpp"
 #include <iostream>
 #include <cstring>
 #include <algorithm>
@@ -350,24 +351,26 @@ namespace pisecured
             {
                 if (!storage)
                     throw std::runtime_error("storage not available");
-                auto txns = storage->get_mempool_transactions(100);
-                result["count"] = (uint32_t)txns.size();
-                result["bytes"] = 0;
-                json tx_array = json::array();
-                for (const auto &tx : txns)
-                {
-                    tx_array.push_back("placeholder_tx_hash");
-                }
-                result["transactions"] = tx_array;
+                result = rpc_getmempool(*storage);
             }
             else if (method == "sendtransaction")
             {
                 if (!storage)
                     throw std::runtime_error("storage not available");
-                if (params.empty())
-                    throw std::runtime_error("sendtransaction requires serialized tx parameter");
-                result["hash"] = "placeholder_tx_hash";
-                result["status"] = "pending";
+                result = rpc_sendtransaction(*storage, params);
+            }
+            else if (method == "getblocktemplate")
+            {
+                if (!storage)
+                    throw std::runtime_error("storage not available");
+                result = rpc_getblocktemplate(*storage, params);
+            }
+            else if (method == "submitblock")
+            {
+                if (!storage)
+                    throw std::runtime_error("storage not available");
+                // Validation does not depend on this host being a Pi, and does not mine.
+                result = rpc_submitblock(*storage, p2p, params);
             }
             else if (method == "pinsregister")
             {

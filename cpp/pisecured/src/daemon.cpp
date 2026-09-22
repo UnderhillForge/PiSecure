@@ -1,4 +1,5 @@
 #include "pisecured/daemon.hpp"
+#include "pisecured/chain_rpc.hpp"
 #include <iostream>
 #include <csignal>
 
@@ -59,6 +60,12 @@ namespace pisecured
         if (!storage_.init(config_.datadir, config_.testnet, config_.hybrid_storage))
         {
             std::cerr << "Storage init failed\n";
+            running_ = false;
+            return false;
+        }
+        if (!restore_chain(storage_))
+        {
+            std::cerr << "Chain restore failed\n";
             running_ = false;
             return false;
         }

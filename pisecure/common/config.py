@@ -36,7 +36,8 @@ class Config:
 
     # Modes
     VALIDATE_ONLY: bool = _env_bool("PISECURE_VALIDATE_ONLY", False)
-    MOCK_HARDWARE: bool = _env_bool("PISECURE_MOCK_HARDWARE", False)
+    # Env cannot turn this on. The CLI rejects PISECURE_MOCK_HARDWARE.
+    MOCK_HARDWARE: bool = False
     QUIET: bool = _env_bool("PISECURE_QUIET", False)
 
     # Storage
@@ -46,7 +47,8 @@ class Config:
     HYBRID_DB_FILE: str = os.path.join(HYBRID_STORAGE_DIR, "index.db")
 
     # Mining
-    MINE_BLOCK_REWARD: float = 50.0
+    # 0.2 314ST. Miner gets this minus the validator 1%. Difficulty stays in 2–4.
+    MINE_BLOCK_REWARD: float = 0.2
     MINE_INITIAL_DIFFICULTY: int = 4
     MINE_DIFFICULTY_ADJUSTMENT: float = 1.0
     MINE_TARGET_BLOCK_TIME: float = 60.0

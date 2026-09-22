@@ -2,18 +2,13 @@
 Mining-related CLI commands.
 """
 
-import time
-
 import click
 
 from pisecure.cli.formatters import (
     print_error,
     print_info,
     print_success,
-    print_warning,
 )
-from pisecure.common.config import Config
-from pisecure.core import SignChain
 from pisecure.core.hardware import HardwareVerifier
 
 
@@ -49,24 +44,11 @@ def register(cli):
     )
     @click.pass_context
     def mine_cmd(ctx, wallet, count, sleep_interval):
-        """Mine pending transactions (requires Pi hardware or mock)."""
-        try:
-            chain = SignChain(use_hybrid_storage=Config.USE_HYBRID_STORAGE)
-            mined = 0
-            target = count if count > 0 else float("inf")
-            while mined < target:
-                block = chain.mine_pending_transactions(wallet)
-                if block:
-                    mined += 1
-                    print_success(
-                        f"Mined block #{block.get('index', '?')} → rewards to {wallet}"
-                    )
-                else:
-                    print_info("No transactions to mine; waiting...")
-                time.sleep(sleep_interval)
-        except KeyboardInterrupt:
-            print_warning("Mining stopped by user")
-        except Exception as exc:  # noqa: BLE001
-            print_error(f"Mining failed: {exc}")
+        """Disabled. Block production belongs to psminer on an official Pi."""
+        raise click.ClickException(
+            "pisecure mine is disabled. Only psminer on an official Raspberry Pi "
+            "2/3/4/5 may produce blocks. This CLI does not mine and does not "
+            f"fake hardware (ignored wallet {wallet})."
+        )
 
     return cli

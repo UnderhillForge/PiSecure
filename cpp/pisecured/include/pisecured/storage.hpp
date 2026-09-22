@@ -88,6 +88,27 @@ namespace pisecured
         bool validate_block_header(const BlockHeader &header, const BlockHeader *prev_header = nullptr);
         bool validate_block_pow(const std::array<uint8_t, 32> &hash, uint32_t difficulty);
 
+        bool has_tip() const;
+        uint32_t tip_difficulty() const;
+        // Index a frame already present in blk*.dat (used on startup).
+        bool index_existing_block(uint64_t index, const BlockHeader &header);
+
+        struct UtxoSpend
+        {
+            std::array<uint8_t, 32> txid{};
+            uint32_t vout = 0;
+        };
+        struct UtxoCredit
+        {
+            std::array<uint8_t, 32> txid{};
+            uint32_t vout = 0;
+            uint64_t value = 0;
+            std::string address;
+        };
+        bool utxo_available(const std::array<uint8_t, 32> &txid, uint32_t vout, uint64_t &value) const;
+        // Apply every spend and credit, or leave the set unchanged.
+        bool apply_utxos(const std::vector<UtxoSpend> &spends, const std::vector<UtxoCredit> &credits);
+
     private:
         std::filesystem::path datadir_;
         std::filesystem::path blocks_path_;
@@ -108,6 +129,10 @@ namespace pisecured
 
         // Mempool
         std::unordered_map<std::array<uint8_t, 32>, Transaction, Hash256> mempool_;
+
+        // txid-hex + ':' + vout → (value, address)
+        std::map<std::string, std::pair<uint64_t, std::string>> utxo_;
+        mutable std::mutex utxo_mutex_;
 
         bool rotate_if_needed(uint64_t upcoming_bytes);
         std::filesystem::path file_path(uint32_t file_index) const;

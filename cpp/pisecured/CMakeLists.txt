@@ -30,6 +30,7 @@ set(PISECURED_SOURCES
     src/storage.cpp
     src/p2p.cpp
     src/rpc.cpp
+    src/chain_rpc.cpp
     src/validator_purse.cpp
     src/ws_server.cpp
 )

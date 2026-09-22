@@ -146,15 +146,16 @@ class BootstrapEntropyClient:
             Entropy bytes or None if failed
         """
         import os
-        import secrets
 
-        # Check for mock hardware mode
-        if os.environ.get("PISECURE_MOCK_HARDWARE") == "1":
-            # Return mock entropy for testing
-            logger.debug(
-                "PISECURE_MOCK_HARDWARE enabled - using secrets module for entropy"
+        if os.environ.get("PISECURE_MOCK_HARDWARE", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            raise RuntimeError(
+                "PISECURE_MOCK_HARDWARE is not allowed. Refusing to fake entropy."
             )
-            return secrets.token_bytes(num_bytes)
 
         try:
             with open("/dev/hwrng", "rb") as hwrng:

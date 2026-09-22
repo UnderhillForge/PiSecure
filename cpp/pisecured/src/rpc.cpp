@@ -2,6 +2,7 @@
 #include "pisecured/storage.hpp"
 #include "pisecured/p2p.hpp"
 #include "pisecured/validator_purse.hpp"
+#include "pisecured/chain_rpc.hpp"
 #include <iostream>
 #include <chrono>
 #include <iomanip>
@@ -290,33 +291,16 @@ namespace pisecured
 
     json RPC::method_sendtransaction(const json &params)
     {
-        if (!storage_ || params.empty())
-            throw std::runtime_error("Missing transaction data");
-
-        // Placeholder for transaction relay
-        json result;
-        result["status"] = "accepted";
-        result["message"] = "Transaction will be relayed to network";
-        return result;
+        if (!storage_)
+            throw std::runtime_error("Storage not available");
+        return rpc_sendtransaction(*storage_, params);
     }
 
     json RPC::method_getmempool(const json &params)
     {
         if (!storage_)
-            return json::array();
-
-        auto mempool = storage_->get_mempool_transactions(100);
-        json result = json::array();
-
-        for (const auto &tx : mempool)
-        {
-            json tx_obj;
-            tx_obj["fee"] = tx.fee;
-            tx_obj["size"] = tx.data.size();
-            result.push_back(tx_obj);
-        }
-
-        return result;
+            return json::object();
+        return rpc_getmempool(*storage_);
     }
 
     // ========== Network Diagnostics ==========
@@ -419,42 +403,17 @@ namespace pisecured
 
     json RPC::method_submitblock(const json &params)
     {
-        if (!storage_ || !p2p_ || params.size() < 3)
-            throw std::runtime_error("Missing block submission parameters (nonce, hash, data)");
-
-        uint32_t nonce = params[0].get<uint32_t>();
-        std::string hash_str = params[1].get<std::string>();
-        json block_data = params[2];
-
-        // TODO: Validate block and add to storage
-        // For now, accept and relay to P2P network
-
-        json result;
-        result["status"] = "accepted";
-        result["hash"] = hash_str;
-        result["message"] = "Block will be validated and relayed to network";
-
-        return result;
+        if (!storage_)
+            throw std::runtime_error("Storage not available");
+        // Same checks with or without --validate-only. This process does not mine.
+        return rpc_submitblock(*storage_, p2p_, params);
     }
 
     json RPC::method_getblocktemplate(const json &params)
     {
         if (!storage_)
             throw std::runtime_error("Storage not available");
-
-        // Get current best block
-        uint32_t height = storage_->get_best_height();
-        auto best_hash = storage_->get_best_block_hash();
-
-        // Generate template for next block
-        json result;
-        result["height"] = height + 1;
-        result["prev_block_hash"] = ""; // Convert best_hash to hex string
-        result["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count() / 1000000000;
-        result["difficulty"] = 146; // Current network difficulty
-        result["version"] = 1;
-
-        return result;
+        return rpc_getblocktemplate(*storage_, params);
     }
 
     // ========== Error & Success Responses ==========

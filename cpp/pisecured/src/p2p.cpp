@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <fcntl.h>
 #include <cstring>
 #include <iostream>
@@ -777,8 +778,16 @@ namespace pisecured
 
     void AddrMan::addBootstrapPeers(const std::vector<std::string> &bootstrapHosts, uint16_t port)
     {
+        // One outbound peer. HTTP bootstrap registration (queryBootstrapServer) is still a stub.
+        bool added = false;
         for (const auto &host : bootstrapHosts)
         {
+            if (added)
+            {
+                std::cerr << "Bootstrap peer skipped after first resolve: " << host << std::endl;
+                continue;
+            }
+
             PeerAddr addr{};
             addr.addr.sin_family = AF_INET;
             addr.addr.sin_port = htons(port);
@@ -786,16 +795,33 @@ namespace pisecured
             addr.lastSeen = std::chrono::system_clock::now().time_since_epoch().count() / 1000000000ULL;
             addr.failures = 0;
 
-            // Resolve hostname
             if (inet_pton(AF_INET, host.c_str(), &addr.addr.sin_addr) == 1)
             {
                 add(addr);
+                added = true;
+                continue;
             }
-            else
+
+            addrinfo hints{};
+            hints.ai_family = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+            addrinfo *res = nullptr;
+            const int rc = getaddrinfo(host.c_str(), nullptr, &hints, &res);
+            if (rc != 0 || res == nullptr || res->ai_addr == nullptr)
             {
-                // TODO: DNS resolution for hostnames
-                std::cerr << "Bootstrap peer DNS resolution not yet implemented: " << host << std::endl;
+                std::cerr << "Bootstrap peer DNS failed for " << host << ": " << gai_strerror(rc) << std::endl;
+                if (res != nullptr)
+                {
+                    freeaddrinfo(res);
+                }
+                continue;
             }
+            const auto *sin = reinterpret_cast<sockaddr_in *>(res->ai_addr);
+            addr.addr.sin_addr = sin->sin_addr;
+            std::cout << "Bootstrap peer " << host << " resolved to " << inet_ntoa(addr.addr.sin_addr) << std::endl;
+            freeaddrinfo(res);
+            add(addr);
+            added = true;
         }
     }
 
