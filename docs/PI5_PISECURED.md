@@ -189,6 +189,10 @@ Reject reasons:
 - `missing hw_proof`
 - `hw_proof model is not an official Raspberry Pi 2/3/4/5`
 - `hw_proof serial_commitment missing or malformed`
+- `hw_proof challenge missing` (height 4 and later)
+- `hw_proof challenge mismatch` (height 4 and later)
+- `hw_proof serial missing or malformed` (height 4 and later)
+- `hw_proof serial_commitment does not bind serial and challenge` (height 4 and later)
 - `version invalid`
 - `height does not extend tip`
 - `nonce invalid`
@@ -246,6 +250,25 @@ Spend accepted into the mempool, not yet in a block:
 - merkle root `fa64931b1c8f761f8b70081e33383aae30f65d86614466fd4e42d8c44c783eb0`
 
 A 1-unit fee floors the 60/20/8/7 shares to 0. The 1 unit is the burn remainder, not an output. The old placeholder tx is not in this mempool. Block 2 is not mined from this session.
+
+## Height 4 serial binding
+
+Blocks 1–3 stay valid with the old rule: `serial_commitment` is any 32 non-zero bytes. From height 4, `getblocktemplate` adds a fresh challenge and does not fill the serial:
+
+```json
+"hw_proof": {
+  "model": "",
+  "serial_commitment": "",
+  "challenge": "<64 hex, 32 random bytes>",
+  "serial_rule": "sha256(serial_utf8 || challenge_bytes)"
+}
+```
+
+`submitblock` must send `model`, that same `challenge`, the device-tree serial (hex, 1–64 chars, no NULs), and
+
+`serial_commitment = hex(SHA256(utf8(serial) || raw 32-byte challenge))`.
+
+The challenge has to be one this process issued. PiHash1 is unchanged: its preimage still ends with the model and the 32-byte commitment, not the serial plaintext. The accepted block JSON stores `challenge`, `serial`, and `serial_commitment` so a later check does not need the template cache.
 
 ## Spending keys
 

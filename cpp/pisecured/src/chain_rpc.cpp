@@ -2,6 +2,7 @@
 #include "pisecured/p2p.hpp"
 
 #include <openssl/evp.h>
+#include <openssl/rand.h>
 #include <openssl/sha.h>
 
 #include <algorithm>
@@ -11,6 +12,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
+#include <unordered_set>
 
 namespace pisecured
 {
@@ -721,6 +724,55 @@ namespace pisecured
             return hex;
         }
 
+        std::mutex g_challenge_mu;
+        std::unordered_set<std::string> g_challenges;
+
+        std::string issue_challenge()
+        {
+            std::array<uint8_t, 32> raw{};
+            if (RAND_bytes(raw.data(), static_cast<int>(raw.size())) != 1)
+            {
+                return {};
+            }
+            const std::string hex = to_hex(raw);
+            std::lock_guard<std::mutex> lock(g_challenge_mu);
+            g_challenges.insert(hex);
+            return hex;
+        }
+
+        bool challenge_was_issued(const std::string &hex)
+        {
+            std::lock_guard<std::mutex> lock(g_challenge_mu);
+            return g_challenges.find(hex) != g_challenges.end();
+        }
+
+        void retire_challenge(const std::string &hex)
+        {
+            std::lock_guard<std::mutex> lock(g_challenge_mu);
+            g_challenges.erase(hex);
+        }
+
+        bool pi_serial_text(const std::string &serial)
+        {
+            if (serial.empty() || serial.size() > 64)
+            {
+                return false;
+            }
+            for (unsigned char c : serial)
+            {
+                if (c == 0)
+                {
+                    return false;
+                }
+                const bool hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                if (!hex)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         bool address_filename(const std::string &address)
         {
             if (address.empty() || address.size() > 128)
@@ -1030,7 +1082,12 @@ namespace pisecured
             {"coinbase_txid", to_hex(cb.txid)},
             {"merkle_root", to_hex(root)},
             {"txs", txs},
-            {"hw_proof", {{"model", ""}, {"serial_commitment", ""}}},
+            {"hw_proof", next_height >= 4
+                             ? json{{"model", ""},
+                                   {"serial_commitment", ""},
+                                   {"challenge", issue_challenge()},
+                                   {"serial_rule", "sha256(serial_utf8 || challenge_bytes)"}}
+                             : json{{"model", ""}, {"serial_commitment", ""}}},
             {"pihash", {{"algorithm", "sha256-pihash1"}, {"domain", "PiHash1"}, {"difficulty_means", "leading zero bits"}}},
         };
     }
@@ -1192,6 +1249,33 @@ namespace pisecured
         if (height != expect_height)
         {
             return rejected("height does not extend tip");
+        }
+        std::string serial_text;
+        std::string challenge_hex;
+        if (height >= 4)
+        {
+            if (!proof.contains("challenge") || !proof["challenge"].is_string() || proof["challenge"].get<std::string>().empty())
+            {
+                return rejected("hw_proof challenge missing");
+            }
+            challenge_hex = lower_hex(proof["challenge"].get<std::string>());
+            std::array<uint8_t, 32> challenge_raw{};
+            if (!from_hex(challenge_hex, challenge_raw) || !challenge_was_issued(challenge_hex))
+            {
+                return rejected("hw_proof challenge mismatch");
+            }
+            if (!proof.contains("serial") || !proof["serial"].is_string() || !pi_serial_text(proof["serial"].get<std::string>()))
+            {
+                return rejected("hw_proof serial missing or malformed");
+            }
+            serial_text = proof["serial"].get<std::string>();
+            std::vector<uint8_t> bind;
+            bind.insert(bind.end(), serial_text.begin(), serial_text.end());
+            bind.insert(bind.end(), challenge_raw.begin(), challenge_raw.end());
+            if (sha256(bind) != serial)
+            {
+                return rejected("hw_proof serial_commitment does not bind serial and challenge");
+            }
         }
         const uint32_t difficulty = block["difficulty"].get<uint32_t>();
         if (difficulty != expect_diff)
@@ -1365,7 +1449,13 @@ namespace pisecured
             stored_txs.push_back(tx_to_json(tx));
         }
         stored["txs"] = stored_txs;
-        stored["hw_proof"] = json{{"model", model}, {"serial_commitment", to_hex(serial)}};
+        json stored_proof = {{"model", model}, {"serial_commitment", to_hex(serial)}};
+        if (height >= 4)
+        {
+            stored_proof["challenge"] = challenge_hex;
+            stored_proof["serial"] = serial_text;
+        }
+        stored["hw_proof"] = stored_proof;
 
         const std::string dumped = stored.dump();
         if (dumped.size() > kMaxBlockBytes)
@@ -1387,6 +1477,10 @@ namespace pisecured
         if (!storage.store_block_with_header(digest, header, raw))
         {
             return rejected("block too large");
+        }
+        if (height >= 4)
+        {
+            retire_challenge(challenge_hex);
         }
 
         std::vector<Storage::UtxoSpend> spends;
