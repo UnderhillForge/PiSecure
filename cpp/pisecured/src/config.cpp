@@ -24,6 +24,31 @@ namespace pisecured
     {
         Config cfg;
         cfg.datadir = default_datadir(false);
+
+        // EnvironmentFile=/etc/pisecure/pisecure.env is applied by systemd
+        // before exec. CLI flags below override these.
+        if (const char *data_dir = std::getenv("PISECURE_DATA_DIR"))
+        {
+            if (data_dir[0] != '\0')
+            {
+                cfg.datadir = data_dir;
+            }
+        }
+        if (const char *host = std::getenv("PISECURED_HOST"))
+        {
+            if (host[0] != '\0')
+            {
+                cfg.rpc_bind = host;
+            }
+        }
+        if (const char *port = std::getenv("PISECURED_PORT"))
+        {
+            if (port[0] != '\0')
+            {
+                cfg.rpc_port = std::stoi(port);
+            }
+        }
+
         cfg.conf_file = cfg.datadir / "pisecured.conf";
         cfg.validator_bucket_path = cfg.datadir / "validator_bucket.json";
         cfg.ws_bind = cfg.rpc_bind;
@@ -47,6 +72,23 @@ namespace pisecured
             if (arg == "--datadir")
             {
                 cfg.datadir = next(arg);
+                cfg.conf_file = cfg.datadir / "pisecured.conf";
+                if (!explicit_validator_path)
+                {
+                    cfg.validator_bucket_path = cfg.datadir / "validator_bucket.json";
+                }
+            }
+            else if (arg == "--host")
+            {
+                // Alias used by deploy/pisecured.service (ExecStart --host/--port).
+                cfg.rpc_bind = next(arg);
+                cfg.ws_bind = cfg.rpc_bind;
+            }
+            else if (arg == "--port")
+            {
+                int port = std::stoi(next(arg));
+                cfg.rpc_port = port;
+                cfg.ws_port = port;
             }
             else if (arg == "--conf")
             {

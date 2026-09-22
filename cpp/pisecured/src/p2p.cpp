@@ -1104,6 +1104,18 @@ namespace pisecured
         return true;
     }
 
+    void P2PServer::sleepWhileRunning(std::chrono::milliseconds total)
+    {
+        const auto slice = std::chrono::milliseconds(200);
+        auto left = total;
+        while (running_.load() && left.count() > 0)
+        {
+            auto step = left < slice ? left : slice;
+            std::this_thread::sleep_for(step);
+            left -= step;
+        }
+    }
+
     void P2PServer::stop()
     {
         if (!running_.exchange(false))
@@ -1135,9 +1147,6 @@ namespace pisecured
             bootstrapHeartbeatThread_.join();
         if (threatDetectionThread_.joinable())
             threatDetectionThread_.join();
-
-        // Close all peer connections
-        pingThread_.join();
 
         // Close all peer connections
         std::lock_guard<std::mutex> lock(peersMutex_);
@@ -1245,7 +1254,7 @@ namespace pisecured
     {
         while (running_)
         {
-            std::this_thread::sleep_for(std::chrono::seconds(10));
+            sleepWhileRunning(std::chrono::seconds(10));
 
             int outbound = getOutboundCount();
             if (outbound < MAX_OUTBOUND_CONNECTIONS)
@@ -1435,7 +1444,7 @@ namespace pisecured
     {
         while (running_)
         {
-            std::this_thread::sleep_for(std::chrono::seconds(PING_INTERVAL_SECONDS));
+            sleepWhileRunning(std::chrono::seconds(PING_INTERVAL_SECONDS));
 
             std::vector<std::shared_ptr<Peer>> currentPeers;
             {
@@ -2162,7 +2171,7 @@ namespace pisecured
     {
         while (running_)
         {
-            std::this_thread::sleep_for(std::chrono::seconds(30));
+            sleepWhileRunning(std::chrono::seconds(30));
 
             if (bootstrapWs_ && bootstrapWs_->isConnected())
             {
@@ -2243,7 +2252,7 @@ namespace pisecured
     {
         while (running_)
         {
-            std::this_thread::sleep_for(std::chrono::seconds(10)); // Run analysis every 10 seconds
+            sleepWhileRunning(std::chrono::seconds(10)); // Run analysis every 10 seconds
 
             std::vector<std::shared_ptr<Peer>> peersCopy;
             {

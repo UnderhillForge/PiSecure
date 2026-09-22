@@ -313,6 +313,8 @@ namespace pisecured
         void pingLoop();
         void bootstrapHeartbeatLoop();
         void threatDetectionLoop();
+        // Wake within ~200ms of stop() so systemd does not hit TimeoutStopSec.
+        void sleepWhileRunning(std::chrono::milliseconds total);
 
         // Bootstrap callbacks
         void onBootstrapThreatDetected(const std::string &threatType, const std::string &severity, const std::string &details);
