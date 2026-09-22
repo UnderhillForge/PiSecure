@@ -383,6 +383,10 @@ std::vector<uint8_t> PiHash::HardwareHash(
     return mixed_hash;
 }
 
+std::vector<uint8_t> PiHash::MixFinalize(const std::vector<uint8_t>& preimage, uint32_t nonce_low) {
+    return CpuOptimizedFinalize(MemoryHardMix(preimage, nonce_low));
+}
+
 std::vector<uint8_t> PiHash::MemoryHardMix(
     const std::vector<uint8_t>& hw_hash,
     uint32_t nonce) {

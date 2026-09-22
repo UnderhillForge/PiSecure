@@ -1,5 +1,6 @@
 #include "pisecured/chain_rpc.hpp"
 #include "pisecured/p2p.hpp"
+#include "pihash.h"
 
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -238,19 +239,18 @@ namespace pisecured
             return ids[0];
         }
 
-        // PiHash1 || header fields || model || serial commitment. SHA-256.
-        // Any host can recompute this. It does not read local device-tree.
-        std::array<uint8_t, 32> pihash_v1(uint32_t version,
-                                           const std::array<uint8_t, 32> &prev,
-                                           const std::array<uint8_t, 32> &merkle,
-                                           uint64_t timestamp,
-                                           uint32_t difficulty,
-                                           uint64_t nonce,
-                                           const std::string &model,
-                                           const std::array<uint8_t, 32> &serial_commitment)
+        std::vector<uint8_t> header_preimage(const char *domain,
+                                             uint32_t version,
+                                             const std::array<uint8_t, 32> &prev,
+                                             const std::array<uint8_t, 32> &merkle,
+                                             uint64_t timestamp,
+                                             uint32_t difficulty,
+                                             uint64_t nonce,
+                                             const std::string &model,
+                                             const std::array<uint8_t, 32> &serial_commitment)
         {
             std::vector<uint8_t> pre;
-            append_str(pre, "PiHash1");
+            append_str(pre, domain);
             append_u32(pre, version);
             append_bytes(pre, prev.data(), 32);
             append_bytes(pre, merkle.data(), 32);
@@ -260,7 +260,42 @@ namespace pisecured
             append_u16(pre, static_cast<uint16_t>(model.size()));
             pre.insert(pre.end(), model.begin(), model.end());
             append_bytes(pre, serial_commitment.data(), 32);
-            return sha256(pre);
+            return pre;
+        }
+
+        // Height 1–4. One SHA-256 over the PiHash1 preimage.
+        std::array<uint8_t, 32> pihash_v1(uint32_t version,
+                                           const std::array<uint8_t, 32> &prev,
+                                           const std::array<uint8_t, 32> &merkle,
+                                           uint64_t timestamp,
+                                           uint32_t difficulty,
+                                           uint64_t nonce,
+                                           const std::string &model,
+                                           const std::array<uint8_t, 32> &serial_commitment)
+        {
+            return sha256(header_preimage("PiHash1", version, prev, merkle, timestamp, difficulty, nonce, model, serial_commitment));
+        }
+
+        // Height 5+. Same preimage with domain PiHash2, then PiHash::MixFinalize.
+        std::array<uint8_t, 32> pihash_v2(uint32_t version,
+                                           const std::array<uint8_t, 32> &prev,
+                                           const std::array<uint8_t, 32> &merkle,
+                                           uint64_t timestamp,
+                                           uint32_t difficulty,
+                                           uint64_t nonce,
+                                           const std::string &model,
+                                           const std::array<uint8_t, 32> &serial_commitment)
+        {
+            const auto pre = header_preimage("PiHash2", version, prev, merkle, timestamp, difficulty, nonce, model, serial_commitment);
+            pisecure::pihash::PiHash hasher(1, 32, false);
+            const auto mixed = hasher.MixFinalize(pre, static_cast<uint32_t>(nonce));
+            std::array<uint8_t, 32> out{};
+            const size_t n = std::min(out.size(), mixed.size());
+            for (size_t i = 0; i < n; ++i)
+            {
+                out[i] = mixed[i];
+            }
+            return out;
         }
 
         json as_object_param(const json &params)
@@ -1088,7 +1123,15 @@ namespace pisecured
                                    {"challenge", issue_challenge()},
                                    {"serial_rule", "sha256(serial_utf8 || challenge_bytes)"}}
                              : json{{"model", ""}, {"serial_commitment", ""}}},
-            {"pihash", {{"algorithm", "sha256-pihash1"}, {"domain", "PiHash1"}, {"difficulty_means", "leading zero bits"}}},
+            {"pihash", next_height >= 5
+                           ? json{{"algorithm", "pihash2"},
+                                 {"domain", "PiHash2"},
+                                 {"rounds", 1},
+                                 {"memory_mb", 32},
+                                 {"difficulty_means", "leading zero bits"}}
+                           : json{{"algorithm", "sha256-pihash1"},
+                                 {"domain", "PiHash1"},
+                                 {"difficulty_means", "leading zero bits"}}},
         };
     }
 
@@ -1418,7 +1461,21 @@ namespace pisecured
             return rejected("merkle root mismatch");
         }
 
-        const auto digest = pihash_v1(1, prev, root, timestamp, difficulty, nonce, model, serial);
+        if (height >= 5)
+        {
+            std::string algo;
+            if (block.contains("pihash") && block["pihash"].is_object() && block["pihash"].contains("algorithm") && block["pihash"]["algorithm"].is_string())
+            {
+                algo = block["pihash"]["algorithm"].get<std::string>();
+            }
+            if (algo != "pihash2")
+            {
+                return rejected("pihash algorithm not pihash2");
+            }
+        }
+        const auto digest = height >= 5
+                                ? pihash_v2(1, prev, root, timestamp, difficulty, nonce, model, serial)
+                                : pihash_v1(1, prev, root, timestamp, difficulty, nonce, model, serial);
         std::array<uint8_t, 32> claimed{};
         if (!from_hex(block["hash"].get<std::string>(), claimed))
         {

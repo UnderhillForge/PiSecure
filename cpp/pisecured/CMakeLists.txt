@@ -9,6 +9,8 @@ find_package(OpenSSL REQUIRED)
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../hw
+    ${CMAKE_CURRENT_SOURCE_DIR}/../crypto
     ${OPENSSL_INCLUDE_DIR}
 )
 
@@ -33,6 +35,9 @@ set(PISECURED_SOURCES
     src/chain_rpc.cpp
     src/validator_purse.cpp
     src/ws_server.cpp
+    ../hw/pihash.cpp
+    ../hw/videocore_mailbox.cpp
+    ../crypto/sha256.cpp
 )
 
 add_executable(pisecured ${PISECURED_SOURCES})

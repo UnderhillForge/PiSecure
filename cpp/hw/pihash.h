@@ -110,6 +110,13 @@ public:
      * obscured within compiled binary to prevent spoofing.
      */
     static bool VerifyHardware(const HardwareFingerprint& fingerprint);
+
+    /**
+     * Portable digest: MemoryHardMix then CpuOptimizedFinalize.
+     * Does not read VideoCore, mailbox, or a hardware fingerprint.
+     * nonce_low is the MemoryHardMix nonce argument (low 32 bits).
+     */
+    std::vector<uint8_t> MixFinalize(const std::vector<uint8_t>& preimage, uint32_t nonce_low);
     
 private:
     int rounds_;

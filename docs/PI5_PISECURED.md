@@ -251,6 +251,16 @@ Spend accepted into the mempool, not yet in a block:
 
 A 1-unit fee floors the 60/20/8/7 shares to 0. The 1 unit is the burn remainder, not an output. The old placeholder tx is not in this mempool. Block 2 is not mined from this session.
 
+## PiHash2 from height 5
+
+Heights 1–4 stay PiHash1: one SHA-256 of the header preimage whose 7-byte domain is `PiHash1`. From height 5 the template field `pihash` is:
+
+```json
+{"algorithm": "pihash2", "domain": "PiHash2", "rounds": 1, "memory_mb": 32}
+```
+
+The preimage is the same layout with domain `PiHash2`. `submitblock` rejects a height-5 header whose `pihash.algorithm` is not `pihash2` (`pihash algorithm not pihash2`), and a PiHash2 header whose digest does not match (`pihash mismatch`) or does not meet the 2–4 leading-zero band (`pihash does not meet difficulty`).
+
 ## Height 4 serial binding
 
 Blocks 1–3 stay valid with the old rule: `serial_commitment` is any 32 non-zero bytes. From height 4, `getblocktemplate` adds a fresh challenge and does not fill the serial:
