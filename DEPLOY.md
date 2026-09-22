@@ -71,8 +71,10 @@ Do **not** use `ProtectHome=read-only` while binaries live under `$HOME`. The un
 
 ## 5. Smoke checks after deploy
 
+On a Raspberry Pi the daemon is the systemd unit, not a container. `pisecured` listens on `PISECURED_HOST`:`PISECURED_PORT` (the unit passes `--host` and `--port`). Chain data is `PISECURE_DATA_DIR`.
+
 ```bash
-pisecure --validate-only --mock-hardware version
-pisecure --validate-only --mock-hardware status
+systemctl is-active pisecured
+ss -lptn | grep 3144
 curl -fsS https://bootstrap.pisecure.org/health
 ```
