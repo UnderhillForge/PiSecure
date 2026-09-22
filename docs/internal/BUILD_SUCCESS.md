@@ -40,7 +40,7 @@ psminer --help
 psminer -w YOUR_WALLET_ADDRESS
 
 # Multi-threaded mining with custom difficulty
-psminer -w YOUR_WALLET_ADDRESS -t 4 --difficulty 146
+psminer is a GitHub Release binary. Difficulty comes from the pisecured template (band 2–4).
 
 # Testnet mining
 psminer -w YOUR_WALLET_ADDRESS --testnet
@@ -63,7 +63,7 @@ psminer -w <wallet-address>
 ### 2. Move to Private Repository
 When ready to separate psminer source code:
 ```bash
-# 1. Create private PiSecure-Miner repo
+# psminer ships as a GitHub Release binary, not from this tree.
 # 2. Move these files:
 #    - cpp/psminer/
 #    - cpp/hw/pihash.* (PiHash algorithm)

@@ -2,10 +2,10 @@
 PiHash C++ Bindings Stub - Mining Moved to Private Repository
 
 This module attempted to wrap C++ PiHash implementation.
-Mining functionality has been moved to the private PiSecure-Miner repository.
+Mining is the psminer release binary for Raspberry Pi 2-5.
 
 VALIDATION: Available through pihash module
-MINING: Moved to https://github.com/UnderhillForge/PiSecure-Miner
+MINING: Moved to https://github.com/UnderhillForge/PiSecure/releases
 """
 
 
@@ -44,13 +44,13 @@ class PiHash:
     C++ mining implementation moved to PiSecure-Miner.
     This is now a stub that raises helpful errors.
 
-    Install from: https://github.com/UnderhillForge/PiSecure-Miner
+    Install from: https://github.com/UnderhillForge/PiSecure/releases
     """
 
     def __init__(self, rounds: int = 8, memory_mb: int = 256):
         raise NotImplementedError(
             "PiHash C++ mining has been moved to PiSecure-Miner.\n"
-            "https://github.com/UnderhillForge/PiSecure-Miner"
+            "https://github.com/UnderhillForge/PiSecure/releases"
         )
 
     def compute(self, data: bytes, nonce: int, hw_fingerprint=None) -> str:
@@ -65,7 +65,7 @@ def compute_pihash(data: bytes, nonce: int, rounds: int = 8, memory_mb: int = 25
     """Compute PiHash via C++ - Mining moved to PiSecure-Miner"""
     raise NotImplementedError(
         "PiHash C++ mining has been moved to PiSecure-Miner.\n"
-        "https://github.com/UnderhillForge/PiSecure-Miner"
+        "https://github.com/UnderhillForge/PiSecure/releases"
     )
 
 
@@ -73,5 +73,5 @@ def find_nonce(block_data: bytes, difficulty: int, max_attempts: int = None) -> 
     """Find nonce via C++ - Mining moved to PiSecure-Miner"""
     raise NotImplementedError(
         "PiHash C++ mining has been moved to PiSecure-Miner.\n"
-        "https://github.com/UnderhillForge/PiSecure-Miner"
+        "https://github.com/UnderhillForge/PiSecure/releases"
     )

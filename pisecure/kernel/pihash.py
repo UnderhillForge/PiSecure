@@ -12,7 +12,7 @@ MINING FUNCTIONS (moved to PiSecure-Miner):
 - compute_pihash() - Removed (only in PiSecure-Miner)
 - find_nonce() - Removed (only in PiSecure-Miner)
 
-For mining, install: https://github.com/UnderhillForge/PiSecure-Miner
+For mining, install: https://github.com/UnderhillForge/PiSecure/releases
 """
 
 
@@ -75,11 +75,11 @@ class PiHash:
     """
     PiHash Mining Algorithm - MOVED TO PRIVATE REPOSITORY
 
-    Mining functionality has been moved to the private PiSecure-Miner repository.
+    Mining is the psminer release binary for Raspberry Pi 2-5.
     This class is now a stub that raises helpful errors.
 
     For mining on Raspberry Pi, install:
-    https://github.com/UnderhillForge/PiSecure-Miner
+    https://github.com/UnderhillForge/PiSecure/releases
 
     For validation on any platform, use:
     - count_zero_bits(hash_hex)
@@ -91,7 +91,7 @@ class PiHash:
         raise NotImplementedError(
             "PiHash mining has been moved to a private repository.\n\n"
             "To enable mining on Raspberry Pi:\n"
-            "1. Clone: https://github.com/UnderhillForge/PiSecure-Miner\n"
+            "1. Download psminer: https://github.com/UnderhillForge/PiSecure/releases\n"
             "2. Build: mkdir build && cd build && cmake .. && make -j4\n"
             "3. Run: ./psminer/psminer --wallet YOUR_ADDRESS\n\n"
             "For validation on any platform, use psvalidator instead."
@@ -121,7 +121,7 @@ def compute_pihash(data: bytes, nonce: int, hardware_fingerprint=None, rounds: i
     """Compute PiHash - Mining moved to PiSecure-Miner"""
     raise NotImplementedError(
         "PiHash mining has been moved to PiSecure-Miner private repository.\n"
-        "https://github.com/UnderhillForge/PiSecure-Miner"
+        "https://github.com/UnderhillForge/PiSecure/releases"
     )
 
 
@@ -129,7 +129,7 @@ def find_nonce(block_data: bytes, difficulty: int, max_attempts: int = None) -> 
     """Find nonce for PiHash - Mining moved to PiSecure-Miner"""
     raise NotImplementedError(
         "PiHash mining has been moved to PiSecure-Miner private repository.\n"
-        "https://github.com/UnderhillForge/PiSecure-Miner"
+        "https://github.com/UnderhillForge/PiSecure/releases"
     )
 
 
@@ -138,5 +138,5 @@ def verify_pihash(data: bytes, nonce: int, target_hash: str, hardware_fingerprin
     """Verify PiHash - Mining moved to PiSecure-Miner"""
     raise NotImplementedError(
         "PiHash mining has been moved to PiSecure-Miner private repository.\n"
-        "https://github.com/UnderhillForge/PiSecure-Miner"
+        "https://github.com/UnderhillForge/PiSecure/releases"
     )

@@ -22,14 +22,7 @@ This document outlines the sustainable, community-aligned approach to developer 
 - Fund community incentives and developer bounties
 - Bootstrap network infrastructure operations
 
-**Mining Approach:**
-```bash
-# Mine foundation allocation before public launch
-pisecure mine --wallet foundation_wallet --target 100000
-
-# Current rate: ~14,000 314ST/hour
-# Time required: ~7 hours of mining
-```
+There is no foundation pre-mine. Block subsidy is 0.200 314ST. Difficulty is a 2–4 leading-zero band, not a fixed 7-hour treasury mine.
 
 ## 💰 **Developer Earnings Model**
 
@@ -134,10 +127,10 @@ achievements = {
 
 ## 📊 **Mining Economics Strategy**
 
-### **Current Mining Data:**
-- **Rate**: 14,000 314ST/hour (875 blocks/hour)
-- **Reward**: 16 314ST/block
-- **Difficulty**: 4 (very low)
+### **Current emission:**
+- **Reward**: 0.200 314ST per block (miner 0.198, validator 0.002)
+- **Difficulty**: leading-zero bits, band 2–4, 60 second target
+- Fees split 60/20/8/7 and a burn remainder. There is no 16 314ST reward.
 
 ### **Annual Mining Caps (Recommended):**
 - **Year 1**: 500,000 314ST max (pre-adoption phase)

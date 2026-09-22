@@ -1,27 +1,6 @@
-# PiSecure One-Click Installer
+# PiSecure install
 
-**Quick installation of the entire PiSecure system on any supported platform.**
-
-## 🚀 Quick Install
-
-### Method 1: Direct from GitHub (Recommended)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/install-oneclick.sh | bash
-```
-
-Or with wget:
-```bash
-wget -qO- https://raw.githubusercontent.com/UnderhillForge/PiSecure/main/install-oneclick.sh | bash
-```
-
-### Method 2: Local Installation
-
-```bash
-git clone https://github.com/UnderhillForge/PiSecure.git
-cd PiSecure
-bash install-oneclick.sh
-```
+Validate with `pisecured` on Debian or Raspberry Pi OS. See the [README](README.md). Mining is the `psminer` binary from GitHub Releases, for Raspberry Pi 2–5 only.
 
 ---
 
@@ -35,7 +14,7 @@ bash install-oneclick.sh
 - ✅ **psvalidator** - Universal validator (works on ANY platform)
 
 ### Platform-Specific
-- 🍓 **psminer** - Mining client (Raspberry Pi only, provided via **private PiSecure-Miner repo**, not included in this public installer)
+- **psminer** - download the release binary (Raspberry Pi 2–5). It is not built from this tree.
 
 ### Dependencies
 - Python 3.7+ with cryptography, Flask, Rich, Textual
@@ -56,12 +35,12 @@ bash install-oneclick.sh
 
 | Platform | pisecure CLI | pisecured | psminer | pswallet | psvalidator |
 |----------|-------------|-----------|---------|----------|-------------|
-| **Raspberry Pi** | ✅ | ✅ | 🔒 Private repo* | ✅ | ✅ |
-| **Linux (x86_64)** | ✅ | ✅ | 🔒 Private repo* | ✅ | ✅ |
-| **macOS (Intel/ARM)** | ✅ | ✅ | 🔒 Private repo* | ✅ | ✅ |
-| **Windows (WSL)** | ✅ | ✅ | 🔒 Private repo* | ✅ | ✅ |
+| **Raspberry Pi** | ✅ | ✅ | Release binary | ✅ | ✅ |
+| **Linux (x86_64)** | ✅ | ✅ | No | ✅ | ✅ |
+| **macOS (Intel/ARM)** | ✅ | ✅ | No | ✅ | ✅ |
+| **Windows (WSL)** | ✅ | ✅ | No | ✅ | ✅ |
 
-*Mining (psminer) is distributed via the private PiSecure-Miner repository to keep hardware verification undisclosed. Mining requires authentic Raspberry Pi hardware. Validation works on ALL platforms and earns rewards!*
+Mining is the `psminer` release binary on an official Raspberry Pi 2–5. Validation runs on any CPU.
 
 ---
 
@@ -82,8 +61,7 @@ source pisecure_env/bin/activate
 # Start RPC daemon (in background or separate terminal)
 ./pisecured
 
-# Mining client (psminer) is provided via the private PiSecure-Miner repo
-# Clone/build it separately if you have authorized access (Raspberry Pi only)
+# psminer: GitHub Releases binary, Raspberry Pi 2–5 only
 
 # On ANY platform: Start validation (earn rewards!)
 ./psvalidator --rpc ws://127.0.0.1:3144

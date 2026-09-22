@@ -1,5 +1,4 @@
 #include "pihash.h"
-#include "videocore_mailbox.h"
 #include "../crypto/sha256.h"
 #include <algorithm>
 #include <sstream>
@@ -11,7 +10,6 @@
 #include <cmath>
 
 using namespace pisecure::crypto;
-using namespace pisecure::hw;  // For VideoCoreVerification
 
 namespace pisecure {
 namespace pihash {
@@ -134,20 +132,8 @@ int PiHash::CountLeadingZeroBits(const std::string& hash_hex) {
 HardwareFingerprint PiHash::GetHardwareFingerprint() {
     HardwareFingerprint fp;
     
-    // Try VideoCore mailbox verification first (strongest anti-emulation)
-    VideoCoreVerification vc_verify = verify_with_videocore();
-    if (vc_verify.is_valid && vc_verify.is_pi_hardware) {
-        // Use VideoCore-provided serial if available
-        if (!vc_verify.board_serial.empty()) {
-            fp.cpu_serial = vc_verify.board_serial;
-        }
-        fp.videocore_verified = true;
-        fp.gpu_temperature = vc_verify.gpu_temperature;
-        fp.arm_clock_rate = vc_verify.arm_clock_rate;
-    } else {
-        // Fall back to file-based verification
-        fp.videocore_verified = false;
-    }
+    // VideoCore mailbox is not linked. Identity for blocks is hw_proof.
+    fp.videocore_verified = false;
     
     // Get CPU serial from /proc/cpuinfo
     std::ifstream cpuinfo("/proc/cpuinfo");

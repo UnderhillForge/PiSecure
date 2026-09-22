@@ -568,8 +568,7 @@ show_completion() {
     echo ""
     
     if [ "$IS_PI" = true ]; then
-        echo "  # Mining client (psminer) lives in private repo"
-        echo "  # Clone/build it from the private PiSecure-Miner repository"
+        echo "  # psminer is a GitHub Release binary for Raspberry Pi 2-5"
         echo ""
     fi
     

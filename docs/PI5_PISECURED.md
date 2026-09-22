@@ -335,7 +335,7 @@ Wallet:
 
 Miner:
 
-- `psminer` and the private PiSecure-Miner repo were not built or run. `pisecured` does not produce blocks. Session 3 should call `getblocktemplate`, compute `sha256-pihash1` on an official Pi 2/3/4/5, and `submitblock`. A block that skips PiHash or `hw_proof` is rejected, so height stays 0 until that miner exists.
+- `psminer` is not in this tree. Download the release binary for Raspberry Pi 2–5. `pisecured` does not produce blocks.
 - `--mock-hardware` and `PISECURE_MOCK_HARDWARE` are hard errors. `pisecure mine` does not mine.
 - DNS now resolves one bootstrap address onto P2P port 3141. The HTTP bootstrap client is still a stub, so a live peer is not guaranteed.
 

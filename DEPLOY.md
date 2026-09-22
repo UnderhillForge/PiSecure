@@ -8,7 +8,7 @@ This repo is **private**. Public `curl | bash` from raw.githubusercontent.com wi
 |--------|-----|-------|
 | Validator / API node | Docker Compose or Python venv | Works on Mac, Linux, Pi |
 | `pisecured` RPC daemon | C++ build + systemd | Needs `libwebsockets-dev` + OpenSSL |
-| `psminer` | Private `PiSecure-Miner` repo | Pi hardware only |
+| `psminer` | GitHub Releases binary | Raspberry Pi 2–5 only |
 | Bootstrap | Separate public `PiSecure-Bootstrap` | Already on Railway at bootstrap.pisecure.org |
 
 ## 1. Docker validator (fastest)

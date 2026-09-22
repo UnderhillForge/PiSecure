@@ -36,7 +36,6 @@ set(PISECURED_SOURCES
     src/validator_purse.cpp
     src/ws_server.cpp
     ../hw/pihash.cpp
-    ../hw/videocore_mailbox.cpp
     ../crypto/sha256.cpp
 )
 

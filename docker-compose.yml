@@ -1,3 +1,4 @@
+# Not the install path. Use pisecured on Debian with systemd.
 services:
   pisecure:
     build:
@@ -8,7 +9,6 @@ services:
     restart: unless-stopped
     environment:
       PISECURE_VALIDATE_ONLY: "1"
-      PISECURE_MOCK_HARDWARE: "1"
       PISECURE_DATA_DIR: /var/lib/pisecure
       PISECURE_CONFIG_DIR: /etc/pisecure
       PISECURE_API_HOST: 0.0.0.0
