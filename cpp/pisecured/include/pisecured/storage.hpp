@@ -106,6 +106,8 @@ namespace pisecured
             std::string address;
         };
         bool utxo_available(const std::array<uint8_t, 32> &txid, uint32_t vout, uint64_t &value) const;
+        bool utxo_address(const std::array<uint8_t, 32> &txid, uint32_t vout, std::string &address) const;
+        std::filesystem::path datadir() const { return datadir_; }
         // Apply every spend and credit, or leave the set unchanged.
         bool apply_utxos(const std::vector<UtxoSpend> &spends, const std::vector<UtxoCredit> &credits);
 

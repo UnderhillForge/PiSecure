@@ -247,6 +247,35 @@ Spend accepted into the mempool, not yet in a block:
 
 A 1-unit fee floors the 60/20/8/7 shares to 0. The 1 unit is the burn remainder, not an output. The old placeholder tx is not in this mempool. Block 2 is not mined from this session.
 
+## Spending keys
+
+A spend is accepted only when each input is signed by the Ed25519 key bound to that input's address. Address strings stay UTF-8 names (`operator`, `student`). They are not pubkey hashes.
+
+Key file, owner `pisecure`, mode `0600`:
+
+`/var/lib/pisecure/wallets/<address>.json`
+
+```json
+{"address": "operator", "scheme": "ed25519", "public_key": "<64 hex>", "secret_key": "<64 hex>"}
+```
+
+`pisecure wallet bind operator` creates the file if it is missing and prints only the public key. `wallet send` loads the source key, signs, and does not print the secret.
+
+The signed bytes are UTF-8 JSON of the tx with signature fields removed and object keys sorted: `version`, `inputs` (`prev_txid`, `vout` only), `outputs` (`address`, `value`), `fee`. Example shape:
+
+```json
+{"fee":1,"inputs":[{"prev_txid":"<64 hex>","vout":0}],"outputs":[{"address":"student","value":10},{"address":"operator","value":187}],"version":1}
+```
+
+Reject strings:
+
+- `address has no spending key` — no key file for the UTXO address
+- `signature missing` — a key is bound and the input has no signature
+- `public key does not match address` — the signature was made by a different bound key
+- `signature invalid` — the public key matches but the Ed25519 signature does not
+
+On this Pi, an unsigned spend of `operator` returned `signature missing`. A spend of `operator` signed by `student` returned `public key does not match address`. The signed send `operator` → `student` of 0.010 314ST (10 units, fee 1, change 187) is mempool tx `9af4d1fea3000bf379db9b3f7eea4595b30f51200d7fb97d09d398eb3ca4d242`. Height is still 2. Block 3 was not mined.
+
 ## Blockers for later sessions
 
 Wallet:

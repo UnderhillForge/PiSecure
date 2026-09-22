@@ -1,12 +1,15 @@
 #include "pisecured/chain_rpc.hpp"
 #include "pisecured/p2p.hpp"
 
+#include <openssl/evp.h>
 #include <openssl/sha.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 
 namespace pisecured
@@ -158,6 +161,8 @@ namespace pisecured
         {
             std::array<uint8_t, 32> prev{};
             uint32_t vout = 0;
+            std::string signature_hex;
+            std::string public_key_hex;
         };
 
         struct TxOut
@@ -354,6 +359,14 @@ namespace pisecured
                     return false;
                 }
                 in.vout = item["vout"].get<uint32_t>();
+                if (item.contains("signature") && item["signature"].is_string())
+                {
+                    in.signature_hex = item["signature"].get<std::string>();
+                }
+                if (item.contains("public_key") && item["public_key"].is_string())
+                {
+                    in.public_key_hex = item["public_key"].get<std::string>();
+                }
                 inputs.push_back(in);
             }
             return true;
@@ -364,7 +377,16 @@ namespace pisecured
             json inputs = json::array();
             for (const auto &in : tx.inputs)
             {
-                inputs.push_back({{"prev_txid", to_hex(in.prev)}, {"vout", in.vout}});
+                json one = {{"prev_txid", to_hex(in.prev)}, {"vout", in.vout}};
+                if (!in.signature_hex.empty())
+                {
+                    one["signature"] = in.signature_hex;
+                }
+                if (!in.public_key_hex.empty())
+                {
+                    one["public_key"] = in.public_key_hex;
+                }
+                inputs.push_back(one);
             }
             json outputs = json::array();
             for (const auto &o : tx.outputs)
@@ -378,6 +400,8 @@ namespace pisecured
                 {"outputs", outputs},
                 {"fee", tx.fee},
                 {"spendable", !tx.inputs.empty()},
+                {"signed", !tx.inputs.empty() && std::all_of(tx.inputs.begin(), tx.inputs.end(), [](const TxIn &in)
+                                                             { return !in.signature_hex.empty(); })},
                 {"size", canonical_tx(tx).size()},
             };
         }
@@ -653,6 +677,175 @@ namespace pisecured
             }
             return true;
         }
+
+        bool decode_hex(const std::string &hex, std::vector<uint8_t> &out)
+        {
+            if (hex.size() % 2 != 0)
+            {
+                return false;
+            }
+            auto nybble = [](char c) -> int
+            {
+                if (c >= '0' && c <= '9')
+                    return c - '0';
+                if (c >= 'a' && c <= 'f')
+                    return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F')
+                    return c - 'A' + 10;
+                return -1;
+            };
+            out.clear();
+            out.reserve(hex.size() / 2);
+            for (size_t i = 0; i < hex.size(); i += 2)
+            {
+                int hi = nybble(hex[i]);
+                int lo = nybble(hex[i + 1]);
+                if (hi < 0 || lo < 0)
+                {
+                    return false;
+                }
+                out.push_back(static_cast<uint8_t>((hi << 4) | lo));
+            }
+            return true;
+        }
+
+        std::string lower_hex(std::string hex)
+        {
+            for (char &c : hex)
+            {
+                if (c >= 'A' && c <= 'F')
+                {
+                    c = static_cast<char>(c - 'A' + 'a');
+                }
+            }
+            return hex;
+        }
+
+        bool address_filename(const std::string &address)
+        {
+            if (address.empty() || address.size() > 128)
+            {
+                return false;
+            }
+            for (char c : address)
+            {
+                const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+                if (!ok)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // Bound Ed25519 public key, or false when no key file exists.
+        bool bound_public_key(const std::filesystem::path &datadir, const std::string &address, std::string &public_hex)
+        {
+            if (!address_filename(address))
+            {
+                return false;
+            }
+            const auto path = datadir / "wallets" / (address + ".json");
+            std::ifstream in(path);
+            if (!in)
+            {
+                return false;
+            }
+            try
+            {
+                json doc = json::parse(in);
+                if (!doc.is_object() || doc.value("scheme", "") != "ed25519" || !doc.contains("public_key") || !doc["public_key"].is_string())
+                {
+                    return false;
+                }
+                public_hex = lower_hex(doc["public_key"].get<std::string>());
+                std::vector<uint8_t> raw;
+                return decode_hex(public_hex, raw) && raw.size() == 32;
+            }
+            catch (const std::exception &)
+            {
+                return false;
+            }
+        }
+
+        // Canonical UTF-8 JSON of the tx with signature fields removed. Keys are sorted.
+        std::string sign_payload(const Tx &tx)
+        {
+            json inputs = json::array();
+            for (const auto &in : tx.inputs)
+            {
+                inputs.push_back({{"prev_txid", to_hex(in.prev)}, {"vout", in.vout}});
+            }
+            json outputs = json::array();
+            for (const auto &o : tx.outputs)
+            {
+                outputs.push_back({{"address", o.address}, {"value", o.value}});
+            }
+            json body = {{"fee", tx.fee}, {"inputs", inputs}, {"outputs", outputs}, {"version", tx.version}};
+            return body.dump();
+        }
+
+        bool ed25519_verify(const std::vector<uint8_t> &pubkey, const std::vector<uint8_t> &sig, const std::string &message)
+        {
+            if (pubkey.size() != 32 || sig.size() != 64)
+            {
+                return false;
+            }
+            EVP_PKEY *key = EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, nullptr, pubkey.data(), pubkey.size());
+            if (key == nullptr)
+            {
+                return false;
+            }
+            EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+            const int init_ok = ctx != nullptr && EVP_DigestVerifyInit(ctx, nullptr, nullptr, nullptr, key) == 1;
+            const int ok = init_ok && EVP_DigestVerify(ctx, sig.data(), sig.size(), reinterpret_cast<const unsigned char *>(message.data()), message.size()) == 1;
+            EVP_MD_CTX_free(ctx);
+            EVP_PKEY_free(key);
+            return ok;
+        }
+
+        bool verify_input_signatures(Storage &storage, const Tx &tx, std::string &reason)
+        {
+            if (tx.inputs.empty())
+            {
+                reason = "transaction inputs missing";
+                return false;
+            }
+            const std::string message = sign_payload(tx);
+            for (const auto &in : tx.inputs)
+            {
+                std::string owner;
+                if (!storage.utxo_address(in.prev, in.vout, owner))
+                {
+                    reason = "unknown input";
+                    return false;
+                }
+                std::string bound;
+                if (!bound_public_key(storage.datadir(), owner, bound))
+                {
+                    reason = "address has no spending key";
+                    return false;
+                }
+                if (in.signature_hex.empty())
+                {
+                    reason = "signature missing";
+                    return false;
+                }
+                if (lower_hex(in.public_key_hex) != bound)
+                {
+                    reason = "public key does not match address";
+                    return false;
+                }
+                std::vector<uint8_t> pubkey;
+                std::vector<uint8_t> sig;
+                if (!decode_hex(bound, pubkey) || !decode_hex(in.signature_hex, sig) || !ed25519_verify(pubkey, sig, message))
+                {
+                    reason = "signature invalid";
+                    return false;
+                }
+            }
+            return true;
+        }
     }
 
     bool restore_chain(Storage &storage)
@@ -865,6 +1058,10 @@ namespace pisecured
             {
                 return rejected(reason);
             }
+            if (!verify_input_signatures(storage, tx, reason))
+            {
+                return rejected(reason);
+            }
             for (const auto &existing : mempool_txs(storage))
             {
                 for (const auto &in : existing.inputs)
@@ -1037,6 +1234,10 @@ namespace pisecured
                     return rejected(reason);
                 }
                 if (!check_spendable(storage, tx, reason))
+                {
+                    return rejected(reason);
+                }
+                if (!verify_input_signatures(storage, tx, reason))
                 {
                     return rejected(reason);
                 }

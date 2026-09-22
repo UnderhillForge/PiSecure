@@ -506,6 +506,18 @@ namespace pisecured
         return true;
     }
 
+    bool Storage::utxo_address(const std::array<uint8_t, 32> &txid, uint32_t vout, std::string &address) const
+    {
+        std::lock_guard<std::mutex> lock(utxo_mutex_);
+        auto it = utxo_.find(utxo_key(txid, vout));
+        if (it == utxo_.end())
+        {
+            return false;
+        }
+        address = it->second.second;
+        return true;
+    }
+
     bool Storage::apply_utxos(const std::vector<UtxoSpend> &spends, const std::vector<UtxoCredit> &credits)
     {
         std::lock_guard<std::mutex> lock(utxo_mutex_);
