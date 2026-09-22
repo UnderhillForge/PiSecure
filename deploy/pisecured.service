@@ -1,0 +1,28 @@
+[Unit]
+Description=PiSecure Blockchain Daemon
+Documentation=https://github.com/UnderhillForge/PiSecure
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pisecure
+Group=pisecure
+WorkingDirectory=/opt/pisecure
+EnvironmentFile=-/etc/pisecure/pisecure.env
+ExecStart=/opt/pisecure/pisecured --host 0.0.0.0 --port 3144
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pisecured
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pisecure /etc/pisecure /opt/pisecure
+LimitNOFILE=65536
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

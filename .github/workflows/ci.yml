@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Syntax check
+        run: python -m compileall -q pisecure tests || python -m compileall -q pisecure
+      - name: CLI import smoke
+        env:
+          PISECURE_VALIDATE_ONLY: "1"
+          PISECURE_MOCK_HARDWARE: "1"
+          PISECURE_DATA_DIR: /tmp/pisecure-ci
+        run: |
+          mkdir -p /tmp/pisecure-ci
+          python -c "from pisecure.common.config import Config; print(Config.get_mode_string())"
+
+  cpp-daemon:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++ pkg-config libssl-dev libwebsockets-dev
+      - name: Configure pisecured
+        run: |
+          cmake -S cpp/pisecured -B cpp/pisecured/build -DCMAKE_BUILD_TYPE=Release
+      - name: Build pisecured
+        run: cmake --build cpp/pisecured/build -j 2

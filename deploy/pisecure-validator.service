@@ -1,0 +1,25 @@
+[Unit]
+Description=PiSecure Python validator / CLI node
+After=network-online.target pisecured.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pisecure
+Group=pisecure
+WorkingDirectory=/opt/pisecure
+EnvironmentFile=-/etc/pisecure/pisecure.env
+ExecStart=/opt/pisecure/pisecure_env/bin/pisecure --validate-only status
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pisecure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pisecure /etc/pisecure
+
+[Install]
+WantedBy=multi-user.target
