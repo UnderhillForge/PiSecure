@@ -1,16 +1,19 @@
 # PiSecure
 
-Validator and peer-to-peer node for a Raspberry Pi chain. The daemon is `pisecured`. Mining is a separate release binary, not this source tree.
+`pisecured` is the validator and peer-to-peer node. It runs on Debian aarch64 and Raspberry Pi OS under systemd.
 
-## Run a validator
+## Validate
 
-Debian aarch64 or Raspberry Pi OS. Any CPU can validate. It does not need to be a Pi.
+Any CPU can validate. A Pi is not required.
 
 ```bash
 pisecured --validate-only --host 0.0.0.0 --port 3144 --p2p-port 3141
 ```
 
-WebSocket JSON-RPC is port **3144**. P2P is port **3141**.
+- WebSocket JSON-RPC: **3144**
+- P2P: **3141**
+
+There is no Docker install and no mock-hardware mode.
 
 Sync from a peer:
 
@@ -21,12 +24,12 @@ pisecured --validate-only --datadir /var/lib/pisecure-sync \
   --peer 192.168.68.77:3141
 ```
 
+The unit file is `deploy/pisecured.service`. Bring-up notes are in `docs/PI5_PISECURED.md`.
+
 ## Mine
 
-Download `psminer` from [GitHub Releases](https://github.com/UnderhillForge/PiSecure/releases). Binary only. Official Raspberry Pi 2, 3, 4, or 5.
+Download the `psminer` binary from [GitHub Releases](https://github.com/UnderhillForge/PiSecure/releases). Raspberry Pi 2, 3, 4, or 5 only. The miner source is not in this repository.
 
 ## Updates
 
 OTA packages are GitHub Releases on this repository. No token is required once the repository is public.
-
-Native packages and systemd are the install path. See `docs/PI5_PISECURED.md`.
