@@ -25,7 +25,9 @@ namespace pisecured
     bool restore_chain(Storage &storage);
 
     json rpc_getblocktemplate(Storage &storage, const json &params);
-    json rpc_submitblock(Storage &storage, P2PServer *p2p, const json &params);
+    // require_local_policy: miner RPC. Synced blocks still check PiHash, model,
+    // and the serial commitment equation, but not this process's challenge cache.
+    json rpc_submitblock(Storage &storage, P2PServer *p2p, const json &params, bool require_local_policy = true);
     json rpc_sendtransaction(Storage &storage, const json &params);
     json rpc_getmempool(Storage &storage);
     json rpc_getblock(Storage &storage, const json &params);

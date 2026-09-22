@@ -1,6 +1,9 @@
 #include "pisecured/p2p.hpp"
 #include "pisecured/ws_server.hpp"
 #include "pisecured/storage.hpp"
+#include "pisecured/chain_rpc.hpp"
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/select.h>
@@ -9,6 +12,7 @@
 #include <fcntl.h>
 #include <cstring>
 #include <iostream>
+#include <cstdio>
 #include <random>
 #include <chrono>
 #include <algorithm>
@@ -1061,6 +1065,33 @@ namespace pisecured
         stop();
     }
 
+    namespace
+    {
+        void registerWithBootstrap(bool testnet)
+        {
+            const char *url = testnet ? "https://bootstrap-testnet.pisecure.org" : "https://bootstrap.pisecure.org";
+            const char *body = testnet
+                                   ? "{\"node_id\":\"pisecure-pi5-validator-testnet\",\"node_type\":\"validator\",\"services\":[\"p2p_sync\"],\"capabilities\":[\"validation\",\"p2p_sync\"],\"network\":\"testnet\"}"
+                                   : "{\"node_id\":\"pisecure-pi5-validator\",\"node_type\":\"validator\",\"services\":[\"p2p_sync\"],\"capabilities\":[\"validation\",\"p2p_sync\"],\"network\":\"mainnet\"}";
+            const std::string cmd = std::string("curl -sS -m 20 -w '\\nHTTPSTATUS:%{http_code}' -X POST '") + url +
+                                    "/api/v1/nodes/register' -H 'Content-Type: application/json' -d '" + body + "'";
+            FILE *pipe = popen(cmd.c_str(), "r");
+            if (pipe == nullptr)
+            {
+                std::cerr << "Bootstrap register failed to start curl\n";
+                return;
+            }
+            std::string output;
+            char buf[512];
+            while (fgets(buf, sizeof(buf), pipe) != nullptr)
+            {
+                output += buf;
+            }
+            const int rc = pclose(pipe);
+            std::cout << "Bootstrap register curl_exit=" << rc << " " << output << std::endl;
+        }
+    }
+
     bool P2PServer::start(const Config &cfg, Storage *storage)
     {
         if (running_.exchange(true))
@@ -1074,9 +1105,38 @@ namespace pisecured
         // Generate node ID from hardware or config
         nodeId_ = "pisecured-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
 
-        // Add bootstrap peers
-        std::vector<std::string> bootstrapHosts = {"bootstrap.pisecure.org", "bootstrap-testnet.pisecure.org"};
-        addrman_.addBootstrapPeers(bootstrapHosts, cfg.p2p_port);
+        if (storage_ && storage_->has_tip())
+        {
+            bestHeight_ = storage_->get_best_height();
+        }
+
+        if (!cfg.peers.empty())
+        {
+            for (const auto &spec : cfg.peers)
+            {
+                const auto colon = spec.rfind(':');
+                if (colon == std::string::npos)
+                {
+                    continue;
+                }
+                PeerAddr addr{};
+                addr.addr.sin_family = AF_INET;
+                addr.addr.sin_port = htons(static_cast<uint16_t>(std::stoi(spec.substr(colon + 1))));
+                addr.services = SERVICES_NODE;
+                addr.failures = 0;
+                if (inet_pton(AF_INET, spec.substr(0, colon).c_str(), &addr.addr.sin_addr) == 1)
+                {
+                    addrman_.add(addr);
+                    std::cout << "Sync peer " << spec << std::endl;
+                }
+            }
+        }
+        else
+        {
+            std::vector<std::string> bootstrapHosts = {"bootstrap.pisecure.org", "bootstrap-testnet.pisecure.org"};
+            addrman_.addBootstrapPeers(bootstrapHosts, cfg.p2p_port);
+            registerWithBootstrap(cfg.testnet);
+        }
 
         // Initialize Bootstrap WebSocket client for Sentinel AI coordination
         std::string wsUrl = cfg.testnet ? "wss://bootstrap-testnet.pisecure.org" : "wss://bootstrap.pisecure.org";
@@ -1280,8 +1340,6 @@ namespace pisecured
     {
         while (running_)
         {
-            sleepWhileRunning(std::chrono::seconds(10));
-
             int outbound = getOutboundCount();
             if (outbound < MAX_OUTBOUND_CONNECTIONS)
             {
@@ -1295,6 +1353,7 @@ namespace pisecured
                     // No peers available
                 }
             }
+            sleepWhileRunning(std::chrono::seconds(10));
         }
     }
 
@@ -1496,6 +1555,10 @@ namespace pisecured
 
     void P2PServer::sendVersion(std::shared_ptr<Peer> peer)
     {
+        if (storage_ && storage_->has_tip())
+        {
+            bestHeight_ = storage_->get_best_height();
+        }
         uint64_t nonce = std::random_device()();
         uint64_t timestamp = std::chrono::system_clock::now().time_since_epoch().count() / 1000000000ULL;
         PeerAddr myAddr{};
@@ -1597,6 +1660,10 @@ namespace pisecured
         std::vector<InvVect> toRequest;
         for (const auto &inv : invs)
         {
+            if (inv.type == static_cast<uint32_t>(InvType::BLOCK) && storage_ && storage_->block_index(inv.hash))
+            {
+                continue;
+            }
             if (peer->knownInv.insert(inv).second)
             {
                 // New inventory, request it
@@ -1629,8 +1696,8 @@ namespace pisecured
         {
             if (inv.type == static_cast<uint32_t>(InvType::BLOCK))
             {
-                // Look up block by hash and send
-                auto block_data = storage_->get_block_by_hash(inv.hash);
+                auto index = storage_->block_index(inv.hash);
+                auto block_data = index ? storage_->read_block(*index) : std::nullopt;
                 if (block_data)
                 {
                     auto block_msg = MessageSerializer::serializeBlock(*block_data);
@@ -1690,10 +1757,10 @@ namespace pisecured
         }
 
         std::vector<BlockHeader> headers;
-        if (start_header)
+        // No locator match (empty chain on the peer): start at height 1.
+        // Height 0 is the zero prev-hash anchor, not a stored block.
+        uint32_t start_height = start_header ? start_header->height + 1 : 1;
         {
-            // Send up to 2000 headers starting from the found header
-            uint32_t start_height = start_header->height + 1;
             uint32_t best_height = storage_->get_best_height();
 
             for (uint32_t h = start_height; h <= best_height && headers.size() < 2000; ++h)
@@ -1751,6 +1818,24 @@ namespace pisecured
 
         for (auto &header : headers)
         {
+            if (prev_header)
+            {
+                header.height = prev_header->height + 1;
+            }
+            else if (header.prevBlockHash == std::array<uint8_t, 32>{})
+            {
+                header.height = 1;
+            }
+            else if (auto known = storage_->get_header_by_hash(header.prevBlockHash))
+            {
+                header.height = known->height + 1;
+            }
+            else
+            {
+                std::cout << "Header does not connect to local tip" << std::endl;
+                return;
+            }
+
             // Validate PoW
             if (!storage_->validate_block_pow(header.hash, header.difficulty))
             {
@@ -1771,7 +1856,7 @@ namespace pisecured
             }
 
             // Check if we already have this block
-            if (!storage_->get_block_by_hash(header.hash))
+            if (!storage_->block_index(header.hash))
             {
                 // Request the block
                 InvVect inv;
@@ -1798,6 +1883,37 @@ namespace pisecured
 
         if (!storage_)
         {
+            return;
+        }
+
+        if (!payload.empty() && payload[0] == '{')
+        {
+            try
+            {
+                const std::string text(payload.begin(), payload.end());
+                json block = json::parse(text);
+                json result = rpc_submitblock(*storage_, this, block, false);
+                const std::string status = result.value("status", "");
+                if (status == "accepted")
+                {
+                    bestHeight_ = storage_->get_best_height();
+                    std::cout << "Synced block height " << result.value("height", 0) << " hash " << result.value("hash", "") << std::endl;
+                }
+                else
+                {
+                    const std::string reason = result.value("reason", "");
+                    std::cout << "Rejected synced block: " << reason << std::endl;
+                    if (reason.find("does not link") == std::string::npos && reason.find("does not extend") == std::string::npos)
+                    {
+                        peer->increaseBanScore(20);
+                    }
+                }
+            }
+            catch (const std::exception &ex)
+            {
+                std::cout << "Rejected synced block: " << ex.what() << std::endl;
+                peer->increaseBanScore(10);
+            }
             return;
         }
 
@@ -2063,6 +2179,35 @@ namespace pisecured
     {
         std::lock_guard<std::mutex> lock(peersMutex_);
         return peers_.size();
+    }
+
+    std::string P2PServer::reachableHost() const
+    {
+        std::string host = "127.0.0.1";
+        ifaddrs *list = nullptr;
+        if (getifaddrs(&list) == 0)
+        {
+            for (ifaddrs *ifa = list; ifa != nullptr; ifa = ifa->ifa_next)
+            {
+                if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != AF_INET)
+                {
+                    continue;
+                }
+                if ((ifa->ifa_flags & IFF_LOOPBACK) != 0 || (ifa->ifa_flags & IFF_UP) == 0)
+                {
+                    continue;
+                }
+                char buf[INET_ADDRSTRLEN] = {};
+                auto *in = reinterpret_cast<sockaddr_in *>(ifa->ifa_addr);
+                if (inet_ntop(AF_INET, &in->sin_addr, buf, sizeof(buf)) != nullptr)
+                {
+                    host = buf;
+                    break;
+                }
+            }
+            freeifaddrs(list);
+        }
+        return host;
     }
 
     void P2PServer::broadcastThreatAlert(const ThreatAlert &alert)

@@ -259,6 +259,7 @@ namespace pisecured
                 if (!p2p)
                     throw std::runtime_error("p2p not available");
                 result["count"] = static_cast<uint32_t>(p2p->getPeerCount());
+                result["self"] = {{"address", p2p->reachableHost()}, {"port", p2p->listenPort()}, {"host", "pisecure.local"}};
             }
             else if (method == "getthreats")
             {

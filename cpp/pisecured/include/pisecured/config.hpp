@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include <filesystem>
 
 namespace pisecured
@@ -24,6 +25,7 @@ namespace pisecured
         std::filesystem::path tls_key_path;  // PEM key
         std::string p2p_bind = "0.0.0.0";
         int p2p_port = 3141;
+        std::vector<std::string> peers;
         bool testnet = false;
         bool validate_only = false;
         bool daemonize = false;

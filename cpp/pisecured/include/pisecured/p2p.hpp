@@ -280,6 +280,9 @@ namespace pisecured
         void requestBlock(const std::array<uint8_t, 32> &blockHash);
         void requestHeaders(uint32_t startHeight);
         size_t getPeerCount() const;
+        // Non-loopback IPv4 and the listen port, for getpeers. Not 0.0.0.0.
+        std::string reachableHost() const;
+        int listenPort() const { return config_.p2p_port; }
 
         // Distributed threat detection and coordination
         void broadcastThreatAlert(const ThreatAlert &alert);

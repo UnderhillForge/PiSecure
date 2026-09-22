@@ -891,7 +891,7 @@ namespace pisecured
             return ok;
         }
 
-        bool verify_input_signatures(Storage &storage, const Tx &tx, std::string &reason)
+        bool verify_input_signatures(Storage &storage, const Tx &tx, std::string &reason, bool require_local_key)
         {
             if (tx.inputs.empty())
             {
@@ -908,24 +908,37 @@ namespace pisecured
                     return false;
                 }
                 std::string bound;
-                if (!bound_public_key(storage.datadir(), owner, bound))
+                const bool have_local = bound_public_key(storage.datadir(), owner, bound);
+                if (require_local_key && !have_local)
                 {
                     reason = "address has no spending key";
                     return false;
                 }
                 if (in.signature_hex.empty())
                 {
-                    reason = "signature missing";
-                    return false;
+                    // Miner RPC still rejects. A synced historical block may
+                    // predate signatures; the PiHash and model checks still run.
+                    if (require_local_key)
+                    {
+                        reason = "signature missing";
+                        return false;
+                    }
+                    continue;
                 }
-                if (lower_hex(in.public_key_hex) != bound)
+                if (have_local && lower_hex(in.public_key_hex) != bound)
                 {
                     reason = "public key does not match address";
                     return false;
                 }
+                if (!have_local && in.public_key_hex.empty())
+                {
+                    reason = "public key does not match address";
+                    return false;
+                }
+                const std::string &use_key = have_local ? bound : in.public_key_hex;
                 std::vector<uint8_t> pubkey;
                 std::vector<uint8_t> sig;
-                if (!decode_hex(bound, pubkey) || !decode_hex(in.signature_hex, sig) || !ed25519_verify(pubkey, sig, message))
+                if (!decode_hex(use_key, pubkey) || !decode_hex(in.signature_hex, sig) || !ed25519_verify(pubkey, sig, message))
                 {
                     reason = "signature invalid";
                     return false;
@@ -1158,7 +1171,7 @@ namespace pisecured
             {
                 return rejected(reason);
             }
-            if (!verify_input_signatures(storage, tx, reason))
+            if (!verify_input_signatures(storage, tx, reason, true))
             {
                 return rejected(reason);
             }
@@ -1204,7 +1217,7 @@ namespace pisecured
         return json{{"count", txs.size()}, {"bytes", bytes}, {"transactions", txs}};
     }
 
-    json rpc_submitblock(Storage &storage, P2PServer *p2p, const json &params)
+    json rpc_submitblock(Storage &storage, P2PServer *p2p, const json &params, bool require_local_policy)
     {
         json block = as_object_param(params);
         if (!block.is_object() || block.empty())
@@ -1303,7 +1316,7 @@ namespace pisecured
             }
             challenge_hex = lower_hex(proof["challenge"].get<std::string>());
             std::array<uint8_t, 32> challenge_raw{};
-            if (!from_hex(challenge_hex, challenge_raw) || !challenge_was_issued(challenge_hex))
+            if (!from_hex(challenge_hex, challenge_raw) || (require_local_policy && !challenge_was_issued(challenge_hex)))
             {
                 return rejected("hw_proof challenge mismatch");
             }
@@ -1364,7 +1377,7 @@ namespace pisecured
                 {
                     return rejected(reason);
                 }
-                if (!verify_input_signatures(storage, tx, reason))
+                if (!verify_input_signatures(storage, tx, reason, require_local_policy))
                 {
                     return rejected(reason);
                 }
@@ -1535,7 +1548,7 @@ namespace pisecured
         {
             return rejected("block too large");
         }
-        if (height >= 4)
+        if (height >= 4 && require_local_policy)
         {
             retire_challenge(challenge_hex);
         }

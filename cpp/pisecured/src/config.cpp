@@ -112,6 +112,10 @@ namespace pisecured
             {
                 cfg.p2p_port = std::stoi(next(arg));
             }
+            else if (arg == "--peer")
+            {
+                cfg.peers.push_back(next(arg));
+            }
             else if (arg == "--testnet")
             {
                 cfg.testnet = true;

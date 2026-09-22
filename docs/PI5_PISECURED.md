@@ -232,7 +232,22 @@ Inputs, when present, must name UTXOs created by an earlier accepted block (coin
 
 ### Peers
 
-`bootstrap.pisecure.org` is resolved with `getaddrinfo` and one IPv4 address is dialed on the P2P port. The HTTP bootstrap register/query calls, and the in-process "WebSocket" client that logs `Connected (HTTP fallback mode)`, are still stubs.
+Block download is P2P on port 3141. It does not go through bootstrap. `getpeers` on this Pi reports `192.168.68.77:3141` (`pisecure.local`). `0.0.0.0` is only the listen bind.
+
+A second validator syncs with the existing framing: `VERSION`, `VERACK`, `GETHEADERS`, `HEADERS`, `GETDATA`, `BLOCK`. Headers start at height 1. The block payload is the stored JSON. The receiver runs the same PiHash and `hw_proof` checks as `submitblock`. A challenge does not have to be in the receiver's template cache, because the binding is in the block. A `qemu-x86` model is still rejected.
+
+```bash
+/opt/pisecure/pisecured \
+  --datadir /tmp/pisecure-sync \
+  --host 127.0.0.1 --port 13144 \
+  --p2p-bind 127.0.0.1 --p2p-port 31411 \
+  --validate-only \
+  --peer 127.0.0.1:3141
+```
+
+That process reached height 5, tip `0a560a2a038e03da504e50a865d565b01c1e1c33b08ab0fc26f826c9ed98ed28`.
+
+Register is optional. On startup the node POSTs `https://bootstrap.pisecure.org/api/v1/nodes/register` with `node_id` `pisecure-pi5-validator` and `node_type` `validator`. A 4xx or a down host is logged and does not stop listening or sync. The live list does not store a P2P address. Bootstrap's advertised genesis `2742129a…` is not our chain: height 1's `prev_block_hash` is 32 zero bytes. The in-process bootstrap WebSocket that logs `Connected (HTTP fallback mode)` is still a stub and is not used to fetch blocks.
 
 ## Height 1 spend
 

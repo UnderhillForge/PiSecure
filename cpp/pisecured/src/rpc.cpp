@@ -312,9 +312,8 @@ namespace pisecured
         if (!p2p_)
             return json::array();
 
-        // This would require exposing peer list from P2PServer
-        // For now, return placeholder
         json result = json::array();
+        result.push_back({{"address", p2p_->reachableHost()}, {"port", p2p_->listenPort()}, {"host", "pisecure.local"}});
         return result;
     }
 
