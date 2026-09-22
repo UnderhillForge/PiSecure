@@ -10,9 +10,10 @@ import click
 from pisecure.cli.formatters import print_error, print_info, print_table
 from pisecure.common.config import Config
 from pisecure.core import SignChain
+from pisecure import __version__
 
 
-def _build_rows(info: dict) -> list[list[str]]:
+def _build_rows(info: dict) -> list:
     return [
         ["Blocks", str(info.get("blocks", 0))],
         ["Pending TX", str(info.get("pending_transactions", 0))],
@@ -22,6 +23,24 @@ def _build_rows(info: dict) -> list[list[str]]:
 
 
 def register(cli):
+    @cli.command(name="status")
+    @click.pass_context
+    def status_cmd(ctx):
+        """Print one-shot node and chain status."""
+        click.echo(f"PiSecure {__version__}")
+        click.echo(f"Mode: {ctx.obj.get('mode', 'unknown')}")
+        click.echo(f"Config: {Config.get_mode_string()}")
+        click.echo(f"Data dir: {Config.get_data_dir()}")
+        click.echo(f"Bootstrap: {Config.BOOTSTRAP_URL}")
+        try:
+            chain = SignChain(use_hybrid_storage=Config.USE_HYBRID_STORAGE)
+            info = chain.get_chain_info()
+            rows = _build_rows(info)
+            print_table("Chain", ["Metric", "Value"], rows)
+        except Exception as exc:  # noqa: BLE001
+            print_error(f"Chain unavailable: {exc}")
+            click.echo("Node process is up; chain data not initialized yet.")
+
     @cli.command(name="monitor")
     @click.option(
         "--refresh", default=2.0, show_default=True, help="Refresh interval seconds"
@@ -42,7 +61,6 @@ def register(cli):
             return
 
         latest = {"data": None}
-        stop_event = Event()
 
         def collect():
             try:
@@ -51,7 +69,6 @@ def register(cli):
             except Exception as exc:  # noqa: BLE001
                 latest["data"] = {"error": str(exc)}
 
-        # Register background collection task
         task_name = "monitor.collect"
         scheduler.add_interval_task(
             task_name, interval_seconds=refresh, func=collect, run_immediately=True
@@ -74,6 +91,5 @@ def register(cli):
             print_info("Monitor stopped by user")
         finally:
             scheduler.remove_task(task_name)
-            stop_event.set()
 
     return cli
