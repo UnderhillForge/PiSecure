@@ -170,9 +170,11 @@ namespace pisecured
             if (method == "getblockcount")
                 return success_response(method_getblockcount(params), id);
             else if (method == "getblock")
-                return success_response(method_getblock(params), id);
+                return success_response(storage_ ? rpc_getblock(*storage_, params) : json::object(), id);
             else if (method == "getheader")
-                return success_response(method_getheader(params), id);
+                return success_response(storage_ ? rpc_getheader(*storage_, params) : json::object(), id);
+            else if (method == "listunspent")
+                return success_response(storage_ ? rpc_listunspent(*storage_, params) : json::object(), id);
             else if (method == "gettransaction")
                 return success_response(method_gettransaction(params), id);
             else if (method == "sendtransaction")

@@ -109,6 +109,16 @@ namespace pisecured
         // Apply every spend and credit, or leave the set unchanged.
         bool apply_utxos(const std::vector<UtxoSpend> &spends, const std::vector<UtxoCredit> &credits);
 
+        struct UtxoEntry
+        {
+            std::string txid_hex;
+            uint32_t vout = 0;
+            uint64_t units = 0;
+            std::string address;
+        };
+        std::vector<UtxoEntry> list_utxos(const std::string &address) const;
+        std::optional<uint64_t> block_index(const std::array<uint8_t, 32> &hash) const;
+
     private:
         std::filesystem::path datadir_;
         std::filesystem::path blocks_path_;

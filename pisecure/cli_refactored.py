@@ -143,7 +143,7 @@ register_cli_commands(cli)
 
 if legacy_cli:
     for name in legacy_cli.list_commands(None):
-        if name not in ["status", "mine", "version", "config"]:  # Skip duplicates
+        if name not in ["status", "mine", "version", "config", "wallet"]:  # Skip duplicates
             cmd = legacy_cli.get_command(None, name)
             if cmd:
                 cli.add_command(cmd, name=name)

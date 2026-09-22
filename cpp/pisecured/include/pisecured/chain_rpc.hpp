@@ -28,4 +28,7 @@ namespace pisecured
     json rpc_submitblock(Storage &storage, P2PServer *p2p, const json &params);
     json rpc_sendtransaction(Storage &storage, const json &params);
     json rpc_getmempool(Storage &storage);
+    json rpc_getblock(Storage &storage, const json &params);
+    json rpc_getheader(Storage &storage, const json &params);
+    json rpc_listunspent(Storage &storage, const json &params);
 }

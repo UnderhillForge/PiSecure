@@ -1226,4 +1226,161 @@ namespace pisecured
         std::cout << "Accepted block height " << height << " hash " << to_hex(digest) << "\n";
         return json{{"status", "accepted"}, {"hash", to_hex(digest)}, {"height", height}};
     }
+
+    namespace
+    {
+        bool find_header(Storage &storage, const json &params, BlockHeader &header)
+        {
+            json key = params;
+            if (params.is_array())
+            {
+                if (params.empty())
+                {
+                    return false;
+                }
+                key = params[0];
+            }
+            if (key.is_object())
+            {
+                if (key.contains("height"))
+                {
+                    key = key["height"];
+                }
+                else if (key.contains("hash"))
+                {
+                    key = key["hash"];
+                }
+            }
+            if (key.is_number_unsigned())
+            {
+                auto found = storage.get_header_by_height(key.get<uint32_t>());
+                if (!found)
+                {
+                    return false;
+                }
+                header = *found;
+                return true;
+            }
+            if (!key.is_string())
+            {
+                return false;
+            }
+            const std::string text = key.get<std::string>();
+            if (text.size() == 64)
+            {
+                std::array<uint8_t, 32> hash{};
+                if (!from_hex(text, hash))
+                {
+                    return false;
+                }
+                auto found = storage.get_header_by_hash(hash);
+                if (!found)
+                {
+                    return false;
+                }
+                header = *found;
+                return true;
+            }
+            try
+            {
+                auto found = storage.get_header_by_height(static_cast<uint32_t>(std::stoul(text)));
+                if (!found)
+                {
+                    return false;
+                }
+                header = *found;
+                return true;
+            }
+            catch (const std::exception &)
+            {
+                return false;
+            }
+        }
+
+        json header_json(const BlockHeader &header)
+        {
+            return json{
+                {"hash", to_hex(header.hash)},
+                {"height", header.height},
+                {"version", header.version},
+                {"prev_block_hash", to_hex(header.prevBlockHash)},
+                {"merkle_root", to_hex(header.merkleRoot)},
+                {"timestamp", header.timestamp},
+                {"difficulty", header.difficulty},
+                {"nonce", header.nonce},
+            };
+        }
+    }
+
+    json rpc_getblock(Storage &storage, const json &params)
+    {
+        BlockHeader header{};
+        if (!find_header(storage, params, header))
+        {
+            throw std::runtime_error("Block not found");
+        }
+        auto index = storage.block_index(header.hash);
+        if (index)
+        {
+            auto raw = storage.read_block(*index);
+            if (raw)
+            {
+                try
+                {
+                    const std::string text(raw->begin(), raw->end());
+                    json obj = json::parse(text);
+                    obj["hash"] = to_hex(header.hash);
+                    obj["height"] = header.height;
+                    return obj;
+                }
+                catch (const std::exception &)
+                {
+                }
+            }
+        }
+        return header_json(header);
+    }
+
+    json rpc_getheader(Storage &storage, const json &params)
+    {
+        BlockHeader header{};
+        if (!find_header(storage, params, header))
+        {
+            throw std::runtime_error("Header not found");
+        }
+        return header_json(header);
+    }
+
+    json rpc_listunspent(Storage &storage, const json &params)
+    {
+        std::string address;
+        if (params.is_array() && !params.empty() && params[0].is_string())
+        {
+            address = params[0].get<std::string>();
+        }
+        else if (params.is_string())
+        {
+            address = params.get<std::string>();
+        }
+        else
+        {
+            json obj = as_object_param(params);
+            if (obj.is_object() && obj.contains("address") && obj["address"].is_string())
+            {
+                address = obj["address"].get<std::string>();
+            }
+        }
+        json rows = json::array();
+        uint64_t total = 0;
+        for (const auto &row : storage.list_utxos(address))
+        {
+            total += row.units;
+            rows.push_back({{"txid", row.txid_hex},
+                            {"vout", row.vout},
+                            {"units", row.units},
+                            {"address", row.address},
+                            {"amount", units_314st(row.units)}});
+        }
+        return json{{"address", address}, {"units", total}, {"amount", units_314st(total)}, {"utxos", rows}};
+    }
 }

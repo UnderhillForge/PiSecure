@@ -230,6 +230,23 @@ Inputs, when present, must name UTXOs created by an earlier accepted block (coin
 
 `bootstrap.pisecure.org` is resolved with `getaddrinfo` and one IPv4 address is dialed on the P2P port. The HTTP bootstrap register/query calls, and the in-process "WebSocket" client that logs `Connected (HTTP fallback mode)`, are still stubs.
 
+## Height 1 spend
+
+Block `0fbe305838fbb59e4ec010d7319a3461a2513663f3643959da3d39c23265fecf` is height 1. Its coinbase txid is `f67580eb5438505cdd19d0cbff2f4370d888be8acfed91d8b212af189db4b9d7`. Miner output vout **0** pays 198 units to `operator`. Validator output vout 1 pays 2 units to `validator`.
+
+`pisecure wallet utxos` and `pisecure wallet send` talk to `ws://127.0.0.1:3144` and use this UTXO map. CLI amounts are **314ST**. `0.050` is 50 units, because 1 unit is 0.001 314ST. The default fee `0.001` is 1 unit.
+
+Spend accepted into the mempool, not yet in a block:
+
+- txid `8c2962a752385f08e2a9b4c74437e10d999931273f6b42de7d89b5dfee2a7345`
+- input `f67580eb…b9d7` vout 0
+- outputs: `student` 50 units, `operator` 147 units change
+- fee 1 unit
+- next template for miner `operator` includes it (`spendable: true`, `fee_units` 1)
+- merkle root `fa64931b1c8f761f8b70081e33383aae30f65d86614466fd4e42d8c44c783eb0`
+
+A 1-unit fee floors the 60/20/8/7 shares to 0. The 1 unit is the burn remainder, not an output. The old placeholder tx is not in this mempool. Block 2 is not mined from this session.
+
 ## Blockers for later sessions
 
 Wallet:

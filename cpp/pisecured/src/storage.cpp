@@ -143,38 +143,45 @@ namespace pisecured
                 continue;
             }
 
-            uint64_t offset = 0;
-            while (in)
+            std::error_code size_ec;
+            const uint64_t file_bytes = std::filesystem::file_size(file, size_ec);
+            if (size_ec)
             {
+                continue;
+            }
+            // Legacy files can start with a non-length prefix. Step until a
+            // uint32 length fits and the payload begins with '{'.
+            uint64_t offset = 0;
+            while (offset + sizeof(uint32_t) <= file_bytes)
+            {
+                in.clear();
+                in.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
                 uint32_t len = 0;
                 in.read(reinterpret_cast<char *>(&len), sizeof(len));
                 if (!in)
                 {
                     break;
                 }
-                if (len == 0)
+                const uint64_t frame_end = offset + sizeof(uint32_t) + static_cast<uint64_t>(len);
+                char first = 0;
+                if (len > 0 && frame_end <= file_bytes)
                 {
-                    break;
+                    in.read(&first, 1);
                 }
-                std::vector<uint8_t> skip(len);
-                in.read(reinterpret_cast<char *>(skip.data()), len);
-                if (!in)
+                if (len > 0 && frame_end <= file_bytes && in && first == '{')
                 {
-                    break;
+                    BlockPos pos;
+                    std::string fname = file.filename().string();
+                    int fnum = std::stoi(fname.substr(3, 5));
+                    pos.file = static_cast<uint32_t>(fnum);
+                    pos.offset = offset;
+                    pos.size = len;
+                    index_.push_back(pos);
+                    ++next_index_;
+                    offset = frame_end;
+                    continue;
                 }
-
-                // Record index entry
-                BlockPos pos;
-                // extract file index from filename
-                std::string fname = file.filename().string();
-                int fnum = std::stoi(fname.substr(3, 5));
-                pos.file = static_cast<uint32_t>(fnum);
-                pos.offset = offset;
-                pos.size = len;
-                index_.push_back(pos);
-                ++next_index_;
-
-                offset += sizeof(len) + len;
+                ++offset;
             }
 
             // Track last file size
@@ -525,5 +532,41 @@ namespace pisecured
             utxo_[utxo_key(credit.txid, credit.vout)] = {credit.value, credit.address};
         }
         return true;
+    }
+
+    std::vector<Storage::UtxoEntry> Storage::list_utxos(const std::string &address) const
+    {
+        std::lock_guard<std::mutex> lock(utxo_mutex_);
+        std::vector<UtxoEntry> rows;
+        for (const auto &item : utxo_)
+        {
+            if (!address.empty() && item.second.second != address)
+            {
+                continue;
+            }
+            const auto colon = item.first.rfind(':');
+            if (colon == std::string::npos)
+            {
+                continue;
+            }
+            UtxoEntry row;
+            row.txid_hex = item.first.substr(0, colon);
+            row.vout = static_cast<uint32_t>(std::stoul(item.first.substr(colon + 1)));
+            row.units = item.second.first;
+            row.address = item.second.second;
+            rows.push_back(row);
+        }
+        return rows;
+    }
+
+    std::optional<uint64_t> Storage::block_index(const std::array<uint8_t, 32> &hash) const
+    {
+        std::lock_guard<std::mutex> lock(io_mutex_);
+        auto it = hash_to_index_.find(hash);
+        if (it == hash_to_index_.end())
+        {
+            return std::nullopt;
+        }
+        return it->second;
     }
 }

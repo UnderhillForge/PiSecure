@@ -322,21 +322,19 @@ namespace pisecured
             {
                 if (!storage)
                     throw std::runtime_error("storage not available");
-                if (params.empty())
-                    throw std::runtime_error("getblock requires block hash or height parameter");
-                // For now, return basic block info (full implementation fetches from storage)
-                result["height"] = storage->get_best_height();
-                result["hash"] = "placeholder_hash";
-                result["transactions"] = 0;
+                result = rpc_getblock(*storage, params);
             }
             else if (method == "getheader")
             {
                 if (!storage)
                     throw std::runtime_error("storage not available");
-                if (params.empty())
-                    throw std::runtime_error("getheader requires block hash parameter");
-                result["height"] = storage->get_best_height();
-                result["timestamp"] = (uint64_t)std::time(nullptr);
+                result = rpc_getheader(*storage, params);
+            }
+            else if (method == "listunspent")
+            {
+                if (!storage)
+                    throw std::runtime_error("storage not available");
+                result = rpc_listunspent(*storage, params);
             }
             else if (method == "gettransaction")
             {
