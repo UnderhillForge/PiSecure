@@ -260,6 +260,12 @@ namespace pisecured
                     throw std::runtime_error("p2p not available");
                 result["count"] = static_cast<uint32_t>(p2p->getPeerCount());
                 result["self"] = {{"address", p2p->reachableHost()}, {"port", p2p->listenPort()}, {"host", "pisecure.local"}};
+                json hints = json::array();
+                for (const auto &hint : p2p->bootstrapHints())
+                {
+                    hints.push_back({{"address", hint.first}, {"port", hint.second}, {"hint", true}});
+                }
+                result["hints"] = hints;
             }
             else if (method == "getthreats")
             {

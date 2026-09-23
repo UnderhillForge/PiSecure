@@ -13,6 +13,7 @@
 #include <cstring>
 #include <iostream>
 #include <cstdio>
+#include <cstdlib>
 #include <random>
 #include <chrono>
 #include <algorithm>
@@ -1065,33 +1066,6 @@ namespace pisecured
         stop();
     }
 
-    namespace
-    {
-        void registerWithBootstrap(bool testnet)
-        {
-            const char *url = testnet ? "https://bootstrap-testnet.pisecure.org" : "https://bootstrap.pisecure.org";
-            const char *body = testnet
-                                   ? "{\"node_id\":\"pisecure-pi5-validator-testnet\",\"node_type\":\"validator\",\"services\":[\"p2p_sync\"],\"capabilities\":[\"validation\",\"p2p_sync\"],\"network\":\"testnet\"}"
-                                   : "{\"node_id\":\"pisecure-pi5-validator\",\"node_type\":\"validator\",\"services\":[\"p2p_sync\"],\"capabilities\":[\"validation\",\"p2p_sync\"],\"network\":\"mainnet\"}";
-            const std::string cmd = std::string("curl -sS -m 20 -w '\\nHTTPSTATUS:%{http_code}' -X POST '") + url +
-                                    "/api/v1/nodes/register' -H 'Content-Type: application/json' -d '" + body + "'";
-            FILE *pipe = popen(cmd.c_str(), "r");
-            if (pipe == nullptr)
-            {
-                std::cerr << "Bootstrap register failed to start curl\n";
-                return;
-            }
-            std::string output;
-            char buf[512];
-            while (fgets(buf, sizeof(buf), pipe) != nullptr)
-            {
-                output += buf;
-            }
-            const int rc = pclose(pipe);
-            std::cout << "Bootstrap register curl_exit=" << rc << " " << output << std::endl;
-        }
-    }
-
     bool P2PServer::start(const Config &cfg, Storage *storage)
     {
         if (running_.exchange(true))
@@ -1135,7 +1109,6 @@ namespace pisecured
         {
             std::vector<std::string> bootstrapHosts = {"bootstrap.pisecure.org", "bootstrap-testnet.pisecure.org"};
             addrman_.addBootstrapPeers(bootstrapHosts, cfg.p2p_port);
-            registerWithBootstrap(cfg.testnet);
         }
 
         // Initialize Bootstrap WebSocket client for Sentinel AI coordination
@@ -2338,10 +2311,174 @@ namespace pisecured
         return hash;
     }
 
+    std::vector<std::pair<std::string, int>> P2PServer::bootstrapHints() const
+    {
+        std::lock_guard<std::mutex> lock(hintMutex_);
+        return bootstrapHints_;
+    }
+
+    void P2PServer::publishBootstrap()
+    {
+        // Optional directory update. A failed POST must not stop listen or sync.
+        if (!config_.peers.empty())
+        {
+            return;
+        }
+        try
+        {
+            if (storage_ != nullptr && storage_->has_tip())
+            {
+                bestHeight_ = storage_->get_best_height();
+            }
+            const auto tipBytes = storage_ != nullptr ? storage_->get_best_block_hash() : std::array<uint8_t, 32>{};
+            static const char *hexd = "0123456789abcdef";
+            std::string tip(64, '0');
+            for (size_t i = 0; i < tipBytes.size(); ++i)
+            {
+                tip[i * 2] = hexd[tipBytes[i] >> 4];
+                tip[i * 2 + 1] = hexd[tipBytes[i] & 0x0f];
+            }
+            const std::string host = reachableHost();
+            const char *base = config_.testnet ? "https://bootstrap-testnet.pisecure.org" : "https://bootstrap.pisecure.org";
+            // Stable id. This host's name is "pisecure" (8 chars). A repeat
+            // register of an older validator id returns 409 and cannot change type.
+            const std::string nodeId = config_.testnet ? "pisecure-pi5-validator-testnet" : "pisecure";
+            const std::string body =
+                std::string("{\"node_id\":\"") + nodeId +
+                "\",\"node_type\":\"miner\",\"services\":[\"mining\",\"p2p_sync\"],\"capabilities\":[\"mining\",\"p2p_sync\"],\"network\":\"" +
+                (config_.testnet ? "testnet" : "mainnet") +
+                "\",\"p2p_host\":\"" + host +
+                "\",\"p2p_port\":" + std::to_string(config_.p2p_port) +
+                ",\"rpc_port\":" + std::to_string(config_.ws_port) +
+                ",\"height\":" + std::to_string(bestHeight_) +
+                ",\"tip\":\"" + tip + "\"}";
+
+            auto http = [](const std::string &method, const std::string &url, const std::string &payload, std::string &response) -> int
+            {
+                std::string cmd = "curl -sS -m 20 -w '\\nHTTPSTATUS:%{http_code}' -X " + method + " '" + url + "'";
+                char path[] = "/tmp/pisecure-bootstrap-XXXXXX";
+                int fd = -1;
+                if (!payload.empty())
+                {
+                    fd = mkstemp(path);
+                    if (fd < 0)
+                    {
+                        response = "mkstemp failed";
+                        return 0;
+                    }
+                    const ssize_t wrote = ::write(fd, payload.data(), payload.size());
+                    ::close(fd);
+                    if (wrote < 0 || static_cast<size_t>(wrote) != payload.size())
+                    {
+                        ::unlink(path);
+                        response = "write failed";
+                        return 0;
+                    }
+                    cmd += " -H 'Content-Type: application/json' --data-binary @" + std::string(path);
+                }
+                FILE *pipe = popen(cmd.c_str(), "r");
+                if (pipe == nullptr)
+                {
+                    if (fd >= 0)
+                    {
+                        ::unlink(path);
+                    }
+                    response = "curl failed to start";
+                    return 0;
+                }
+                std::string output;
+                char buf[512];
+                while (fgets(buf, sizeof(buf), pipe) != nullptr)
+                {
+                    output += buf;
+                }
+                pclose(pipe);
+                if (fd >= 0)
+                {
+                    ::unlink(path);
+                }
+                const auto pos = output.rfind("HTTPSTATUS:");
+                if (pos == std::string::npos)
+                {
+                    response = output;
+                    return 0;
+                }
+                response = output.substr(0, pos);
+                while (!response.empty() && (response.back() == '\n' || response.back() == '\r'))
+                {
+                    response.pop_back();
+                }
+                return std::atoi(output.c_str() + pos + std::strlen("HTTPSTATUS:"));
+            };
+
+            std::string response;
+            const int code = http("POST", std::string(base) + "/api/v1/nodes/register", body, response);
+            std::cout << "Bootstrap register HTTP " << code << " " << response << std::endl;
+            if (code == 409)
+            {
+                const std::string statusBody = body.substr(0, body.size() - 1) + ",\"status\":\"active\"}";
+                std::string statusResponse;
+                const int statusCode = http("POST", std::string(base) + "/api/v1/nodes/status", statusBody, statusResponse);
+                std::cout << "Bootstrap status HTTP " << statusCode << " " << statusResponse << std::endl;
+            }
+
+            std::string listBody;
+            const int listCode = http("GET", std::string(base) + "/api/v1/nodes/list", "", listBody);
+            if (listCode == 200)
+            {
+                std::vector<std::pair<std::string, int>> hints;
+                try
+                {
+                    json doc = json::parse(listBody);
+                    if (doc.contains("nodes") && doc["nodes"].is_array())
+                    {
+                        for (const auto &node : doc["nodes"])
+                        {
+                            std::string hintHost;
+                            if (node.contains("p2p_host") && node["p2p_host"].is_string())
+                            {
+                                hintHost = node["p2p_host"].get<std::string>();
+                            }
+                            else if (node.contains("address") && node["address"].is_string())
+                            {
+                                hintHost = node["address"].get<std::string>();
+                            }
+                            if (hintHost.empty() || hintHost == "0.0.0.0" || hintHost == host)
+                            {
+                                continue;
+                            }
+                            int hintPort = 3141;
+                            if (node.contains("p2p_port") && node["p2p_port"].is_number_integer())
+                            {
+                                hintPort = node["p2p_port"].get<int>();
+                            }
+                            hints.emplace_back(hintHost, hintPort);
+                        }
+                    }
+                }
+                catch (const std::exception &)
+                {
+                }
+                std::lock_guard<std::mutex> lock(hintMutex_);
+                bootstrapHints_ = std::move(hints);
+            }
+        }
+        catch (const std::exception &ex)
+        {
+            std::cerr << "Bootstrap register error: " << ex.what() << std::endl;
+        }
+    }
+
     void P2PServer::bootstrapHeartbeatLoop()
     {
+        auto nextRegister = std::chrono::steady_clock::now();
         while (running_)
         {
+            if (std::chrono::steady_clock::now() >= nextRegister)
+            {
+                publishBootstrap();
+                nextRegister = std::chrono::steady_clock::now() + std::chrono::seconds(300);
+            }
             sleepWhileRunning(std::chrono::seconds(30));
 
             if (bootstrapWs_ && bootstrapWs_->isConnected())

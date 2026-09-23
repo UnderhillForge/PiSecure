@@ -283,6 +283,8 @@ namespace pisecured
         // Non-loopback IPv4 and the listen port, for getpeers. Not 0.0.0.0.
         std::string reachableHost() const;
         int listenPort() const { return config_.p2p_port; }
+        // Bootstrap list addresses. Hints only; blocks are still verified.
+        std::vector<std::pair<std::string, int>> bootstrapHints() const;
 
         // Distributed threat detection and coordination
         void broadcastThreatAlert(const ThreatAlert &alert);
@@ -308,6 +310,9 @@ namespace pisecured
         mutable std::mutex peersMutex_;
         uint32_t bestHeight_;
         std::string nodeId_;
+        mutable std::mutex hintMutex_;
+        std::vector<std::pair<std::string, int>> bootstrapHints_;
+        void publishBootstrap();
 
         // Thread functions
         void acceptLoop();

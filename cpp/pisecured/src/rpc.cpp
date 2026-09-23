@@ -314,6 +314,10 @@ namespace pisecured
 
         json result = json::array();
         result.push_back({{"address", p2p_->reachableHost()}, {"port", p2p_->listenPort()}, {"host", "pisecure.local"}});
+        for (const auto &hint : p2p_->bootstrapHints())
+        {
+            result.push_back({{"address", hint.first}, {"port", hint.second}, {"hint", true}});
+        }
         return result;
     }
 
