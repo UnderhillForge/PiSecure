@@ -1172,6 +1172,9 @@ namespace pisecured
         threatDetectionThread_ = std::thread(&P2PServer::threatDetectionLoop, this);
 
         std::cout << "P2P server started on port " << cfg.p2p_port << std::endl;
+        const AdvertisedP2P advertised = advertisedP2P();
+        std::cout << "advertising p2p at " << advertised.host << ":" << advertised.port
+                  << " source=" << advertised.source << std::endl;
         return true;
     }
 
@@ -2195,6 +2198,103 @@ namespace pisecured
         return host;
     }
 
+    P2PServer::AdvertisedP2P P2PServer::advertisedP2P() const
+    {
+        AdvertisedP2P out;
+        out.port = config_.p2p_port > 0 ? config_.p2p_port : 3141;
+        if (const char *envPort = std::getenv("PISECURE_P2P_PORT"))
+        {
+            if (envPort[0] != '\0')
+            {
+                const int parsed = std::atoi(envPort);
+                if (parsed > 0 && parsed < 65536)
+                {
+                    out.port = parsed;
+                }
+            }
+        }
+
+        auto refused = [](const std::string &host)
+        {
+            return host.empty() || host == "0.0.0.0" || host == "::" || host == "127.0.0.1" || host == "::1";
+        };
+        if (const char *envHost = std::getenv("PISECURE_P2P_HOST"))
+        {
+            if (envHost[0] != '\0' && !refused(envHost))
+            {
+                out.host = envHost;
+                out.source = "env";
+                return out;
+            }
+        }
+
+        auto linkLocal = [](uint32_t hostOrder)
+        {
+            return (hostOrder & 0xFFFF0000u) == 0xA9FE0000u;
+        };
+        auto tailnet = [](uint32_t hostOrder)
+        {
+            return hostOrder >= 0x64400000u && hostOrder <= 0x647FFFFFu;
+        };
+        auto dockerOrDummy = [](const char *name)
+        {
+            if (name == nullptr || name[0] == '\0')
+            {
+                return true;
+            }
+            const std::string iface(name);
+            return iface == "docker0" || iface.rfind("docker", 0) == 0 || iface.rfind("br-", 0) == 0 || iface.rfind("dummy", 0) == 0;
+        };
+
+        std::string tailscale;
+        std::string lan;
+        ifaddrs *list = nullptr;
+        if (getifaddrs(&list) == 0)
+        {
+            for (ifaddrs *ifa = list; ifa != nullptr; ifa = ifa->ifa_next)
+            {
+                if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != AF_INET)
+                {
+                    continue;
+                }
+                if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0)
+                {
+                    continue;
+                }
+                auto *in = reinterpret_cast<sockaddr_in *>(ifa->ifa_addr);
+                const uint32_t hostOrder = ntohl(in->sin_addr.s_addr);
+                char buf[INET_ADDRSTRLEN] = {};
+                if (inet_ntop(AF_INET, &in->sin_addr, buf, sizeof(buf)) == nullptr)
+                {
+                    continue;
+                }
+                const std::string host = buf;
+                if (refused(host) || linkLocal(hostOrder))
+                {
+                    continue;
+                }
+                if (ifa->ifa_name != nullptr && std::strcmp(ifa->ifa_name, "tailscale0") == 0 && tailnet(hostOrder))
+                {
+                    tailscale = host;
+                }
+                if (lan.empty() && !dockerOrDummy(ifa->ifa_name) && std::strcmp(ifa->ifa_name, "tailscale0") != 0)
+                {
+                    lan = host;
+                }
+            }
+            freeifaddrs(list);
+        }
+        if (!tailscale.empty())
+        {
+            out.host = tailscale;
+            out.source = "tailscale";
+            return out;
+        }
+        out.host = lan;
+        out.source = "lan";
+        return out;
+    }
+
     void P2PServer::broadcastThreatAlert(const ThreatAlert &alert)
     {
         auto payload = MessageSerializer::serializeThreatAlert(alert);
@@ -2421,15 +2521,15 @@ namespace pisecured
                 bestHeight_ = storage_->get_best_height();
             }
             const std::string tip = hex32(storage_ != nullptr ? storage_->get_best_block_hash() : std::array<uint8_t, 32>{});
-            const std::string host = reachableHost();
+            const AdvertisedP2P advertised = advertisedP2P();
             const char *base = config_.testnet ? "https://bootstrap-testnet.pisecure.org" : "https://bootstrap.pisecure.org";
             json body = {
                 {"node_id", bootstrapNodeId_},
                 {"node_type", config_.validate_only ? "validator" : "miner"},
                 {"services", json::array({"mining", "p2p_sync"})},
                 {"capabilities", json::array({"mining", "validation"})},
-                {"p2p_host", host},
-                {"p2p_port", config_.p2p_port},
+                {"p2p_host", advertised.host},
+                {"p2p_port", advertised.port},
                 {"rpc_port", config_.ws_port},
                 {"height", bestHeight_},
                 {"tip", tip},
@@ -2457,11 +2557,12 @@ namespace pisecured
                 bestHeight_ = storage_->get_best_height();
             }
             const std::string tip = hex32(storage_ != nullptr ? storage_->get_best_block_hash() : std::array<uint8_t, 32>{});
+            const AdvertisedP2P advertised = advertisedP2P();
             const char *base = config_.testnet ? "https://bootstrap-testnet.pisecure.org" : "https://bootstrap.pisecure.org";
             json body = {
                 {"node_id", bootstrapNodeId_},
-                {"p2p_host", reachableHost()},
-                {"p2p_port", config_.p2p_port},
+                {"p2p_host", advertised.host},
+                {"p2p_port", advertised.port},
                 {"rpc_port", config_.ws_port},
                 {"height", bestHeight_},
                 {"tip", tip},
@@ -2560,10 +2661,11 @@ namespace pisecured
                 --height;
             }
             const json mempool = rpc_getmempool(*storage_);
+            const AdvertisedP2P advertised = advertisedP2P();
             json body = {
                 {"node_id", bootstrapNodeId_},
-                {"p2p_host", reachableHost()},
-                {"p2p_port", config_.p2p_port},
+                {"p2p_host", advertised.host},
+                {"p2p_port", advertised.port},
                 {"rpc_port", config_.ws_port},
                 {"height", bestHeight_},
                 {"tip", tip},

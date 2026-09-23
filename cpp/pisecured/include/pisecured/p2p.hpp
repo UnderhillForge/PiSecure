@@ -313,6 +313,13 @@ namespace pisecured
         mutable std::mutex hintMutex_;
         std::vector<std::pair<std::string, int>> bootstrapHints_;
         std::string bootstrapNodeId_;
+        struct AdvertisedP2P
+        {
+            std::string host;
+            int port = 3141;
+            const char *source = "lan";
+        };
+        AdvertisedP2P advertisedP2P() const;
         void registerBootstrapNode();
         void postBootstrapStatus();
         void reportBootstrapChain();
