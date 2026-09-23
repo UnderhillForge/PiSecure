@@ -1,5 +1,6 @@
 #include "pisecured/config.hpp"
 #include "pisecured/daemon.hpp"
+#include "release_update.hpp"
 #include <iostream>
 #include <csignal>
 #include <atomic>
@@ -16,6 +17,24 @@ static void handle_signal(int)
 int main(int argc, char *argv[])
 {
     using namespace pisecured;
+
+    if (argc >= 3 && std::string(argv[1]) == "update" && std::string(argv[2]) == "download")
+    {
+        const auto report = pisecure_update::check_release(PISECURE_RELEASE);
+        std::cout << report.line << std::endl;
+        if (report.kind != pisecure_update::Report::Kind::Newer)
+        {
+            return report.kind == pisecure_update::Report::Kind::Skipped ? 0 : 0;
+        }
+        std::string err;
+        if (!pisecure_update::download_member(report, "pisecured", "/tmp/pisecured", err))
+        {
+            std::cerr << err << std::endl;
+            return 1;
+        }
+        pisecure_update::print_daemon_install(report.tag);
+        return 0;
+    }
 
     Config cfg = load_config(argc, argv);
 

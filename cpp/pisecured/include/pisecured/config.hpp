@@ -29,6 +29,8 @@ namespace pisecured
         bool testnet = false;
         bool validate_only = false;
         bool daemonize = false;
+        bool no_update_check = false;
+        bool apply_update = false;
         int max_peers = 32;
         bool hybrid_storage = true;
 

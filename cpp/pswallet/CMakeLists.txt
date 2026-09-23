@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.12)
-project(pswallet VERSION 1.0.0 LANGUAGES CXX)
+project(pswallet VERSION 1.0.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,6 +17,7 @@ find_package(OpenSSL REQUIRED)
 # Include directories
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common
     ${CURL_INCLUDE_DIRS}
     ${OPENSSL_INCLUDE_DIR}
 )
@@ -33,10 +34,12 @@ endif()
 # Source files
 set(PSWALLET_SOURCES
     src/main.cpp
+    ../common/release_update.cpp
 )
 
 # Main executable
 add_executable(pswallet ${PSWALLET_SOURCES})
+target_compile_definitions(pswallet PRIVATE PSWALLET_VERSION="${PROJECT_VERSION}" PISECURE_RELEASE="0.2.0")
 
 target_link_libraries(pswallet
     Threads::Threads

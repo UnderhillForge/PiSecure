@@ -1,3 +1,5 @@
+#include "release_update.hpp"
+
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -33,6 +35,57 @@ namespace
 
     PassOpt g_pass;
     bool g_dry_run = false;
+    bool g_no_update_check = false;
+
+    void maybe_check_update()
+    {
+        if (g_no_update_check)
+        {
+            return;
+        }
+        if (const char *env = std::getenv("PISECURE_NO_UPDATE"))
+        {
+            const std::string flag = env;
+            if (flag == "1" || flag == "true" || flag == "TRUE" || flag == "yes")
+            {
+                return;
+            }
+        }
+        try
+        {
+            const auto report = pisecure_update::check_release(PISECURE_RELEASE);
+            std::cerr << report.line << "\n";
+            if (report.kind != pisecure_update::Report::Kind::Newer)
+            {
+                return;
+            }
+            if (!isatty(STDIN_FILENO))
+            {
+                return;
+            }
+            std::cerr << "Download pswallet " << report.tag << "? [y/N] " << std::flush;
+            std::string answer;
+            if (!std::getline(std::cin, answer))
+            {
+                return;
+            }
+            if (answer != "y" && answer != "Y")
+            {
+                return;
+            }
+            std::string err;
+            if (!pisecure_update::download_member(report, "pswallet", "/tmp/pswallet", err))
+            {
+                std::cerr << err << "\n";
+                return;
+            }
+            pisecure_update::print_wallet_install();
+        }
+        catch (const std::exception &)
+        {
+            std::cerr << "update check skipped\n";
+        }
+    }
 
     constexpr uint64_t kScryptN = 16384;
     constexpr uint64_t kScryptR = 8;
@@ -1246,14 +1299,14 @@ namespace
         {
             if (row.is_object() && fold_name(row.value("name", "")) == folded)
             {
-                row["name"] = folded;
+                row["name"] = name;
                 row["address"] = ps1;
                 replaced = true;
             }
         }
         if (!replaced)
         {
-            doc["reserved_bind"].push_back({{"name", folded}, {"address", ps1}});
+            doc["reserved_bind"].push_back({{"name", name}, {"address", ps1}});
         }
         if (!write_privileged(path, doc.dump(2) + "\n", "0644"))
         {
@@ -1316,7 +1369,7 @@ namespace
         json tx = {
             {"version", 1},
             {"type", "register"},
-            {"name", is_reserved_name(name) ? fold_name(name) : name},
+            {"name", name},
             {"address", ps1},
             {"fee", 1},
             {"inputs", json::array({{{"prev_txid", chosen->txid}, {"vout", chosen->vout}}})},
@@ -1376,16 +1429,20 @@ namespace
             std::cerr << err << "\n";
             return 1;
         }
-        const Coin *chosen = nullptr;
+        std::sort(coins.begin(), coins.end(), [](const Coin &a, const Coin &b)
+                  { return a.units > b.units; });
+        std::vector<Coin> chosen;
+        uint64_t sum = 0;
         for (const auto &coin : coins)
         {
-            if (coin.units >= pay + fee)
+            if (sum >= pay + fee)
             {
-                chosen = &coin;
                 break;
             }
+            chosen.push_back(coin);
+            sum += coin.units;
         }
-        if (chosen == nullptr)
+        if (sum < pay + fee)
         {
             if (g_dry_run)
             {
@@ -1401,7 +1458,12 @@ namespace
             std::cerr << src << " has no coin covering " << amount << " 314ST plus fee " << fee_text << "\n";
             return 1;
         }
-        const uint64_t change = chosen->units - pay - fee;
+        const uint64_t change = sum - pay - fee;
+        json inputs = json::array();
+        for (const auto &coin : chosen)
+        {
+            inputs.push_back({{"prev_txid", coin.txid}, {"vout", coin.vout}});
+        }
         json outputs = json::array({{{"address", dst_addr}, {"value", pay}}});
         if (change > 0)
         {
@@ -1410,7 +1472,7 @@ namespace
         json tx = {
             {"version", 1},
             {"fee", fee},
-            {"inputs", json::array({{{"prev_txid", chosen->txid}, {"vout", chosen->vout}}})},
+            {"inputs", inputs},
             {"outputs", outputs},
         };
         if (!sign_tx(tx, key, err))
@@ -1467,6 +1529,11 @@ int main(int argc, char **argv)
             usage();
             return 0;
         }
+        if (arg == "--version")
+        {
+            std::cout << "pswallet " PSWALLET_VERSION "\n";
+            return 0;
+        }
         if (arg == "--grant")
         {
             grant = true;
@@ -1475,6 +1542,11 @@ int main(int argc, char **argv)
         if (arg == "--dry-run")
         {
             g_dry_run = true;
+            continue;
+        }
+        if (arg == "--no-update-check")
+        {
+            g_no_update_check = true;
             continue;
         }
         if (arg == "--fee" && i + 1 < argc)
@@ -1500,6 +1572,7 @@ int main(int argc, char **argv)
     {
         if (cmd == "create" && positional.size() == 1)
         {
+            maybe_check_update();
             return cmd_create();
         }
         if (cmd == "encrypt" && positional.size() == 2)
@@ -1508,10 +1581,12 @@ int main(int argc, char **argv)
         }
         if (cmd == "list" && positional.size() == 1)
         {
+            maybe_check_update();
             return cmd_list();
         }
         if (cmd == "balance" && positional.size() == 2)
         {
+            maybe_check_update();
             return cmd_balance(positional[1]);
         }
         if (cmd == "utxos" && positional.size() == 2)
@@ -1528,6 +1603,7 @@ int main(int argc, char **argv)
         }
         if (cmd == "send" && positional.size() == 4)
         {
+            maybe_check_update();
             return cmd_send(positional[1], positional[2], positional[3], fee);
         }
     }

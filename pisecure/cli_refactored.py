@@ -151,6 +151,9 @@ if legacy_cli:
 
 def main():
     """Main entry point for PiSecure CLI."""
+    if len(sys.argv) >= 3 and sys.argv[1] == "update" and sys.argv[2] == "download":
+        binary = "/opt/pisecure/pisecured"
+        os.execv(binary, [binary, "update", "download"])
     click_context: dict = {}
     try:
         cli(obj=click_context)

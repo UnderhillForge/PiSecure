@@ -51,4 +51,4 @@ Grandfather strings `operator` and `student` still spend when that key file exis
 
 ## OTA
 
-`psminer` checks GitHub Releases on this repository. It asks before it downloads an update.
+`pisecured` and `pswallet` read the latest GitHub Release on this repository (`pisecure-pi5-v*-aarch64.tar.gz`). A newer tag is logged with its URL and sha256. Nothing is installed unless the daemon is started with `--apply-update`, or you run `pisecure update download`. `pswallet` asks before it downloads, and the default is no. `psminer` asks before it downloads an update.

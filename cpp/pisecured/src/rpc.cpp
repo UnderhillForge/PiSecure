@@ -3,6 +3,7 @@
 #include "pisecured/p2p.hpp"
 #include "pisecured/validator_purse.hpp"
 #include "pisecured/chain_rpc.hpp"
+#include "release_update.hpp"
 #include <iostream>
 #include <chrono>
 #include <iomanip>
@@ -199,6 +200,21 @@ namespace pisecured
                 return success_response(method_submitblock(params), id);
             else if (method == "getblocktemplate")
                 return success_response(method_getblocktemplate(params), id);
+            else if (method == "checkupdate")
+            {
+                const auto report = pisecure_update::check_release(PISECURE_RELEASE);
+                json body = {{"status", report.kind == pisecure_update::Report::Kind::Newer ? "available" : report.kind == pisecure_update::Report::Kind::Current ? "current" : "skipped"},
+                             {"line", report.line}};
+                if (!report.tag.empty())
+                    body["tag"] = report.tag;
+                if (!report.url.empty())
+                    body["url"] = report.url;
+                if (!report.sha256.empty())
+                    body["sha256"] = report.sha256;
+                if (report.kind == pisecure_update::Report::Kind::Newer)
+                    pisecure_update::write_available("/var/lib/pisecure/update-available.json", report);
+                return success_response(body, id);
+            }
             else
                 return error_response(-32601, "Method not found", id);
         }

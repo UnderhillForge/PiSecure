@@ -1,5 +1,6 @@
 #include "pisecured/daemon.hpp"
 #include "pisecured/chain_rpc.hpp"
+#include "release_update.hpp"
 #include <iostream>
 #include <csignal>
 
@@ -92,6 +93,35 @@ namespace pisecured
                 std::cerr << "RPC start failed\n";
                 running_ = false;
                 return false;
+            }
+        }
+
+        if (!config_.no_update_check)
+        {
+            try
+            {
+                const auto report = pisecure_update::check_release(PISECURE_RELEASE);
+                std::cout << report.line << std::endl;
+                if (report.kind == pisecure_update::Report::Kind::Newer)
+                {
+                    pisecure_update::write_available((config_.datadir / "update-available.json").string(), report);
+                    if (config_.apply_update)
+                    {
+                        std::string err;
+                        if (pisecure_update::download_member(report, "pisecured", "/tmp/pisecured", err))
+                        {
+                            pisecure_update::print_daemon_install(report.tag);
+                        }
+                        else
+                        {
+                            std::cerr << err << std::endl;
+                        }
+                    }
+                }
+            }
+            catch (const std::exception &)
+            {
+                std::cout << "update check skipped" << std::endl;
             }
         }
 

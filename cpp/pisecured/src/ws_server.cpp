@@ -1,5 +1,6 @@
 #include "pisecured/ws_server.hpp"
 #include "pisecured/chain_rpc.hpp"
+#include "release_update.hpp"
 #include <iostream>
 #include <cstring>
 #include <algorithm>
@@ -392,6 +393,28 @@ namespace pisecured
                 result["service"] = service_name;
                 result["registered"] = true;
                 result["endpoint"] = service_host + ":" + std::to_string(service_port);
+            }
+            else if (method == "checkupdate")
+            {
+                const auto report = pisecure_update::check_release(PISECURE_RELEASE);
+                result["status"] = report.kind == pisecure_update::Report::Kind::Newer ? "available" : report.kind == pisecure_update::Report::Kind::Current ? "current" : "skipped";
+                result["line"] = report.line;
+                if (!report.tag.empty())
+                {
+                    result["tag"] = report.tag;
+                }
+                if (!report.url.empty())
+                {
+                    result["url"] = report.url;
+                }
+                if (!report.sha256.empty())
+                {
+                    result["sha256"] = report.sha256;
+                }
+                if (report.kind == pisecure_update::Report::Kind::Newer)
+                {
+                    pisecure_update::write_available("/var/lib/pisecure/update-available.json", report);
+                }
             }
             else if (method == "pinsresolve")
             {

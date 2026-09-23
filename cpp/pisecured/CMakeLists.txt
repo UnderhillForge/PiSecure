@@ -11,6 +11,7 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../hw
     ${CMAKE_CURRENT_SOURCE_DIR}/../crypto
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common
     ${OPENSSL_INCLUDE_DIR}
 )
 
@@ -37,9 +38,11 @@ set(PISECURED_SOURCES
     src/ws_server.cpp
     ../hw/pihash.cpp
     ../crypto/sha256.cpp
+    ../common/release_update.cpp
 )
 
 add_executable(pisecured ${PISECURED_SOURCES})
+target_compile_definitions(pisecured PRIVATE PISECURE_RELEASE="0.2.0")
 
 target_link_libraries(pisecured
     Threads::Threads

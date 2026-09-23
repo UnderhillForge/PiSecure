@@ -55,6 +55,14 @@ namespace pisecured
         cfg.ws_port = cfg.rpc_port;
 
         bool explicit_validator_path = false;
+        if (const char *no_update = std::getenv("PISECURE_NO_UPDATE"))
+        {
+            const std::string flag = no_update;
+            if (flag == "1" || flag == "true" || flag == "TRUE" || flag == "yes")
+            {
+                cfg.no_update_check = true;
+            }
+        }
 
         for (int i = 1; i < argc; ++i)
         {
@@ -135,6 +143,14 @@ namespace pisecured
             else if (arg == "--no-hybrid-storage")
             {
                 cfg.hybrid_storage = false;
+            }
+            else if (arg == "--no-update-check")
+            {
+                cfg.no_update_check = true;
+            }
+            else if (arg == "--apply-update")
+            {
+                cfg.apply_update = true;
             }
             else if (arg == "--no-validator-rewards")
             {
