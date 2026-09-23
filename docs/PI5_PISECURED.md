@@ -343,7 +343,7 @@ Left untouched on purpose: Docker/compose files from `bda1027` / `5cbaab1`, OTA 
 
 ## Name backup
 
-A long address is `ps1` plus hex(SHA256(ed25519 public key)). Key files are mode 0600 in `/var/lib/pisecure/wallets/`. Back them up or the coins are unspendable.
+A long address is `ps1` plus hex(SHA256(ed25519 public key)). Key files are mode 0600 in `/var/lib/pisecure/wallets/`. `pswallet encrypt` stores the seed as scrypt and ChaCha20-Poly1305 in `secret_key_enc`. `public_key` stays plaintext. The passphrase is not written in the file. Back up the file and remember the passphrase, or the coins are unspendable.
 
 On this Pi:
 

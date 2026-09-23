@@ -1,3 +1,4 @@
+#include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <openssl/sha.h>
@@ -7,6 +8,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -23,6 +25,18 @@ using json = nlohmann::json;
 
 namespace
 {
+    struct PassOpt
+    {
+        bool from_flag = false;
+        std::string value;
+    };
+
+    PassOpt g_pass;
+    bool g_dry_run = false;
+
+    constexpr uint64_t kScryptN = 16384;
+    constexpr uint64_t kScryptR = 8;
+    constexpr uint64_t kScryptP = 1;
     std::string data_dir()
     {
         const char *env = std::getenv("PISECURE_DATA_DIR");
@@ -483,7 +497,198 @@ namespace
         std::string secret_hex;
     };
 
-    bool load_key(const std::string &address, Key &key, std::string &err)
+    struct EchoOff
+    {
+        termios saved{};
+        bool active = false;
+        EchoOff()
+        {
+            if (!isatty(STDIN_FILENO) || tcgetattr(STDIN_FILENO, &saved) != 0)
+            {
+                return;
+            }
+            termios next = saved;
+            next.c_lflag &= ~tcflag_t(ECHO);
+            active = tcsetattr(STDIN_FILENO, TCSANOW, &next) == 0;
+        }
+        ~EchoOff()
+        {
+            if (active)
+            {
+                tcsetattr(STDIN_FILENO, TCSANOW, &saved);
+            }
+        }
+    };
+
+    std::string prompt_passphrase(std::string &err)
+    {
+        if (!isatty(STDIN_FILENO))
+        {
+            err = "passphrase required";
+            return {};
+        }
+        std::cerr << "passphrase: " << std::flush;
+        std::string line;
+        {
+            EchoOff hidden;
+            if (!std::getline(std::cin, line))
+            {
+                err = "passphrase required";
+                return {};
+            }
+        }
+        std::cerr << "\n";
+        if (line.empty())
+        {
+            err = "passphrase required";
+            return {};
+        }
+        return line;
+    }
+
+    std::string passphrase_for(bool required, std::string &err)
+    {
+        if (g_pass.from_flag)
+        {
+            if (g_pass.value.empty())
+            {
+                err = "passphrase required";
+                return {};
+            }
+            return g_pass.value;
+        }
+        if (const char *env = std::getenv("PISECURE_WALLET_PASS"))
+        {
+            if (env[0] != '\0')
+            {
+                return env;
+            }
+        }
+        if (!required)
+        {
+            return {};
+        }
+        return prompt_passphrase(err);
+    }
+
+    bool scrypt_key(const std::string &pass, const uint8_t *salt, size_t salt_len, uint8_t out[32])
+    {
+        return EVP_PBE_scrypt(pass.data(), pass.size(), salt, salt_len, kScryptN, kScryptR, kScryptP, 64ull * 1024ull * 1024ull, out, 32) == 1;
+    }
+
+    bool seal_seed(const std::string &pass, const std::string &public_hex, const std::vector<uint8_t> &seed, json &enc, std::string &err)
+    {
+        if (seed.size() != 32)
+        {
+            err = "spending key is not ed25519";
+            return false;
+        }
+        uint8_t salt[16];
+        uint8_t nonce[12];
+        uint8_t key[32];
+        if (RAND_bytes(salt, sizeof(salt)) != 1 || RAND_bytes(nonce, sizeof(nonce)) != 1 || !scrypt_key(pass, salt, sizeof(salt), key))
+        {
+            err = "could not encrypt spending key";
+            return false;
+        }
+        EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+        uint8_t ct[32];
+        uint8_t tag[16];
+        int len = 0;
+        int final_len = 0;
+        const bool ok = ctx != nullptr &&
+                        EVP_EncryptInit_ex(ctx, EVP_chacha20_poly1305(), nullptr, nullptr, nullptr) == 1 &&
+                        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, 12, nullptr) == 1 &&
+                        EVP_EncryptInit_ex(ctx, nullptr, nullptr, key, nonce) == 1 &&
+                        EVP_EncryptUpdate(ctx, nullptr, &len, reinterpret_cast<const uint8_t *>(public_hex.data()), static_cast<int>(public_hex.size())) == 1 &&
+                        EVP_EncryptUpdate(ctx, ct, &len, seed.data(), 32) == 1 &&
+                        EVP_EncryptFinal_ex(ctx, ct + len, &final_len) == 1 &&
+                        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag) == 1;
+        EVP_CIPHER_CTX_free(ctx);
+        OPENSSL_cleanse(key, sizeof(key));
+        if (!ok || len + final_len != 32)
+        {
+            err = "could not encrypt spending key";
+            return false;
+        }
+        std::vector<uint8_t> packed(ct, ct + 32);
+        packed.insert(packed.end(), tag, tag + 16);
+        enc = {{"kdf", "scrypt"},
+               {"kdf_n", kScryptN},
+               {"kdf_r", kScryptR},
+               {"kdf_p", kScryptP},
+               {"cipher", "chacha20poly1305"},
+               {"salt", hex_of(salt, sizeof(salt))},
+               {"nonce", hex_of(nonce, sizeof(nonce))},
+               {"ciphertext", hex_of(packed.data(), packed.size())}};
+        return true;
+    }
+
+    bool open_seed(const std::string &pass, const std::string &public_hex, const json &enc, std::string &secret_hex, std::string &err)
+    {
+        if (!enc.is_object() || enc.value("kdf", "") != "scrypt" || enc.value("cipher", "") != "chacha20poly1305")
+        {
+            err = "spending key is not ed25519";
+            return false;
+        }
+        std::vector<uint8_t> salt;
+        std::vector<uint8_t> nonce;
+        std::vector<uint8_t> packed;
+        if (!decode_hex(enc.value("salt", ""), salt) || salt.size() != 16 || !decode_hex(enc.value("nonce", ""), nonce) || nonce.size() != 12 || !decode_hex(enc.value("ciphertext", ""), packed) || packed.size() != 48)
+        {
+            err = "spending key is not ed25519";
+            return false;
+        }
+        uint8_t key[32];
+        const uint64_t n = enc.value("kdf_n", kScryptN);
+        const uint64_t r = enc.value("kdf_r", kScryptR);
+        const uint64_t p = enc.value("kdf_p", kScryptP);
+        if (EVP_PBE_scrypt(pass.data(), pass.size(), salt.data(), salt.size(), n, r, p, 64ull * 1024ull * 1024ull, key, 32) != 1)
+        {
+            err = "wrong passphrase";
+            return false;
+        }
+        EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+        uint8_t plain[32];
+        int len = 0;
+        int final_len = 0;
+        const bool ok = ctx != nullptr &&
+                        EVP_DecryptInit_ex(ctx, EVP_chacha20_poly1305(), nullptr, nullptr, nullptr) == 1 &&
+                        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, 12, nullptr) == 1 &&
+                        EVP_DecryptInit_ex(ctx, nullptr, nullptr, key, nonce.data()) == 1 &&
+                        EVP_DecryptUpdate(ctx, nullptr, &len, reinterpret_cast<const uint8_t *>(public_hex.data()), static_cast<int>(public_hex.size())) == 1 &&
+                        EVP_DecryptUpdate(ctx, plain, &len, packed.data(), 32) == 1 &&
+                        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, 16, packed.data() + 32) == 1 &&
+                        EVP_DecryptFinal_ex(ctx, plain + len, &final_len) == 1;
+        EVP_CIPHER_CTX_free(ctx);
+        OPENSSL_cleanse(key, sizeof(key));
+        if (!ok)
+        {
+            OPENSSL_cleanse(plain, sizeof(plain));
+            err = "wrong passphrase";
+            return false;
+        }
+        secret_hex = hex_of(plain, 32);
+        OPENSSL_cleanse(plain, sizeof(plain));
+        return true;
+    }
+
+    bool write_wallet_doc(const std::string &path, const json &doc, std::string &err)
+    {
+        if (doc.contains("secret_key"))
+        {
+            err = "refusing to write plaintext secret_key";
+            return false;
+        }
+        if (!write_privileged(path, doc.dump(2) + "\n", "0600"))
+        {
+            err = "could not write " + path;
+            return false;
+        }
+        return true;
+    }
+
+    bool read_wallet_doc(const std::string &address, json &doc, std::string &err)
     {
         bool ok = false;
         const std::string raw = read_file_maybe_sudo(wallet_path(address), ok);
@@ -492,14 +697,56 @@ namespace
             err = "no spending key for " + address;
             return false;
         }
-        json doc = json::parse(raw);
-        if (doc.value("scheme", "") != "ed25519" || !doc.contains("public_key") || !doc.contains("secret_key"))
+        try
+        {
+            doc = json::parse(raw);
+        }
+        catch (const std::exception &)
         {
             err = "spending key for " + address + " is not ed25519";
             return false;
         }
+        if (!doc.is_object() || doc.value("scheme", "") != "ed25519" || !doc.contains("public_key") || !doc["public_key"].is_string())
+        {
+            err = "spending key for " + address + " is not ed25519";
+            return false;
+        }
+        return true;
+    }
+
+    bool load_key(const std::string &address, Key &key, std::string &err)
+    {
+        json doc;
+        if (!read_wallet_doc(address, doc, err))
+        {
+            return false;
+        }
         key.address = address;
         key.public_hex = doc["public_key"].get<std::string>();
+        const bool enc = doc.contains("secret_key_enc");
+        const bool plain = doc.contains("secret_key") && doc["secret_key"].is_string();
+        if (enc)
+        {
+            const std::string pass = passphrase_for(true, err);
+            if (pass.empty())
+            {
+                if (err.empty())
+                {
+                    err = "passphrase required";
+                }
+                return false;
+            }
+            if (!open_seed(pass, key.public_hex, doc["secret_key_enc"], key.secret_hex, err))
+            {
+                return false;
+            }
+            return true;
+        }
+        if (!plain)
+        {
+            err = "no spending key for " + address;
+            return false;
+        }
         key.secret_hex = doc["secret_key"].get<std::string>();
         return true;
     }
@@ -778,15 +1025,92 @@ namespace
         }
         EVP_PKEY_free(pkey);
         const std::string address = ps1_of_pubkey(pub);
-        json doc = {{"address", address}, {"scheme", "ed25519"}, {"public_key", hex_of(pub, 32)}, {"secret_key", hex_of(seed, 32)}};
-        const std::string path = wallet_path(address);
-        if (!write_privileged(path, doc.dump(2) + "\n", "0600"))
+        const std::string public_hex = hex_of(pub, 32);
+        std::string err;
+        const std::string pass = passphrase_for(true, err);
+        if (pass.empty())
         {
-            std::cerr << "could not write " << path << "\n";
+            OPENSSL_cleanse(seed, sizeof(seed));
+            std::cerr << (err.empty() ? "passphrase required" : err) << "\n";
+            return 1;
+        }
+        json enc;
+        std::vector<uint8_t> raw_seed(seed, seed + 32);
+        OPENSSL_cleanse(seed, sizeof(seed));
+        if (!seal_seed(pass, public_hex, raw_seed, enc, err))
+        {
+            OPENSSL_cleanse(raw_seed.data(), raw_seed.size());
+            std::cerr << err << "\n";
+            return 1;
+        }
+        OPENSSL_cleanse(raw_seed.data(), raw_seed.size());
+        json doc = {{"address", address}, {"scheme", "ed25519"}, {"public_key", public_hex}, {"secret_key_enc", enc}};
+        const std::string path = wallet_path(address);
+        if (!write_wallet_doc(path, doc, err))
+        {
+            std::cerr << err << "\n";
             return 1;
         }
         std::cout << address << "\n"
                   << path << "\n";
+        return 0;
+    }
+
+    int cmd_encrypt(const std::string &who)
+    {
+        std::string err;
+        const std::string address = resolve_address(who, err);
+        if (address.empty())
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        json doc;
+        if (!read_wallet_doc(address, doc, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        const bool plain = doc.contains("secret_key") && doc["secret_key"].is_string();
+        if (!plain)
+        {
+            if (doc.contains("secret_key_enc"))
+            {
+                std::cout << "already encrypted\n";
+                return 0;
+            }
+            std::cerr << "no spending key for " << address << "\n";
+            return 1;
+        }
+        const std::string pass = passphrase_for(true, err);
+        if (pass.empty())
+        {
+            std::cerr << (err.empty() ? "passphrase required" : err) << "\n";
+            return 1;
+        }
+        std::vector<uint8_t> seed;
+        if (!decode_hex(doc["secret_key"].get<std::string>(), seed) || seed.size() != 32)
+        {
+            std::cerr << "spending key is not ed25519\n";
+            return 1;
+        }
+        json enc;
+        const std::string public_hex = doc["public_key"].get<std::string>();
+        if (!seal_seed(pass, public_hex, seed, enc, err))
+        {
+            OPENSSL_cleanse(seed.data(), seed.size());
+            std::cerr << err << "\n";
+            return 1;
+        }
+        OPENSSL_cleanse(seed.data(), seed.size());
+        doc.erase("secret_key");
+        doc["secret_key_enc"] = enc;
+        if (!write_wallet_doc(wallet_path(address), doc, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        std::cout << wallet_path(address) << "\n";
         return 0;
     }
 
@@ -1063,6 +1387,17 @@ namespace
         }
         if (chosen == nullptr)
         {
+            if (g_dry_run)
+            {
+                std::string sig;
+                if (!ed25519_sign(key.secret_hex, src_addr, sig, err))
+                {
+                    std::cerr << err << "\n";
+                    return 1;
+                }
+                std::cout << "signed\n";
+                return 0;
+            }
             std::cerr << src << " has no coin covering " << amount << " 314ST plus fee " << fee_text << "\n";
             return 1;
         }
@@ -1083,6 +1418,11 @@ namespace
             std::cerr << err << "\n";
             return 1;
         }
+        if (g_dry_run)
+        {
+            std::cout << "signed\n";
+            return 0;
+        }
         json result;
         if (!rpc("sendtransaction", tx, result, err))
         {
@@ -1102,13 +1442,15 @@ namespace
     {
         std::cerr << "pswallet talks to ws://127.0.0.1:3144\n"
                   << "  create\n"
+                  << "  encrypt NAME [--passphrase TEXT]\n"
                   << "  register NAME ps1... [--grant]\n"
                   << "  list\n"
                   << "  info NAME|ps1\n"
                   << "  balance NAME|ps1\n"
                   << "  utxos NAME|ps1\n"
-                  << "  send SRC DST AMOUNT [--fee 0.001]\n"
-                  << "Amounts are 314ST. 0.001 is 1 unit.\n";
+                  << "  send SRC DST AMOUNT [--fee 0.001] [--dry-run]\n"
+                  << "Amounts are 314ST. 0.001 is 1 unit.\n"
+                  << "A tty prompt or PISECURE_WALLET_PASS unlocks secret_key_enc.\n";
     }
 }
 
@@ -1130,9 +1472,20 @@ int main(int argc, char **argv)
             grant = true;
             continue;
         }
+        if (arg == "--dry-run")
+        {
+            g_dry_run = true;
+            continue;
+        }
         if (arg == "--fee" && i + 1 < argc)
         {
             fee = argv[++i];
+            continue;
+        }
+        if (arg == "--passphrase" && i + 1 < argc)
+        {
+            g_pass.from_flag = true;
+            g_pass.value = argv[++i];
             continue;
         }
         positional.push_back(arg);
@@ -1148,6 +1501,10 @@ int main(int argc, char **argv)
         if (cmd == "create" && positional.size() == 1)
         {
             return cmd_create();
+        }
+        if (cmd == "encrypt" && positional.size() == 2)
+        {
+            return cmd_encrypt(positional[1]);
         }
         if (cmd == "list" && positional.size() == 1)
         {
