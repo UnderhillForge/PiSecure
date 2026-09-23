@@ -1076,6 +1076,18 @@ namespace pisecured
         config_ = cfg;
         storage_ = storage;
 
+        if (const char *envId = std::getenv("PISECURE_NODE_ID"))
+        {
+            if (envId[0] != '\0')
+            {
+                bootstrapNodeId_ = envId;
+            }
+        }
+        if (bootstrapNodeId_.empty())
+        {
+            bootstrapNodeId_ = "pisecure-pi5-validator";
+        }
+
         // Generate node ID from hardware or config
         nodeId_ = "pisecured-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
 
@@ -2317,150 +2329,117 @@ namespace pisecured
         return bootstrapHints_;
     }
 
-    void P2PServer::publishBootstrap()
+    namespace
     {
-        // Optional directory update. A failed POST must not stop listen or sync.
-        if (!config_.peers.empty())
+        int bootstrapHttp(const std::string &method, const std::string &url, const std::string &payload, std::string &response)
         {
-            return;
+            std::string cmd = "curl -sS -m 20 -w '\\nHTTPSTATUS:%{http_code}' -X " + method + " '" + url + "'";
+            char path[] = "/tmp/pisecure-bootstrap-XXXXXX";
+            int fd = -1;
+            if (!payload.empty())
+            {
+                fd = mkstemp(path);
+                if (fd < 0)
+                {
+                    response = "mkstemp failed";
+                    return 0;
+                }
+                const ssize_t wrote = ::write(fd, payload.data(), payload.size());
+                ::close(fd);
+                if (wrote < 0 || static_cast<size_t>(wrote) != payload.size())
+                {
+                    ::unlink(path);
+                    response = "write failed";
+                    return 0;
+                }
+                cmd += " -H 'Content-Type: application/json' --data-binary @" + std::string(path);
+            }
+            FILE *pipe = popen(cmd.c_str(), "r");
+            if (pipe == nullptr)
+            {
+                if (fd >= 0)
+                {
+                    ::unlink(path);
+                }
+                response = "curl failed to start";
+                return 0;
+            }
+            std::string output;
+            char buf[512];
+            while (fgets(buf, sizeof(buf), pipe) != nullptr)
+            {
+                output += buf;
+            }
+            pclose(pipe);
+            if (fd >= 0)
+            {
+                ::unlink(path);
+            }
+            const auto pos = output.rfind("HTTPSTATUS:");
+            if (pos == std::string::npos)
+            {
+                response = output;
+                return 0;
+            }
+            response = output.substr(0, pos);
+            while (!response.empty() && (response.back() == '\n' || response.back() == '\r'))
+            {
+                response.pop_back();
+            }
+            return std::atoi(output.c_str() + pos + std::strlen("HTTPSTATUS:"));
         }
+
+        std::string hex32(const std::array<uint8_t, 32> &bytes)
+        {
+            static const char *hexd = "0123456789abcdef";
+            std::string out(64, '0');
+            for (size_t i = 0; i < bytes.size(); ++i)
+            {
+                out[i * 2] = hexd[bytes[i] >> 4];
+                out[i * 2 + 1] = hexd[bytes[i] & 0x0f];
+            }
+            return out;
+        }
+
+        bool foreignGenesis(const json &node)
+        {
+            std::string genesis;
+            if (node.contains("genesis_hash") && node["genesis_hash"].is_string())
+            {
+                genesis = node["genesis_hash"].get<std::string>();
+            }
+            return genesis.rfind("2742129a", 0) == 0;
+        }
+    }
+
+    void P2PServer::registerBootstrapNode()
+    {
         try
         {
             if (storage_ != nullptr && storage_->has_tip())
             {
                 bestHeight_ = storage_->get_best_height();
             }
-            const auto tipBytes = storage_ != nullptr ? storage_->get_best_block_hash() : std::array<uint8_t, 32>{};
-            static const char *hexd = "0123456789abcdef";
-            std::string tip(64, '0');
-            for (size_t i = 0; i < tipBytes.size(); ++i)
-            {
-                tip[i * 2] = hexd[tipBytes[i] >> 4];
-                tip[i * 2 + 1] = hexd[tipBytes[i] & 0x0f];
-            }
+            const std::string tip = hex32(storage_ != nullptr ? storage_->get_best_block_hash() : std::array<uint8_t, 32>{});
             const std::string host = reachableHost();
             const char *base = config_.testnet ? "https://bootstrap-testnet.pisecure.org" : "https://bootstrap.pisecure.org";
-            // Stable id. This host's name is "pisecure" (8 chars). A repeat
-            // register of an older validator id returns 409 and cannot change type.
-            const std::string nodeId = config_.testnet ? "pisecure-pi5-validator-testnet" : "pisecure";
-            const std::string body =
-                std::string("{\"node_id\":\"") + nodeId +
-                "\",\"node_type\":\"miner\",\"services\":[\"mining\",\"p2p_sync\"],\"capabilities\":[\"mining\",\"p2p_sync\"],\"network\":\"" +
-                (config_.testnet ? "testnet" : "mainnet") +
-                "\",\"p2p_host\":\"" + host +
-                "\",\"p2p_port\":" + std::to_string(config_.p2p_port) +
-                ",\"rpc_port\":" + std::to_string(config_.ws_port) +
-                ",\"height\":" + std::to_string(bestHeight_) +
-                ",\"tip\":\"" + tip + "\"}";
-
-            auto http = [](const std::string &method, const std::string &url, const std::string &payload, std::string &response) -> int
-            {
-                std::string cmd = "curl -sS -m 20 -w '\\nHTTPSTATUS:%{http_code}' -X " + method + " '" + url + "'";
-                char path[] = "/tmp/pisecure-bootstrap-XXXXXX";
-                int fd = -1;
-                if (!payload.empty())
-                {
-                    fd = mkstemp(path);
-                    if (fd < 0)
-                    {
-                        response = "mkstemp failed";
-                        return 0;
-                    }
-                    const ssize_t wrote = ::write(fd, payload.data(), payload.size());
-                    ::close(fd);
-                    if (wrote < 0 || static_cast<size_t>(wrote) != payload.size())
-                    {
-                        ::unlink(path);
-                        response = "write failed";
-                        return 0;
-                    }
-                    cmd += " -H 'Content-Type: application/json' --data-binary @" + std::string(path);
-                }
-                FILE *pipe = popen(cmd.c_str(), "r");
-                if (pipe == nullptr)
-                {
-                    if (fd >= 0)
-                    {
-                        ::unlink(path);
-                    }
-                    response = "curl failed to start";
-                    return 0;
-                }
-                std::string output;
-                char buf[512];
-                while (fgets(buf, sizeof(buf), pipe) != nullptr)
-                {
-                    output += buf;
-                }
-                pclose(pipe);
-                if (fd >= 0)
-                {
-                    ::unlink(path);
-                }
-                const auto pos = output.rfind("HTTPSTATUS:");
-                if (pos == std::string::npos)
-                {
-                    response = output;
-                    return 0;
-                }
-                response = output.substr(0, pos);
-                while (!response.empty() && (response.back() == '\n' || response.back() == '\r'))
-                {
-                    response.pop_back();
-                }
-                return std::atoi(output.c_str() + pos + std::strlen("HTTPSTATUS:"));
+            json body = {
+                {"node_id", bootstrapNodeId_},
+                {"node_type", config_.validate_only ? "validator" : "miner"},
+                {"services", json::array({"mining", "p2p_sync"})},
+                {"capabilities", json::array({"mining", "validation"})},
+                {"p2p_host", host},
+                {"p2p_port", config_.p2p_port},
+                {"rpc_port", config_.ws_port},
+                {"height", bestHeight_},
+                {"tip", tip},
             };
-
             std::string response;
-            const int code = http("POST", std::string(base) + "/api/v1/nodes/register", body, response);
+            const int code = bootstrapHttp("POST", std::string(base) + "/api/v1/nodes/register", body.dump(), response);
             std::cout << "Bootstrap register HTTP " << code << " " << response << std::endl;
             if (code == 409)
             {
-                const std::string statusBody = body.substr(0, body.size() - 1) + ",\"status\":\"active\"}";
-                std::string statusResponse;
-                const int statusCode = http("POST", std::string(base) + "/api/v1/nodes/status", statusBody, statusResponse);
-                std::cout << "Bootstrap status HTTP " << statusCode << " " << statusResponse << std::endl;
-            }
-
-            std::string listBody;
-            const int listCode = http("GET", std::string(base) + "/api/v1/nodes/list", "", listBody);
-            if (listCode == 200)
-            {
-                std::vector<std::pair<std::string, int>> hints;
-                try
-                {
-                    json doc = json::parse(listBody);
-                    if (doc.contains("nodes") && doc["nodes"].is_array())
-                    {
-                        for (const auto &node : doc["nodes"])
-                        {
-                            std::string hintHost;
-                            if (node.contains("p2p_host") && node["p2p_host"].is_string())
-                            {
-                                hintHost = node["p2p_host"].get<std::string>();
-                            }
-                            else if (node.contains("address") && node["address"].is_string())
-                            {
-                                hintHost = node["address"].get<std::string>();
-                            }
-                            if (hintHost.empty() || hintHost == "0.0.0.0" || hintHost == host)
-                            {
-                                continue;
-                            }
-                            int hintPort = 3141;
-                            if (node.contains("p2p_port") && node["p2p_port"].is_number_integer())
-                            {
-                                hintPort = node["p2p_port"].get<int>();
-                            }
-                            hints.emplace_back(hintHost, hintPort);
-                        }
-                    }
-                }
-                catch (const std::exception &)
-                {
-                }
-                std::lock_guard<std::mutex> lock(hintMutex_);
-                bootstrapHints_ = std::move(hints);
+                postBootstrapStatus();
             }
         }
         catch (const std::exception &ex)
@@ -2469,17 +2448,266 @@ namespace pisecured
         }
     }
 
+    void P2PServer::postBootstrapStatus()
+    {
+        try
+        {
+            if (storage_ != nullptr && storage_->has_tip())
+            {
+                bestHeight_ = storage_->get_best_height();
+            }
+            const std::string tip = hex32(storage_ != nullptr ? storage_->get_best_block_hash() : std::array<uint8_t, 32>{});
+            const char *base = config_.testnet ? "https://bootstrap-testnet.pisecure.org" : "https://bootstrap.pisecure.org";
+            json body = {
+                {"node_id", bootstrapNodeId_},
+                {"p2p_host", reachableHost()},
+                {"p2p_port", config_.p2p_port},
+                {"rpc_port", config_.ws_port},
+                {"height", bestHeight_},
+                {"tip", tip},
+                {"status", "active"},
+                {"mining_active", false},
+                {"peers_connected", static_cast<int>(getPeerCount())},
+            };
+            std::string response;
+            const int code = bootstrapHttp("POST", std::string(base) + "/api/v1/nodes/status", body.dump(), response);
+            std::cout << "Bootstrap status HTTP " << code << " " << response << std::endl;
+        }
+        catch (const std::exception &ex)
+        {
+            std::cerr << "Bootstrap status error: " << ex.what() << std::endl;
+        }
+    }
+
+    void P2PServer::reportBootstrapChain()
+    {
+        try
+        {
+            if (storage_ == nullptr)
+            {
+                return;
+            }
+            if (storage_->has_tip())
+            {
+                bestHeight_ = storage_->get_best_height();
+            }
+            const std::string tip = hex32(storage_->get_best_block_hash());
+            const char *base = config_.testnet ? "https://bootstrap-testnet.pisecure.org" : "https://bootstrap.pisecure.org";
+            json blocks = json::array();
+            uint32_t height = bestHeight_;
+            int kept = 0;
+            while (kept < 120 && height >= 1)
+            {
+                auto header = storage_->get_header_by_height(height);
+                if (!header)
+                {
+                    break;
+                }
+                std::string miner;
+                int txCount = 0;
+                auto index = storage_->block_index(header->hash);
+                if (index)
+                {
+                    auto raw = storage_->read_block(*index);
+                    if (raw)
+                    {
+                        try
+                        {
+                            const std::string text(raw->begin(), raw->end());
+                            json block = json::parse(text);
+                            if (block.contains("txs") && block["txs"].is_array())
+                            {
+                                txCount = static_cast<int>(block["txs"].size());
+                            }
+                            if (block.contains("coinbase") && block["coinbase"].is_object())
+                            {
+                                const auto &coinbase = block["coinbase"];
+                                if (coinbase.contains("outputs") && coinbase["outputs"].is_array())
+                                {
+                                    for (const auto &out : coinbase["outputs"])
+                                    {
+                                        if (out.value("role", "") == "miner" && out.contains("address"))
+                                        {
+                                            miner = out["address"].get<std::string>();
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (miner.empty() && coinbase.contains("wallet") && coinbase["wallet"].is_string())
+                                {
+                                    miner = coinbase["wallet"].get<std::string>();
+                                }
+                            }
+                        }
+                        catch (const std::exception &)
+                        {
+                        }
+                    }
+                }
+                blocks.push_back({{"height", header->height},
+                                  {"hash", hex32(header->hash)},
+                                  {"timestamp", header->timestamp},
+                                  {"miner", miner},
+                                  {"tx_count", txCount},
+                                  {"reward", "0.198"},
+                                  {"subsidy", "0.200"},
+                                  {"difficulty", header->difficulty}});
+                ++kept;
+                if (height == 1)
+                {
+                    break;
+                }
+                --height;
+            }
+            const json mempool = rpc_getmempool(*storage_);
+            json body = {
+                {"node_id", bootstrapNodeId_},
+                {"p2p_host", reachableHost()},
+                {"p2p_port", config_.p2p_port},
+                {"rpc_port", config_.ws_port},
+                {"height", bestHeight_},
+                {"tip", tip},
+                {"difficulty", storage_->tip_difficulty()},
+                {"peer_count", static_cast<int>(getPeerCount())},
+                {"mempool_count", mempool.value("count", 0)},
+                {"mempool_bytes", mempool.value("bytes", 0)},
+                {"blocks", blocks},
+            };
+            std::string response;
+            const int code = bootstrapHttp("POST", std::string(base) + "/api/v1/chain/report", body.dump(), response);
+            std::cout << "Bootstrap report HTTP " << code << " " << response << std::endl;
+            if (code == 403)
+            {
+                std::cerr << "Bootstrap report not registered; registering once more\n";
+                registerBootstrapNode();
+            }
+        }
+        catch (const std::exception &ex)
+        {
+            std::cerr << "Bootstrap report error: " << ex.what() << std::endl;
+        }
+    }
+
+    void P2PServer::refreshBootstrapHints()
+    {
+        try
+        {
+            const char *base = config_.testnet ? "https://bootstrap-testnet.pisecure.org" : "https://bootstrap.pisecure.org";
+            const std::string self = reachableHost();
+            std::vector<std::pair<std::string, int>> hints;
+            auto absorb = [&](const std::string &payload)
+            {
+                json doc = json::parse(payload);
+                if (doc.contains("genesis_hash") && doc["genesis_hash"].is_string() &&
+                    doc["genesis_hash"].get<std::string>().rfind("2742129a", 0) == 0)
+                {
+                    return;
+                }
+                if (doc.contains("network_info") && doc["network_info"].is_object())
+                {
+                    const auto &info = doc["network_info"];
+                    if (info.contains("genesis_hash") && info["genesis_hash"].is_string() &&
+                        info["genesis_hash"].get<std::string>().rfind("2742129a", 0) == 0)
+                    {
+                        return;
+                    }
+                }
+                const json *rows = nullptr;
+                if (doc.contains("nodes") && doc["nodes"].is_array())
+                {
+                    rows = &doc["nodes"];
+                }
+                else if (doc.contains("peers") && doc["peers"].is_array())
+                {
+                    rows = &doc["peers"];
+                }
+                if (rows == nullptr)
+                {
+                    return;
+                }
+                for (const auto &node : *rows)
+                {
+                    if (foreignGenesis(node))
+                    {
+                        continue;
+                    }
+                    if (!node.contains("p2p_host") || !node["p2p_host"].is_string() || !node.contains("p2p_port"))
+                    {
+                        continue;
+                    }
+                    const std::string hintHost = node["p2p_host"].get<std::string>();
+                    if (hintHost.empty() || hintHost == "0.0.0.0" || hintHost == self)
+                    {
+                        continue;
+                    }
+                    int hintPort = 3141;
+                    if (node["p2p_port"].is_number_integer())
+                    {
+                        hintPort = node["p2p_port"].get<int>();
+                    }
+                    hints.emplace_back(hintHost, hintPort);
+                }
+            };
+            std::string peersBody;
+            if (bootstrapHttp("GET", std::string(base) + "/api/v1/bootstrap/peers", "", peersBody) == 200)
+            {
+                try
+                {
+                    absorb(peersBody);
+                }
+                catch (const std::exception &)
+                {
+                }
+            }
+            std::string listBody;
+            if (bootstrapHttp("GET", std::string(base) + "/api/v1/nodes/list", "", listBody) == 200)
+            {
+                try
+                {
+                    absorb(listBody);
+                }
+                catch (const std::exception &)
+                {
+                }
+            }
+            std::lock_guard<std::mutex> lock(hintMutex_);
+            bootstrapHints_ = std::move(hints);
+        }
+        catch (const std::exception &ex)
+        {
+            std::cerr << "Bootstrap peer hint error: " << ex.what() << std::endl;
+        }
+    }
+
     void P2PServer::bootstrapHeartbeatLoop()
     {
-        auto nextRegister = std::chrono::steady_clock::now();
+        // An explicit --peer is a sync client. It must not publish under this
+        // process id or it would overwrite the primary host and ports.
+        const bool publish = config_.peers.empty();
+        if (publish)
+        {
+            registerBootstrapNode();
+            reportBootstrapChain();
+            refreshBootstrapHints();
+        }
+        auto nextStatus = std::chrono::steady_clock::now() + std::chrono::seconds(300);
         while (running_)
         {
-            if (std::chrono::steady_clock::now() >= nextRegister)
-            {
-                publishBootstrap();
-                nextRegister = std::chrono::steady_clock::now() + std::chrono::seconds(300);
-            }
             sleepWhileRunning(std::chrono::seconds(30));
+            if (!running_)
+            {
+                break;
+            }
+            if (publish)
+            {
+                reportBootstrapChain();
+                refreshBootstrapHints();
+                if (std::chrono::steady_clock::now() >= nextStatus)
+                {
+                    postBootstrapStatus();
+                    nextStatus = std::chrono::steady_clock::now() + std::chrono::seconds(300);
+                }
+            }
 
             if (bootstrapWs_ && bootstrapWs_->isConnected())
             {

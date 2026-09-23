@@ -82,7 +82,7 @@ Sep 22 16:45:05 pisecure pisecured[6929]: [WS] WebSocket server listening on ws:
 
 `ss` shows `0.0.0.0:3144` owned by that pid. `python3 ws-client.py --url ws://127.0.0.1:3144` got `{"status":"pong"}` and a bucket subscription.
 
-`curl -fsS https://bootstrap.pisecure.org/health` returned `"status":"healthy"`. The in-process bootstrap client is still a stub: the journal says `Bootstrap peer DNS resolution not yet implemented` and `Connected (HTTP fallback mode)` without opening a socket.
+`curl -fsS https://bootstrap.pisecure.org/health` returned `"status":"healthy"`. Directory register, status, and chain report are described under Peers. The log line `Connected (HTTP fallback mode)` is the unused WebSocket placeholder and does not carry blocks.
 
 `systemctl restart pisecured` completed with `Deactivated successfully` (no SIGKILL). An earlier build slept inside the 120s ping loop and systemd hit `TimeoutStopSec`.
 
@@ -247,7 +247,7 @@ A second validator syncs with the existing framing: `VERSION`, `VERACK`, `GETHEA
 
 That process reached height 5, tip `0a560a2a038e03da504e50a865d565b01c1e1c33b08ab0fc26f826c9ed98ed28`.
 
-Register is optional. On startup the node POSTs `https://bootstrap.pisecure.org/api/v1/nodes/register` with `node_id` `pisecure-pi5-validator` and `node_type` `validator`. A 4xx or a down host is logged and does not stop listening or sync. The live list does not store a P2P address. Bootstrap's advertised genesis `2742129a…` is not our chain: height 1's `prev_block_hash` is 32 zero bytes. The in-process bootstrap WebSocket that logs `Connected (HTTP fallback mode)` is still a stub and is not used to fetch blocks.
+Register is a helper. On startup this miner POSTs `https://bootstrap.pisecure.org/api/v1/nodes/register` once. `node_id` defaults to `pisecure-pi5-validator` (`PISECURE_NODE_ID` overrides it). `node_type` is `miner`, or `validator` when `--validate-only` is set. The body always includes `p2p_host` (first non-loopback IPv4), `p2p_port` 3141, and `rpc_port` 3144, plus the stored height and tip. HTTP 409 `NODE_ALREADY_REGISTERED` posts that same id to `/api/v1/nodes/status` and does not create another id. Status repeats every 300s with `status` `active`, `mining_active` false, and `peers_connected`. `/api/v1/chain/report` repeats every 30s with up to 120 newest blocks. HTTP 403 registers once more and the loop continues. A failed HTTPS call is logged and does not stop P2P or RPC. A process started with `--peer` does not publish, so a second validator leaves this host's directory record alone. `GET /api/v1/bootstrap/peers` and `GET /api/v1/nodes/list` supply `p2p_host:p2p_port` as hints (`hint: true` on `getpeers`). This process still handshakes and checks PiHash2 and `hw_proof`. Ignore advertised genesis `2742129a`. Height 1 hash is `0fbe305838fbb59e4ec010d7319a3461a2513663f3643959da3d39c23265fecf` and its `prev_block_hash` is 32 zero bytes. The in-process bootstrap WebSocket that logs `Connected (HTTP fallback mode)` is still a stub and is not used to fetch blocks.
 
 ## Height 1 spend
 
@@ -337,6 +337,6 @@ Miner:
 
 - `psminer` is not in this tree. Download the release binary for Raspberry Pi 2–5. `pisecured` does not produce blocks.
 - `--mock-hardware` and `PISECURE_MOCK_HARDWARE` are hard errors. `pisecure mine` does not mine.
-- DNS now resolves one bootstrap address onto P2P port 3141. The HTTP bootstrap client is still a stub, so a live peer is not guaranteed.
+- With no `--peer`, DNS still resolves `bootstrap.pisecure.org` onto P2P port 3141. Directory `p2p_host:p2p_port` values are hints. Blocks are not downloaded over HTTPS.
 
 Left untouched on purpose: Docker/compose files from `bda1027` / `5cbaab1`, OTA apply, DEX, tokenomics, and the genesis hash.

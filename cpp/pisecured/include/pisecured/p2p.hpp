@@ -312,7 +312,11 @@ namespace pisecured
         std::string nodeId_;
         mutable std::mutex hintMutex_;
         std::vector<std::pair<std::string, int>> bootstrapHints_;
-        void publishBootstrap();
+        std::string bootstrapNodeId_;
+        void registerBootstrapNode();
+        void postBootstrapStatus();
+        void reportBootstrapChain();
+        void refreshBootstrapHints();
 
         // Thread functions
         void acceptLoop();
