@@ -15,6 +15,7 @@
 #include <iostream>
 #include <mutex>
 #include <unordered_set>
+#include <utility>
 
 namespace pisecured
 {
@@ -179,8 +180,11 @@ namespace pisecured
         {
             uint32_t version = 1;
             bool coinbase = false;
+            bool reg = false;
             uint32_t height = 0;
             uint64_t fee = 0;
+            std::string name;
+            std::string reg_address;
             std::vector<TxIn> inputs;
             std::vector<TxOut> outputs;
             std::array<uint8_t, 32> txid{};
@@ -208,6 +212,15 @@ namespace pisecured
             }
             append_u64(out, tx.fee);
             append_u32(out, tx.coinbase ? tx.height : 0);
+            // Register fields are appended only. A spend's preimage stays TX1.
+            if (tx.reg)
+            {
+                append_str(out, "REG1");
+                append_u16(out, static_cast<uint16_t>(tx.name.size()));
+                out.insert(out.end(), tx.name.begin(), tx.name.end());
+                append_u16(out, static_cast<uint16_t>(tx.reg_address.size()));
+                out.insert(out.end(), tx.reg_address.begin(), tx.reg_address.end());
+            }
             return out;
         }
 
@@ -431,7 +444,7 @@ namespace pisecured
             {
                 outputs.push_back({{"address", o.address}, {"value", o.value}});
             }
-            return json{
+            json doc = {
                 {"txid", to_hex(tx.txid)},
                 {"version", tx.version},
                 {"inputs", inputs},
@@ -442,6 +455,13 @@ namespace pisecured
                                                              { return !in.signature_hex.empty(); })},
                 {"size", canonical_tx(tx).size()},
             };
+            if (tx.reg)
+            {
+                doc["type"] = "register";
+                doc["name"] = tx.name;
+                doc["address"] = tx.reg_address;
+            }
+            return doc;
         }
 
         bool parse_user_tx(const json &obj, Tx &tx, std::string &reason)
@@ -464,11 +484,53 @@ namespace pisecured
             tx.version = 1;
             tx.coinbase = false;
             tx.height = 0;
+            tx.reg = false;
+            tx.name.clear();
+            tx.reg_address.clear();
             tx.fee = obj["fee"].get<uint64_t>();
             if (tx.fee < 1)
             {
                 reason = "fee too low";
                 return false;
+            }
+            if (obj.contains("type") && obj["type"].is_string())
+            {
+                if (obj["type"].get<std::string>() != "register")
+                {
+                    reason = "malformed transaction";
+                    return false;
+                }
+                if (!obj.contains("name") || !obj["name"].is_string() || !obj.contains("address") || !obj["address"].is_string())
+                {
+                    reason = "name invalid";
+                    return false;
+                }
+                tx.reg = true;
+                tx.name = obj["name"].get<std::string>();
+                tx.reg_address = obj["address"].get<std::string>();
+                if (tx.reg_address.size() == 67)
+                {
+                    std::string prefix = tx.reg_address.substr(0, 3);
+                    for (char &c : prefix)
+                    {
+                        if (c >= 'A' && c <= 'Z')
+                        {
+                            c = static_cast<char>(c - 'A' + 'a');
+                        }
+                    }
+                    if (prefix == "ps1")
+                    {
+                        std::string hex = tx.reg_address.substr(3);
+                        for (char &c : hex)
+                        {
+                            if (c >= 'A' && c <= 'F')
+                            {
+                                c = static_cast<char>(c - 'A' + 'a');
+                            }
+                        }
+                        tx.reg_address = "ps1" + hex;
+                    }
+                }
             }
             if (!obj.contains("inputs") || !obj.contains("outputs"))
             {
@@ -676,16 +738,60 @@ namespace pisecured
                         continue;
                     }
                     tx.txid = stored.hash;
-                    txs.push_back(tx);
+                    txs.push_back(std::move(tx));
                 }
                 catch (const std::exception &)
                 {
                 }
             }
-            return txs;
+            std::vector<Tx> ordered;
+            std::vector<char> used(txs.size(), 0);
+            bool progress = true;
+            while (ordered.size() < txs.size() && progress)
+            {
+                progress = false;
+                for (size_t i = 0; i < txs.size(); ++i)
+                {
+                    if (used[i] != 0)
+                    {
+                        continue;
+                    }
+                    bool waiting = false;
+                    for (const auto &in : txs[i].inputs)
+                    {
+                        for (size_t j = 0; j < txs.size(); ++j)
+                        {
+                            if (i == j || used[j] != 0)
+                            {
+                                continue;
+                            }
+                            if (txs[j].txid == in.prev)
+                            {
+                                waiting = true;
+                            }
+                        }
+                    }
+                    if (!waiting)
+                    {
+                        used[i] = 1;
+                        ordered.push_back(txs[i]);
+                        progress = true;
+                    }
+                }
+            }
+            for (size_t i = 0; i < txs.size(); ++i)
+            {
+                if (used[i] == 0)
+                {
+                    ordered.push_back(txs[i]);
+                }
+            }
+            return ordered;
         }
 
-        bool check_spendable(Storage &storage, const Tx &tx, std::string &reason)
+        bool find_outpoint(Storage &storage, const std::array<uint8_t, 32> &prev, uint32_t vout, uint64_t &value, std::string &owner, const std::vector<Tx> *prior);
+
+        bool check_spendable(Storage &storage, const Tx &tx, std::string &reason, const std::vector<Tx> *prior = nullptr)
         {
             if (tx.inputs.empty())
             {
@@ -695,8 +801,23 @@ namespace pisecured
             uint64_t input_value = 0;
             for (const auto &in : tx.inputs)
             {
+                if (prior != nullptr)
+                {
+                    for (const auto &earlier : *prior)
+                    {
+                        for (const auto &spent : earlier.inputs)
+                        {
+                            if (spent.vout == in.vout && spent.prev == in.prev)
+                            {
+                                reason = "unknown input";
+                                return false;
+                            }
+                        }
+                    }
+                }
                 uint64_t value = 0;
-                if (!storage.utxo_available(in.prev, in.vout, value))
+                std::string owner;
+                if (!find_outpoint(storage, in.prev, in.vout, value, owner, prior))
                 {
                     reason = "unknown input";
                     return false;
@@ -855,6 +976,551 @@ namespace pisecured
             }
         }
 
+        bool is_long_address(const std::string &address)
+        {
+            if (address.size() != 67 || address.compare(0, 3, "ps1") != 0)
+            {
+                return false;
+            }
+            for (size_t i = 3; i < address.size(); ++i)
+            {
+                const char c = address[i];
+                const bool hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+                if (!hex)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        std::string long_address(const std::vector<uint8_t> &pubkey)
+        {
+            return "ps1" + to_hex(sha256(pubkey));
+        }
+
+        std::string fold_name(std::string name)
+        {
+            for (char &c : name)
+            {
+                if (c >= 'A' && c <= 'Z')
+                {
+                    c = static_cast<char>(c - 'A' + 'a');
+                }
+            }
+            return name;
+        }
+
+        bool valid_shortname(const std::string &name)
+        {
+            if (name.size() < 2 || name.size() > 32)
+            {
+                return false;
+            }
+            const char first = name[0];
+            if (!((first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z')))
+            {
+                return false;
+            }
+            for (char c : name)
+            {
+                const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
+                if (!ok)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        bool is_reserved_name(const std::string &name)
+        {
+            const std::string folded = fold_name(name);
+            static const char *reserved[] = {"foundation", "validator", "stakers", "loans", "genesis", "pisecure", "operator"};
+            for (const char *item : reserved)
+            {
+                if (folded == item)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        std::string canonical_name(const std::string &name)
+        {
+            if (is_reserved_name(name))
+            {
+                return fold_name(name);
+            }
+            return name;
+        }
+
+        struct NameRec
+        {
+            std::string name;
+            std::string address;
+            std::string kind;
+            std::string txid;
+        };
+
+        std::mutex g_name_mu;
+        std::vector<NameRec> g_names;
+
+        NameRec *find_name_locked(const std::string &name)
+        {
+            const std::string folded = fold_name(name);
+            for (auto &rec : g_names)
+            {
+                if (fold_name(rec.name) == folded)
+                {
+                    return &rec;
+                }
+            }
+            return nullptr;
+        }
+
+        NameRec *find_address_locked(const std::string &address)
+        {
+            for (auto &rec : g_names)
+            {
+                if (rec.address == address)
+                {
+                    return &rec;
+                }
+            }
+            return nullptr;
+        }
+
+        bool remember_name(const std::string &name, const std::string &address, const std::string &kind, const std::string &txid, bool overwrite, std::string &reason)
+        {
+            if (!valid_shortname(name) || !is_long_address(address))
+            {
+                reason = "name invalid";
+                return false;
+            }
+            const std::string shown = canonical_name(name);
+            std::lock_guard<std::mutex> lock(g_name_mu);
+            if (NameRec *by_addr = find_address_locked(address))
+            {
+                if (fold_name(by_addr->name) != fold_name(shown))
+                {
+                    reason = "name is taken";
+                    return false;
+                }
+            }
+            if (NameRec *existing = find_name_locked(shown))
+            {
+                if (existing->address == address)
+                {
+                    if (!txid.empty())
+                    {
+                        existing->txid = txid;
+                    }
+                    if (!kind.empty())
+                    {
+                        existing->kind = kind;
+                    }
+                    return true;
+                }
+                if (!overwrite)
+                {
+                    reason = "name is taken";
+                    return false;
+                }
+                existing->address = address;
+                existing->kind = kind;
+                existing->txid = txid;
+                existing->name = shown;
+                return true;
+            }
+            g_names.push_back(NameRec{shown, address, kind, txid});
+            return true;
+        }
+
+        json name_snapshot_unlocked()
+        {
+            json rows = json::array();
+            for (const auto &rec : g_names)
+            {
+                json row = {{"name", rec.name}, {"address", rec.address}, {"kind", rec.kind}};
+                if (!rec.txid.empty())
+                {
+                    row["txid"] = rec.txid;
+                }
+                rows.push_back(row);
+            }
+            return rows;
+        }
+
+        void save_names(const std::filesystem::path &datadir)
+        {
+            json reserved = json::array();
+            json names = json::array();
+            {
+                std::lock_guard<std::mutex> lock(g_name_mu);
+                for (const auto &rec : g_names)
+                {
+                    if (rec.kind == "reserved_bind")
+                    {
+                        reserved.push_back({{"name", rec.name}, {"address", rec.address}});
+                    }
+                    else
+                    {
+                        json row = {{"name", rec.name}, {"address", rec.address}};
+                        if (!rec.txid.empty())
+                        {
+                            row["txid"] = rec.txid;
+                        }
+                        names.push_back(row);
+                    }
+                }
+            }
+            json doc = {{"reserved_bind", reserved}, {"names", names}};
+            const auto path = datadir / "names.json";
+            const auto tmp = datadir / "names.json.tmp";
+            {
+                std::ofstream out(tmp, std::ios::trunc);
+                if (!out)
+                {
+                    std::cerr << "names.json write failed\n";
+                    return;
+                }
+                out << doc.dump(2) << "\n";
+            }
+            std::error_code ec;
+            std::filesystem::rename(tmp, path, ec);
+            if (ec)
+            {
+                std::cerr << "names.json rename failed\n";
+            }
+        }
+
+        void absorb_name_record(const json &row, bool chain)
+        {
+            if (!row.is_object() || !row.contains("name") || !row["name"].is_string() || !row.contains("address") || !row["address"].is_string())
+            {
+                return;
+            }
+            std::string address = row["address"].get<std::string>();
+            if (is_long_address(address))
+            {
+                address = "ps1" + lower_hex(address.substr(3));
+            }
+            std::string kind = "register";
+            if (row.contains("kind") && row["kind"].is_string() && row["kind"].get<std::string>() == "reserved_bind")
+            {
+                kind = "reserved_bind";
+            }
+            else if (is_reserved_name(row["name"].get<std::string>()))
+            {
+                kind = "reserved_bind";
+            }
+            const std::string txid = row.value("txid", std::string());
+            std::string reason;
+            remember_name(row["name"].get<std::string>(), address, kind, txid, chain, reason);
+        }
+
+        void load_names_file(const std::filesystem::path &datadir)
+        {
+            std::ifstream in(datadir / "names.json");
+            if (!in)
+            {
+                return;
+            }
+            try
+            {
+                json doc = json::parse(in);
+                if (doc.contains("reserved_bind") && doc["reserved_bind"].is_array())
+                {
+                    for (const auto &row : doc["reserved_bind"])
+                    {
+                        json copy = row;
+                        copy["kind"] = "reserved_bind";
+                        absorb_name_record(copy, false);
+                    }
+                }
+                if (doc.contains("names") && doc["names"].is_array())
+                {
+                    for (const auto &row : doc["names"])
+                    {
+                        absorb_name_record(row, false);
+                    }
+                }
+            }
+            catch (const std::exception &)
+            {
+            }
+        }
+
+        bool grant_matches(const std::filesystem::path &datadir, const std::string &name, const std::string &address)
+        {
+            std::ifstream in(datadir / "names.json");
+            if (!in)
+            {
+                return false;
+            }
+            try
+            {
+                json doc = json::parse(in);
+                if (!doc.contains("reserved_bind") || !doc["reserved_bind"].is_array())
+                {
+                    return false;
+                }
+                for (const auto &row : doc["reserved_bind"])
+                {
+                    if (!row.is_object() || !row.contains("name") || !row["name"].is_string() || !row.contains("address") || !row["address"].is_string())
+                    {
+                        continue;
+                    }
+                    std::string bound = row["address"].get<std::string>();
+                    if (is_long_address(bound))
+                    {
+                        bound = "ps1" + lower_hex(bound.substr(3));
+                    }
+                    if (fold_name(row["name"].get<std::string>()) == fold_name(name) && bound == address)
+                    {
+                        std::string reason;
+                        remember_name(name, address, "reserved_bind", "", false, reason);
+                        return true;
+                    }
+                }
+            }
+            catch (const std::exception &)
+            {
+            }
+            return false;
+        }
+
+        bool lookup_name(const std::string &query, std::string &address, std::string &shown, std::string &kind)
+        {
+            std::lock_guard<std::mutex> lock(g_name_mu);
+            if (NameRec *rec = find_name_locked(query))
+            {
+                address = rec->address;
+                shown = rec->name;
+                kind = rec->kind;
+                return true;
+            }
+            return false;
+        }
+
+        bool lookup_ps1(const std::string &address, std::string &shown, std::string &kind)
+        {
+            std::lock_guard<std::mutex> lock(g_name_mu);
+            if (NameRec *rec = find_address_locked(address))
+            {
+                shown = rec->name;
+                kind = rec->kind;
+                return true;
+            }
+            return false;
+        }
+
+        bool resolve_miner(const std::string &wallet, std::string &shown, std::string &payout, std::string &reason)
+        {
+            if (wallet.empty() || wallet.size() > 256)
+            {
+                reason = "wallet or miner address required";
+                return false;
+            }
+            if (wallet.size() == 67)
+            {
+                std::string prefix = wallet.substr(0, 3);
+                for (char &c : prefix)
+                {
+                    if (c >= 'A' && c <= 'Z')
+                    {
+                        c = static_cast<char>(c - 'A' + 'a');
+                    }
+                }
+                std::string hex = wallet.substr(3);
+                for (char &c : hex)
+                {
+                    if (c >= 'A' && c <= 'F')
+                    {
+                        c = static_cast<char>(c - 'A' + 'a');
+                    }
+                }
+                const std::string ps1 = prefix + hex;
+                if (prefix == "ps1" && is_long_address(ps1))
+                {
+                    shown = ps1;
+                    payout = ps1;
+                    return true;
+                }
+            }
+            if (!valid_shortname(wallet))
+            {
+                reason = "unknown shortname";
+                return false;
+            }
+            std::string kind;
+            if (!lookup_name(wallet, payout, shown, kind))
+            {
+                reason = "unknown shortname";
+                return false;
+            }
+            return true;
+        }
+
+        void resolve_output_names(Tx &tx)
+        {
+            bool changed = false;
+            for (auto &out : tx.outputs)
+            {
+                std::string address;
+                std::string shown;
+                std::string kind;
+                if (lookup_name(out.address, address, shown, kind) && address != out.address)
+                {
+                    out.address = address;
+                    changed = true;
+                }
+            }
+            if (changed)
+            {
+                tx.txid = txid_of(tx);
+            }
+        }
+
+        bool admit_register(Storage &storage, const Tx &tx, std::string &reason, bool local_policy, const std::vector<Tx> *prior)
+        {
+            if (!tx.reg)
+            {
+                return true;
+            }
+            if (!valid_shortname(tx.name))
+            {
+                reason = "name invalid";
+                return false;
+            }
+            if (!is_long_address(tx.reg_address))
+            {
+                reason = "address does not match signer";
+                return false;
+            }
+            for (const auto &in : tx.inputs)
+            {
+                uint64_t value = 0;
+                std::string owner;
+                if (!find_outpoint(storage, in.prev, in.vout, value, owner, prior))
+                {
+                    reason = "unknown input";
+                    return false;
+                }
+                if (owner != tx.reg_address)
+                {
+                    reason = "address does not match signer";
+                    return false;
+                }
+                std::vector<uint8_t> pubkey;
+                if (!decode_hex(in.public_key_hex, pubkey) || long_address(pubkey) != tx.reg_address)
+                {
+                    reason = "address does not match signer";
+                    return false;
+                }
+            }
+            std::string existing;
+            std::string shown;
+            std::string kind;
+            if (lookup_name(tx.name, existing, shown, kind) && existing != tx.reg_address)
+            {
+                reason = "name is taken";
+                return false;
+            }
+            if (is_reserved_name(tx.name))
+            {
+                if (local_policy && !grant_matches(storage.datadir(), tx.name, tx.reg_address))
+                {
+                    reason = "name is reserved";
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        bool find_outpoint(Storage &storage, const std::array<uint8_t, 32> &prev, uint32_t vout, uint64_t &value, std::string &owner, const std::vector<Tx> *prior)
+        {
+            if (storage.utxo_available(prev, vout, value) && storage.utxo_address(prev, vout, owner))
+            {
+                return true;
+            }
+            if (prior == nullptr)
+            {
+                return false;
+            }
+            for (const auto &tx : *prior)
+            {
+                if (tx.txid != prev || vout >= tx.outputs.size())
+                {
+                    continue;
+                }
+                value = tx.outputs[vout].value;
+                owner = tx.outputs[vout].address;
+                return true;
+            }
+            return false;
+        }
+
+        void absorb_block_names(const json &block)
+        {
+            if (block.contains("txs") && block["txs"].is_array())
+            {
+                for (const auto &txj : block["txs"])
+                {
+                    if (!txj.is_object() || txj.value("type", "") != "register")
+                    {
+                        continue;
+                    }
+                    absorb_name_record(txj, true);
+                }
+            }
+            if (block.contains("names") && block["names"].is_array())
+            {
+                for (const auto &row : block["names"])
+                {
+                    absorb_name_record(row, true);
+                }
+            }
+        }
+
+        json snapshot_including(const std::vector<Tx> &txs)
+        {
+            json rows;
+            {
+                std::lock_guard<std::mutex> lock(g_name_mu);
+                rows = name_snapshot_unlocked();
+            }
+            for (const auto &tx : txs)
+            {
+                if (!tx.reg)
+                {
+                    continue;
+                }
+                bool found = false;
+                for (auto &row : rows)
+                {
+                    if (fold_name(row.value("name", "")) == fold_name(tx.name))
+                    {
+                        row["name"] = canonical_name(tx.name);
+                        row["address"] = tx.reg_address;
+                        row["kind"] = is_reserved_name(tx.name) ? "reserved_bind" : "register";
+                        row["txid"] = to_hex(tx.txid);
+                        found = true;
+                    }
+                }
+                if (!found)
+                {
+                    rows.push_back({{"name", canonical_name(tx.name)},
+                                    {"address", tx.reg_address},
+                                    {"kind", is_reserved_name(tx.name) ? "reserved_bind" : "register"},
+                                    {"txid", to_hex(tx.txid)}});
+                }
+            }
+            return rows;
+        }
+
         // Canonical UTF-8 JSON of the tx with signature fields removed. Keys are sorted.
         std::string sign_payload(const Tx &tx)
         {
@@ -869,6 +1535,12 @@ namespace pisecured
                 outputs.push_back({{"address", o.address}, {"value", o.value}});
             }
             json body = {{"fee", tx.fee}, {"inputs", inputs}, {"outputs", outputs}, {"version", tx.version}};
+            if (tx.reg)
+            {
+                body["type"] = "register";
+                body["name"] = tx.name;
+                body["address"] = tx.reg_address;
+            }
             return body.dump();
         }
 
@@ -891,7 +1563,7 @@ namespace pisecured
             return ok;
         }
 
-        bool verify_input_signatures(Storage &storage, const Tx &tx, std::string &reason, bool require_local_key)
+        bool verify_input_signatures(Storage &storage, const Tx &tx, std::string &reason, bool require_local_key, const std::vector<Tx> *prior = nullptr)
         {
             if (tx.inputs.empty())
             {
@@ -901,15 +1573,17 @@ namespace pisecured
             const std::string message = sign_payload(tx);
             for (const auto &in : tx.inputs)
             {
+                uint64_t value = 0;
                 std::string owner;
-                if (!storage.utxo_address(in.prev, in.vout, owner))
+                if (!find_outpoint(storage, in.prev, in.vout, value, owner, prior))
                 {
                     reason = "unknown input";
                     return false;
                 }
+                const bool ps1_owner = is_long_address(owner);
                 std::string bound;
                 const bool have_local = bound_public_key(storage.datadir(), owner, bound);
-                if (require_local_key && !have_local)
+                if (require_local_key && !have_local && !ps1_owner)
                 {
                     reason = "address has no spending key";
                     return false;
@@ -918,27 +1592,38 @@ namespace pisecured
                 {
                     // Miner RPC still rejects. A synced historical block may
                     // predate signatures; the PiHash and model checks still run.
-                    if (require_local_key)
+                    // A ps1 output always needs a signature.
+                    if (require_local_key || ps1_owner)
                     {
                         reason = "signature missing";
                         return false;
                     }
                     continue;
                 }
-                if (have_local && lower_hex(in.public_key_hex) != bound)
+                if (in.public_key_hex.empty())
                 {
                     reason = "public key does not match address";
                     return false;
                 }
-                if (!have_local && in.public_key_hex.empty())
+                const std::string presented = lower_hex(in.public_key_hex);
+                if (have_local && presented != bound)
                 {
                     reason = "public key does not match address";
                     return false;
                 }
-                const std::string &use_key = have_local ? bound : in.public_key_hex;
                 std::vector<uint8_t> pubkey;
                 std::vector<uint8_t> sig;
-                if (!decode_hex(use_key, pubkey) || !decode_hex(in.signature_hex, sig) || !ed25519_verify(pubkey, sig, message))
+                if (!decode_hex(presented, pubkey) || pubkey.size() != 32)
+                {
+                    reason = "public key does not match address";
+                    return false;
+                }
+                if (ps1_owner && long_address(pubkey) != owner)
+                {
+                    reason = "public key does not match address";
+                    return false;
+                }
+                if (!decode_hex(in.signature_hex, sig) || !ed25519_verify(pubkey, sig, message))
                 {
                     reason = "signature invalid";
                     return false;
@@ -950,6 +1635,7 @@ namespace pisecured
 
     bool restore_chain(Storage &storage)
     {
+        load_names_file(storage.datadir());
         const uint64_t count = storage.next_index();
         struct Found
         {
@@ -1013,8 +1699,7 @@ namespace pisecured
                 return false;
             }
 
-            std::vector<Storage::UtxoSpend> spends;
-            std::vector<Storage::UtxoCredit> credits;
+            std::vector<Storage::UtxoCredit> coinbase_credits;
             if (item.obj.contains("coinbase") && item.obj["coinbase"].is_object())
             {
                 const auto &cb = item.obj["coinbase"];
@@ -1029,16 +1714,21 @@ namespace pisecured
                             uint64_t units = 0;
                             if (o.is_object() && units_of(o, units) && units > 0)
                             {
-                                credits.push_back(Storage::UtxoCredit{txid, vout, units, o.value("address", std::string())});
+                                coinbase_credits.push_back(Storage::UtxoCredit{txid, vout, units, o.value("address", std::string())});
                             }
                             ++vout;
                         }
                     }
                     else
                     {
-                        credits.push_back(Storage::UtxoCredit{txid, 0, cb.value("value", 0ull), cb.value("wallet", std::string())});
+                        coinbase_credits.push_back(Storage::UtxoCredit{txid, 0, cb.value("value", 0ull), cb.value("wallet", std::string())});
                     }
                 }
+            }
+            if (!coinbase_credits.empty() && !storage.apply_utxos({}, coinbase_credits))
+            {
+                std::cerr << "UTXO replay failed at height " << item.height << "\n";
+                return false;
             }
             if (item.obj.contains("txs") && item.obj["txs"].is_array())
             {
@@ -1050,6 +1740,8 @@ namespace pisecured
                     {
                         continue;
                     }
+                    std::vector<Storage::UtxoSpend> spends;
+                    std::vector<Storage::UtxoCredit> credits;
                     for (const auto &in : tx.inputs)
                     {
                         spends.push_back(Storage::UtxoSpend{in.prev, in.vout});
@@ -1060,13 +1752,14 @@ namespace pisecured
                         credits.push_back(Storage::UtxoCredit{tx.txid, vout, o.value, o.address});
                         ++vout;
                     }
+                    if (!storage.apply_utxos(spends, credits))
+                    {
+                        std::cerr << "UTXO replay failed at height " << item.height << "\n";
+                        return false;
+                    }
                 }
             }
-            if (!storage.apply_utxos(spends, credits))
-            {
-                std::cerr << "UTXO replay failed at height " << item.height << "\n";
-                return false;
-            }
+            absorb_block_names(item.obj);
             expected_prev = hash;
             expected_height = item.height + 1;
             ++restored;
@@ -1085,9 +1778,12 @@ namespace pisecured
     json rpc_getblocktemplate(Storage &storage, const json &params)
     {
         const std::string wallet = wallet_from_params(params);
-        if (wallet.empty() || wallet.size() > 256)
+        std::string shown;
+        std::string payout;
+        std::string why;
+        if (!resolve_miner(wallet, shown, payout, why))
         {
-            throw std::runtime_error("wallet or miner address required");
+            throw std::runtime_error(why);
         }
 
         const bool tipped = storage.has_tip();
@@ -1113,12 +1809,12 @@ namespace pisecured
             }
         }
         const Emission emit = emission_for(fee_units);
-        const std::vector<CbOut> cb_outs = template_coinbase(wallet, emit);
+        const std::vector<CbOut> cb_outs = template_coinbase(payout, emit);
         Tx cb = coinbase_from(next_height, cb_outs);
         std::vector<std::array<uint8_t, 32>> ids{cb.txid};
         ids.insert(ids.end(), txids.begin(), txids.end());
         const auto root = merkle_root(ids);
-        json coinbase = coinbase_body(wallet, next_height, emit, cb, cb_outs);
+        json coinbase = coinbase_body(shown, next_height, emit, cb, cb_outs);
 
         return json{
             {"version", 1},
@@ -1161,21 +1857,27 @@ namespace pisecured
         {
             return rejected(reason);
         }
+        resolve_output_names(tx);
         if (storage.has_transaction(tx.txid))
         {
             return rejected("duplicate transaction");
         }
+        const std::vector<Tx> prior = mempool_txs(storage);
         if (!tx.inputs.empty())
         {
-            if (!check_spendable(storage, tx, reason))
+            if (!check_spendable(storage, tx, reason, &prior))
             {
                 return rejected(reason);
             }
-            if (!verify_input_signatures(storage, tx, reason, true))
+            if (!verify_input_signatures(storage, tx, reason, true, &prior))
             {
                 return rejected(reason);
             }
-            for (const auto &existing : mempool_txs(storage))
+            if (!admit_register(storage, tx, reason, true, &prior))
+            {
+                return rejected(reason);
+            }
+            for (const auto &existing : prior)
             {
                 for (const auto &in : existing.inputs)
                 {
@@ -1190,8 +1892,8 @@ namespace pisecured
             }
         }
 
-        obj["txid"] = to_hex(tx.txid);
-        auto dumped = obj.dump();
+        const json stored_tx = tx_to_json(tx);
+        auto dumped = stored_tx.dump();
         Transaction stored;
         stored.hash = tx.txid;
         stored.data.assign(dumped.begin(), dumped.end());
@@ -1200,6 +1902,16 @@ namespace pisecured
         if (!storage.add_transaction(stored))
         {
             return rejected("malformed transaction");
+        }
+        if (tx.reg)
+        {
+            const std::string kind = is_reserved_name(tx.name) ? "reserved_bind" : "register";
+            if (!remember_name(tx.name, tx.reg_address, kind, to_hex(tx.txid), false, reason))
+            {
+                storage.remove_transaction(tx.txid);
+                return rejected(reason.empty() ? "name is taken" : reason);
+            }
+            save_names(storage.datadir());
         }
         return json{{"status", "accepted"}, {"txid", to_hex(tx.txid)}};
     }
@@ -1281,11 +1993,19 @@ namespace pisecured
         {
             return rejected("coinbase wallet missing");
         }
-        const std::string wallet = coinbase["wallet"].get<std::string>();
-        if (wallet.size() > 256)
+        const std::string wallet_field = coinbase["wallet"].get<std::string>();
+        if (wallet_field.size() > 256)
         {
             return rejected("coinbase wallet missing");
         }
+        std::string shown;
+        std::string payout;
+        std::string why;
+        if (!resolve_miner(wallet_field, shown, payout, why))
+        {
+            return rejected(why == "wallet or miner address required" ? std::string("coinbase wallet missing") : why);
+        }
+        const std::string wallet = shown;
 
         const bool tipped = storage.has_tip();
         const uint32_t expect_height = tipped ? storage.get_best_height() + 1 : 1;
@@ -1365,6 +2085,7 @@ namespace pisecured
             {
                 return rejected("malformed transaction");
             }
+            std::vector<Tx> prior;
             for (const auto &txj : block["txs"])
             {
                 Tx tx;
@@ -1373,14 +2094,20 @@ namespace pisecured
                 {
                     return rejected(reason);
                 }
-                if (!check_spendable(storage, tx, reason))
+                resolve_output_names(tx);
+                if (!check_spendable(storage, tx, reason, &prior))
                 {
                     return rejected(reason);
                 }
-                if (!verify_input_signatures(storage, tx, reason, require_local_policy))
+                if (!verify_input_signatures(storage, tx, reason, require_local_policy, &prior))
                 {
                     return rejected(reason);
                 }
+                if (!admit_register(storage, tx, reason, require_local_policy, &prior))
+                {
+                    return rejected(reason);
+                }
+                prior.push_back(tx);
                 txs.push_back(tx);
             }
         }
@@ -1407,7 +2134,7 @@ namespace pisecured
                 {
                     return rejected("coinbase missing");
                 }
-                if (out.role == "miner" && out.address != wallet)
+                if (out.role == "miner" && out.address != payout)
                 {
                     return rejected("coinbase wallet missing");
                 }
@@ -1416,7 +2143,7 @@ namespace pisecured
         }
         else if (coinbase.contains("value") && coinbase["value"].is_number_unsigned())
         {
-            cb_outs.push_back(CbOut{"miner", wallet, coinbase["value"].get<uint64_t>()});
+            cb_outs.push_back(CbOut{"miner", payout, coinbase["value"].get<uint64_t>()});
         }
         else
         {
@@ -1519,6 +2246,7 @@ namespace pisecured
             stored_txs.push_back(tx_to_json(tx));
         }
         stored["txs"] = stored_txs;
+        stored["names"] = snapshot_including(txs);
         json stored_proof = {{"model", model}, {"serial_commitment", to_hex(serial)}};
         if (height >= 4)
         {
@@ -1553,16 +2281,21 @@ namespace pisecured
             retire_challenge(challenge_hex);
         }
 
-        std::vector<Storage::UtxoSpend> spends;
-        std::vector<Storage::UtxoCredit> credits;
+        std::vector<Storage::UtxoCredit> coinbase_credits;
         uint32_t cb_vout = 0;
         for (const auto &o : cb.outputs)
         {
-            credits.push_back(Storage::UtxoCredit{cb.txid, cb_vout, o.value, o.address});
+            coinbase_credits.push_back(Storage::UtxoCredit{cb.txid, cb_vout, o.value, o.address});
             ++cb_vout;
+        }
+        if (!coinbase_credits.empty() && !storage.apply_utxos({}, coinbase_credits))
+        {
+            std::cerr << "Block stored but UTXO update failed at height " << height << "\n";
         }
         for (const auto &tx : txs)
         {
+            std::vector<Storage::UtxoSpend> spends;
+            std::vector<Storage::UtxoCredit> credits;
             for (const auto &in : tx.inputs)
             {
                 spends.push_back(Storage::UtxoSpend{in.prev, in.vout});
@@ -1573,11 +2306,21 @@ namespace pisecured
                 credits.push_back(Storage::UtxoCredit{tx.txid, vout, o.value, o.address});
                 ++vout;
             }
+            if (!storage.apply_utxos(spends, credits))
+            {
+                std::cerr << "Block stored but UTXO update failed at height " << height << "\n";
+            }
             storage.remove_transaction(tx.txid);
+            if (tx.reg)
+            {
+                std::string ignored;
+                const std::string kind = is_reserved_name(tx.name) ? "reserved_bind" : "register";
+                remember_name(tx.name, tx.reg_address, kind, to_hex(tx.txid), !require_local_policy, ignored);
+            }
         }
-        if (!storage.apply_utxos(spends, credits))
+        if (!txs.empty())
         {
-            std::cerr << "Block stored but UTXO update failed at height " << height << "\n";
+            save_names(storage.datadir());
         }
 
         if (p2p != nullptr && p2p->getPeerCount() > 0)
@@ -1734,6 +2477,43 @@ namespace pisecured
             {
                 address = obj["address"].get<std::string>();
             }
+            else if (obj.is_object() && obj.contains("name") && obj["name"].is_string())
+            {
+                address = obj["name"].get<std::string>();
+            }
+        }
+        load_names_file(storage.datadir());
+        std::string shown;
+        std::string kind;
+        std::string resolved;
+        const std::string query = address;
+        if (lookup_name(query, resolved, shown, kind))
+        {
+            address = resolved;
+        }
+        else if (query.size() == 67)
+        {
+            std::string prefix = query.substr(0, 3);
+            for (char &c : prefix)
+            {
+                if (c >= 'A' && c <= 'Z')
+                {
+                    c = static_cast<char>(c - 'A' + 'a');
+                }
+            }
+            std::string hex = query.substr(3);
+            for (char &c : hex)
+            {
+                if (c >= 'A' && c <= 'F')
+                {
+                    c = static_cast<char>(c - 'A' + 'a');
+                }
+            }
+            if (prefix == "ps1" && is_long_address(prefix + hex))
+            {
+                address = prefix + hex;
+                lookup_ps1(address, shown, kind);
+            }
         }
         json rows = json::array();
         uint64_t total = 0;
@@ -1746,6 +2526,133 @@ namespace pisecured
                             {"address", row.address},
                             {"amount", units_314st(row.units)}});
         }
-        return json{{"address", address}, {"units", total}, {"amount", units_314st(total)}, {"utxos", rows}};
+        json result = {{"address", address}, {"units", total}, {"amount", units_314st(total)}, {"utxos", rows}};
+        if (!shown.empty())
+        {
+            result["name"] = shown;
+        }
+        if (!query.empty() && query != address)
+        {
+            result["query"] = query;
+        }
+        return result;
+    }
+
+    json rpc_namelookup(Storage &storage, const json &params)
+    {
+        load_names_file(storage.datadir());
+        json obj = as_object_param(params);
+        std::string by_name;
+        std::string by_address;
+        if (obj.is_object())
+        {
+            if (obj.contains("name") && obj["name"].is_string())
+            {
+                by_name = obj["name"].get<std::string>();
+            }
+            else if (obj.contains("address") && obj["address"].is_string())
+            {
+                by_address = obj["address"].get<std::string>();
+            }
+        }
+        else if (params.is_string())
+        {
+            by_name = params.get<std::string>();
+        }
+        auto normalize_ps1 = [](std::string text) -> std::string
+        {
+            if (text.size() != 67)
+            {
+                return {};
+            }
+            for (char &c : text)
+            {
+                if (c >= 'A' && c <= 'Z')
+                {
+                    c = static_cast<char>(c - 'A' + 'a');
+                }
+            }
+            if (text.compare(0, 3, "ps1") != 0 || !is_long_address(text))
+            {
+                return {};
+            }
+            return text;
+        };
+        auto wallet_file = [&](const std::string &name) -> bool
+        {
+            if (!address_filename(name))
+            {
+                return false;
+            }
+            std::error_code ec;
+            return std::filesystem::exists(storage.datadir() / "wallets" / (name + ".json"), ec);
+        };
+        auto names_for = [&](const std::string &ps1) -> json
+        {
+            json names = json::array();
+            std::lock_guard<std::mutex> lock(g_name_mu);
+            for (const auto &rec : g_names)
+            {
+                if (rec.address == ps1)
+                {
+                    names.push_back(rec.name);
+                }
+            }
+            return names;
+        };
+        auto ps1_hit = [&](const std::string &ps1) -> json
+        {
+            if (ps1.empty())
+            {
+                return json{{"found", false}};
+            }
+            const json names = names_for(ps1);
+            if (!wallet_file(ps1) && names.empty())
+            {
+                return json{{"found", false}};
+            }
+            return json{{"found", true}, {"address", ps1}, {"names", names}};
+        };
+        if (!by_address.empty())
+        {
+            return ps1_hit(normalize_ps1(by_address));
+        }
+        if (by_name.empty())
+        {
+            return json{{"found", false}};
+        }
+        const std::string as_ps1 = normalize_ps1(by_name);
+        if (!as_ps1.empty())
+        {
+            return ps1_hit(as_ps1);
+        }
+        std::string address;
+        std::string shown;
+        std::string kind;
+        if (lookup_name(by_name, address, shown, kind))
+        {
+            return json{{"found", true}, {"name", shown}, {"address", address}, {"reserved", is_reserved_name(shown)}};
+        }
+        std::string file_name = by_name;
+        if (!wallet_file(file_name))
+        {
+            const std::string folded = fold_name(by_name);
+            if (folded != by_name && wallet_file(folded))
+            {
+                file_name = folded;
+            }
+            else
+            {
+                return json{{"found", false}};
+            }
+        }
+        return json{{"found", true}, {"name", file_name}, {"address", file_name}, {"reserved", is_reserved_name(file_name)}};
+    }
+
+    json rpc_name_snapshot(Storage &storage)
+    {
+        load_names_file(storage.datadir());
+        std::lock_guard<std::mutex> lock(g_name_mu);
+        return name_snapshot_unlocked();
     }
 }

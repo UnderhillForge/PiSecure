@@ -329,7 +329,7 @@ On this Pi, an unsigned spend of `operator` returned `signature missing`. A spen
 Wallet:
 
 - No wallet create or send UI in this session. `sendtransaction` accepts a structural tx and, once a block exists, a spend of a real UTXO. Signatures are not checked.
-- `pswallet` is not in the git tree (removed in `caaf39f`). It has to be built from `cpp/pswallet` later.
+- `cpp/pswallet` builds `/opt/pisecure/pswallet` and talks to `ws://127.0.0.1:3144`.
 - `/var/lib/pisecure/wallets/` and `index.db` are older Python data. They were kept and chowned to `pisecure:pisecure`. `pisecured` does not read them. It stores blocks as `blocks/blkNNNNN.dat`.
 - HTTP JSON-RPC is off unless `--http-rpc` is passed. Clients should use the WebSocket on port 3144.
 
@@ -340,3 +340,14 @@ Miner:
 - With no `--peer`, DNS still resolves `bootstrap.pisecure.org` onto P2P port 3141. Directory `p2p_host:p2p_port` values are hints. Blocks are not downloaded over HTTPS.
 
 Left untouched on purpose: Docker/compose files from `bda1027` / `5cbaab1`, OTA apply, DEX, tokenomics, and the genesis hash.
+
+## Name backup
+
+A long address is `ps1` plus hex(SHA256(ed25519 public key)). Key files are mode 0600 in `/var/lib/pisecure/wallets/`. Back them up or the coins are unspendable.
+
+On this Pi:
+
+- `foundation` → `ps154bc21d4a37549c5a599a16b4822bf771ed29001095e241d05ef8ebf709854ee` at `/var/lib/pisecure/wallets/ps154bc21d4a37549c5a599a16b4822bf771ed29001095e241d05ef8ebf709854ee.json`
+- `OperatorX` → `ps1ff97b6682d9748878990a6f2b1dbac3554c38a3e64ffc18bf77159fbb80e86cb` at `/var/lib/pisecure/wallets/ps1ff97b6682d9748878990a6f2b1dbac3554c38a3e64ffc18bf77159fbb80e86cb.json`
+
+`/var/lib/pisecure/names.json` stores the reserved bind. A fresh node learns names by replaying `type: register` transactions during blk restore, from the `names` snapshot written on blocks accepted after this, and from the `names` array on the bootstrap chain report. Heights 1–9 were not rewritten. The register transactions stay in the mempool until a miner includes them.

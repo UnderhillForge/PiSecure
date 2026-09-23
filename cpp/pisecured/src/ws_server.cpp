@@ -343,6 +343,12 @@ namespace pisecured
                     throw std::runtime_error("storage not available");
                 result = rpc_listunspent(*storage, params);
             }
+            else if (method == "namelookup")
+            {
+                if (!storage)
+                    throw std::runtime_error("storage not available");
+                result = rpc_namelookup(*storage, params);
+            }
             else if (method == "gettransaction")
             {
                 if (!storage)

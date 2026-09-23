@@ -2572,6 +2572,7 @@ namespace pisecured
                 {"mempool_count", mempool.value("count", 0)},
                 {"mempool_bytes", mempool.value("bytes", 0)},
                 {"blocks", blocks},
+                {"names", rpc_name_snapshot(*storage_)},
             };
             std::string response;
             const int code = bootstrapHttp("POST", std::string(base) + "/api/v1/chain/report", body.dump(), response);

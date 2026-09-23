@@ -33,10 +33,6 @@ endif()
 # Source files
 set(PSWALLET_SOURCES
     src/main.cpp
-    src/cli.cpp
-    src/wallet.cpp
-    src/blockchain_client.cpp
-    src/smart_contract.cpp
 )
 
 # Main executable

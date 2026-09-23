@@ -175,6 +175,8 @@ namespace pisecured
                 return success_response(storage_ ? rpc_getheader(*storage_, params) : json::object(), id);
             else if (method == "listunspent")
                 return success_response(storage_ ? rpc_listunspent(*storage_, params) : json::object(), id);
+            else if (method == "namelookup")
+                return success_response(storage_ ? rpc_namelookup(*storage_, params) : json::object(), id);
             else if (method == "gettransaction")
                 return success_response(method_gettransaction(params), id);
             else if (method == "sendtransaction")

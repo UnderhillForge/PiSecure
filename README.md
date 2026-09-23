@@ -1,35 +1,54 @@
 # PiSecure
 
-`pisecured` is the validator and peer-to-peer node. It runs on Debian aarch64 and Raspberry Pi OS under systemd.
+PiSecure is a low-power chain for Raspberry Pi. Each block pays **0.200 314ST**. Official Pi 2, 3, 4, and 5 can mine. Any CPU can validate.
 
-## Validate
+## Install
 
-Any CPU can validate. A Pi is not required.
+Download the v0.2.1 aarch64 archive from this repo's GitHub Releases and check the sha256 printed on that release:
 
 ```bash
-pisecured --validate-only --host 0.0.0.0 --port 3144 --p2p-port 3141
+curl -fL -O https://github.com/UnderhillForge/PiSecure/releases/download/v0.2.1/pisecure-pi5-v0.2.1-aarch64.tar.gz
+sha256sum pisecure-pi5-v0.2.1-aarch64.tar.gz
+tar -xzf pisecure-pi5-v0.2.1-aarch64.tar.gz
+sudo install -d /opt/pisecure
+sudo install -m 0755 pisecured pswallet psminer /opt/pisecure/
+sudo cp deploy/pisecured.service /etc/systemd/system/pisecured.service
+sudo systemctl daemon-reload
 ```
+
+There is no Docker install and no mock-hardware mode.
+
+An extra node syncs from this Pi over P2P. Bootstrap is not required:
+
+```bash
+/opt/pisecure/pisecured --validate-only --peer 192.168.68.77:3141
+```
+
+## Run
+
+```bash
+systemctl enable --now pisecured
+pswallet create
+pswallet register AdaPi      # if namelookup live
+/opt/pisecure/psminer --once # default wallet
+/opt/pisecure/psminer -w AdaPi --once
+```
+
+## Wallets
+
+A long address is `ps1` plus 64 hex characters, `hex(SHA256(ed25519 public key))`. Shortnames are unique. Reserved names: foundation, validator, stakers, loans, operator.
+
+Keys live in `/var/lib/pisecure/wallets/*.json`. Back them up. A lost key cannot spend those coins.
+
+Grandfather strings `operator` and `student` still spend when that key file exists.
+
+## Ports
 
 - WebSocket JSON-RPC: **3144**
 - P2P: **3141**
 
-There is no Docker install and no mock-hardware mode.
+`https://bootstrap.pisecure.org` is a helper directory. Sync does not need it.
 
-Sync from a peer:
+## OTA
 
-```bash
-pisecured --validate-only --datadir /var/lib/pisecure-sync \
-  --host 127.0.0.1 --port 13144 \
-  --p2p-bind 127.0.0.1 --p2p-port 31411 \
-  --peer 192.168.68.77:3141
-```
-
-The unit file is `deploy/pisecured.service`. Bring-up notes are in `docs/PI5_PISECURED.md`.
-
-## Mine
-
-Download the `psminer` binary from [GitHub Releases](https://github.com/UnderhillForge/PiSecure/releases). Raspberry Pi 2, 3, 4, or 5 only. The miner source is not in this repository.
-
-## Updates
-
-OTA packages are GitHub Releases on this repository. No token is required once the repository is public.
+`psminer` checks GitHub Releases on this repository. It asks before it downloads an update.
