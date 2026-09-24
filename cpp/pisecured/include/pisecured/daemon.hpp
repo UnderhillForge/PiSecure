@@ -20,6 +20,8 @@ namespace pisecured
 
         bool start();
         void stop();
+        // One GitHub release check. Applies and restarts only when configured and the tag is newer.
+        void check_for_update();
 
         // Validator rewards access
         ValidatorPurse *get_validator_purse() { return validator_purse_.get(); }

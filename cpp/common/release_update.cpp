@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 
@@ -493,5 +494,125 @@ namespace pisecure_update
     void print_wallet_install()
     {
         std::cout << "sudo install -m 755 /tmp/pswallet /opt/pisecure/pswallet\n";
+    }
+
+    namespace
+    {
+        int restart_argc = 0;
+        char **restart_argv = nullptr;
+
+        bool copy_bytes(const std::string &from, const std::string &to)
+        {
+            std::ifstream in(from, std::ios::binary);
+            std::ofstream out(to, std::ios::binary | std::ios::trunc);
+            if (!in || !out)
+            {
+                return false;
+            }
+            out << in.rdbuf();
+            out.close();
+            return static_cast<bool>(out);
+        }
+
+        bool restore_running_image()
+        {
+            if (!copy_bytes("/proc/self/exe", "/opt/pisecure/pisecured"))
+            {
+                return false;
+            }
+            return ::chmod("/opt/pisecure/pisecured", 0755) == 0;
+        }
+    }
+
+    void set_restart_args(int argc, char **argv)
+    {
+        restart_argc = argc;
+        restart_argv = argv;
+    }
+
+    bool install_member(const Report &report, const std::string &member, const std::string &final_path, std::string &err)
+    {
+        char tmp[] = "/tmp/pisecure-bin-XXXXXX";
+        const int fd = mkstemp(tmp);
+        if (fd < 0)
+        {
+            err = "update check skipped";
+            return false;
+        }
+        ::close(fd);
+        if (!download_member(report, member, tmp, err))
+        {
+            std::remove(tmp);
+            return false;
+        }
+        const std::string staged = final_path + ".new";
+        if (!copy_bytes(tmp, staged))
+        {
+            std::remove(tmp);
+            std::remove(staged.c_str());
+            err = "could not stage " + member;
+            return false;
+        }
+        std::remove(tmp);
+        if (::chmod(staged.c_str(), 0755) != 0 || std::rename(staged.c_str(), final_path.c_str()) != 0)
+        {
+            std::remove(staged.c_str());
+            err = "could not install " + member;
+            return false;
+        }
+        return true;
+    }
+
+    bool apply_daemon(const Report &report, std::string &err)
+    {
+        if (!install_member(report, "pisecured", "/opt/pisecure/pisecured", err))
+        {
+            return false;
+        }
+        std::ofstream out("/etc/pisecure/pisecured.version", std::ios::trunc);
+        if (!out)
+        {
+            restore_running_image();
+            err = "could not record version";
+            return false;
+        }
+        out << report.tag << "\n";
+        out.close();
+        if (!out)
+        {
+            restore_running_image();
+            err = "could not record version";
+            return false;
+        }
+        return true;
+    }
+
+    bool restart_after_apply(std::string &err)
+    {
+        if (std::getenv("INVOCATION_ID") != nullptr)
+        {
+            const int rc = std::system("sudo -n /usr/bin/systemd-run --quiet --on-active=1s --unit=pisecured-apply /usr/bin/systemctl restart pisecured");
+            if (rc != 0)
+            {
+                err = "update installed; systemctl restart pisecured";
+                return false;
+            }
+            return true;
+        }
+        if (restart_argv == nullptr || restart_argc < 1)
+        {
+            err = "update installed; start /opt/pisecure/pisecured";
+            return false;
+        }
+        std::vector<char *> args;
+        args.push_back(const_cast<char *>("/opt/pisecure/pisecured"));
+        for (int i = 1; i < restart_argc; ++i)
+        {
+            args.push_back(restart_argv[i]);
+        }
+        args.push_back(nullptr);
+        ::execv("/opt/pisecure/pisecured", args.data());
+        err = "update installed; could not exec pisecured";
+        return false;
     }
 }

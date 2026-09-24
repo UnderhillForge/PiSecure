@@ -1,0 +1,2 @@
+# Let the daemon schedule its own restart after a verified binary replace.
+pisecure ALL=(root) NOPASSWD: /usr/bin/systemd-run --quiet --on-active=1s --unit=pisecured-apply /usr/bin/systemctl restart pisecured

@@ -53,7 +53,7 @@ namespace pisecured
         std::atomic<bool> running_{false};
         std::thread worker_;
         lws_context *context_ = nullptr;
-        int port_ = 3142;
+        int port_ = 3144;
         bool use_tls_ = false;
         std::string bind_addr_ = "127.0.0.1";
         std::filesystem::path tls_cert_;

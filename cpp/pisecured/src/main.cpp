@@ -2,6 +2,7 @@
 #include "pisecured/daemon.hpp"
 #include "release_update.hpp"
 #include <iostream>
+#include <cstdlib>
 #include <csignal>
 #include <atomic>
 #include <thread>
@@ -17,7 +18,9 @@ static void handle_signal(int)
 static void print_usage()
 {
     std::cout << "pisecured [--validate-only] [--host 0.0.0.0] [--port 3144] [--p2p-port 3141]\n"
-              << "          [--peer HOST:PORT] [--datadir PATH] [--no-update-check]\n"
+              << "          [--peer HOST:PORT] [--datadir PATH] [--apply-update] [--no-update-check]\n"
+              << "The systemd unit passes --apply-update. --apply-update=ask only logs.\n"
+              << "PISECURE_UPDATE_INTERVAL_SEC defaults to 6 hours.\n"
               << "Set PISECURE_NODE_ID to a unique name on every machine.\n"
               << "Do not reuse pisecure-pi5-validator except on that Pi.\n"
               << "Coordinated defense stays off unless PISECURE_SENTINEL=1.\n";
@@ -56,6 +59,7 @@ int main(int argc, char *argv[])
     }
 
     Config cfg = load_config(argc, argv);
+    pisecure_update::set_restart_args(argc, argv);
 
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
@@ -67,9 +71,32 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    int interval = 6 * 60 * 60;
+    if (const char *env = std::getenv("PISECURE_UPDATE_INTERVAL_SEC"))
+    {
+        if (env[0] != '\0')
+        {
+            char *end = nullptr;
+            const long parsed = std::strtol(env, &end, 10);
+            if (end != env && parsed > 0)
+            {
+                interval = static_cast<int>(parsed);
+            }
+        }
+    }
+    auto next_check = std::chrono::steady_clock::now() + std::chrono::seconds(interval);
     while (!g_should_stop.load())
     {
         std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (g_should_stop.load())
+        {
+            break;
+        }
+        if (std::chrono::steady_clock::now() >= next_check)
+        {
+            daemon.check_for_update();
+            next_check = std::chrono::steady_clock::now() + std::chrono::seconds(interval);
+        }
     }
 
     daemon.stop();

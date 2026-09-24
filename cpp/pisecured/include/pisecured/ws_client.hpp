@@ -19,7 +19,7 @@ namespace pisecured
     class WSClient
     {
     public:
-        WSClient(const std::string &url = "ws://127.0.0.1:3142");
+        WSClient(const std::string &url = "ws://127.0.0.1:3144");
         ~WSClient();
 
         // Connection management

@@ -96,36 +96,46 @@ namespace pisecured
             }
         }
 
-        if (!config_.no_update_check)
+        check_for_update();
+        return true;
+    }
+
+    void Daemon::check_for_update()
+    {
+        if (config_.no_update_check)
         {
-            try
+            return;
+        }
+        try
+        {
+            const auto report = pisecure_update::check_release(PISECURE_RELEASE);
+            if (report.kind != pisecure_update::Report::Kind::Newer)
             {
-                const auto report = pisecure_update::check_release(PISECURE_RELEASE);
                 std::cout << report.line << std::endl;
-                if (report.kind == pisecure_update::Report::Kind::Newer)
-                {
-                    pisecure_update::write_available((config_.datadir / "update-available.json").string(), report);
-                    if (config_.apply_update)
-                    {
-                        std::string err;
-                        if (pisecure_update::download_member(report, "pisecured", "/tmp/pisecured", err))
-                        {
-                            pisecure_update::print_daemon_install(report.tag);
-                        }
-                        else
-                        {
-                            std::cerr << err << std::endl;
-                        }
-                    }
-                }
+                return;
             }
-            catch (const std::exception &)
+            pisecure_update::write_available((config_.datadir / "update-available.json").string(), report);
+            if (!config_.apply_update)
             {
-                std::cout << "update check skipped" << std::endl;
+                std::cout << report.line << std::endl;
+                return;
+            }
+            std::string err;
+            if (!pisecure_update::apply_daemon(report, err))
+            {
+                std::cout << err << std::endl;
+                return;
+            }
+            std::cout << "update applied " << report.tag << std::endl;
+            if (!pisecure_update::restart_after_apply(err))
+            {
+                std::cout << err << std::endl;
             }
         }
-
-        return true;
+        catch (const std::exception &)
+        {
+            std::cout << "update check skipped" << std::endl;
+        }
     }
 
     void Daemon::stop()

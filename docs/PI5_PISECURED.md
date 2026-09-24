@@ -32,7 +32,7 @@ Kernel: `6.12.47+rpt-rpi-2712` aarch64.
 | --- | --- |
 | Binary | `/opt/pisecure/pisecured` |
 | Unit | `pisecured.service` (`enabled`, `active`) |
-| ExecStart | `/opt/pisecure/pisecured --host 0.0.0.0 --port 3144` |
+| ExecStart | `/opt/pisecure/pisecured --host 0.0.0.0 --port 3144 --apply-update` |
 | Listen | `0.0.0.0:3144` (WebSocket JSON-RPC) |
 | P2P | `0.0.0.0:3141` |
 | Data | `/var/lib/pisecure` |
@@ -41,7 +41,7 @@ Kernel: `6.12.47+rpt-rpi-2712` aarch64.
 
 `/etc/pisecure/pisecure.env` sets `PISECURE_DATA_DIR=/var/lib/pisecure`, `PISECURED_HOST=0.0.0.0`, `PISECURED_PORT=3144`, `PISECURE_VALIDATE_ONLY=0`, and `PISECURE_MOCK_HARDWARE=0`. The daemon reads the data dir and the host/port. It has no mock-hardware path.
 
-`--host` and `--port` are aliases for the WebSocket bind and port. Without them the unit's `ExecStart` would have been ignored and the process would have stayed on `127.0.0.1:3142`.
+`--host` and `--port` are aliases for the WebSocket bind and port. The unit binds `0.0.0.0:3144` and passes `--apply-update`.
 
 ## Packages
 
@@ -86,9 +86,7 @@ Sep 22 16:45:05 pisecure pisecured[6929]: [WS] WebSocket server listening on ws:
 
 `systemctl restart pisecured` completed with `Deactivated successfully` (no SIGKILL). An earlier build slept inside the 120s ping loop and systemd hit `TimeoutStopSec`.
 
-The previous unit on this Pi ran `/usr/local/bin/pisecured` as user `pi` on port 3142. systemd now runs `/opt/pisecure/pisecured` only. The old binary is still on disk and is not referenced by the unit.
-
-Python CLI (optional, daemon already healthy): `python3 -m venv $HOME/PiSecure/.venv`, then `pip install -r requirements.txt` and `pip install -e .`. `pisecure version` prints `PiSecure 0.1.1`. `status` is registered once, from `pisecure/cli/commands/monitoring.py`.
+systemd runs `/opt/pisecure/pisecured`. Wallets use `/opt/pisecure/pswallet` against `ws://127.0.0.1:3144`. There is no mock-hardware mode.
 
 ## Block template and validation
 
@@ -336,10 +334,10 @@ Wallet:
 Miner:
 
 - `psminer` is not in this tree. Download the release binary for Raspberry Pi 2–5. `pisecured` does not produce blocks.
-- `--mock-hardware` and `PISECURE_MOCK_HARDWARE` are hard errors. `pisecure mine` does not mine.
+- The daemon does not mine. Mining is the separate `psminer` release binary.
 - With no `--peer`, DNS still resolves `bootstrap.pisecure.org` onto P2P port 3141. Directory `p2p_host:p2p_port` values are hints. Blocks are not downloaded over HTTPS.
 
-Left untouched on purpose: Docker/compose files from `bda1027` / `5cbaab1`, OTA apply, DEX, tokenomics, and the genesis hash.
+Left untouched on purpose: emission, PiHash2, hw_proof, Ed25519 spend checks, namelookup, and the `blk*.dat` layout.
 
 ## Name backup
 

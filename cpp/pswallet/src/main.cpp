@@ -74,12 +74,13 @@ namespace
                 return;
             }
             std::string err;
-            if (!pisecure_update::download_member(report, "pswallet", "/tmp/pswallet", err))
+            if (!pisecure_update::install_member(report, "pswallet", "/opt/pisecure/pswallet", err))
             {
                 std::cerr << err << "\n";
+                pisecure_update::print_wallet_install();
                 return;
             }
-            pisecure_update::print_wallet_install();
+            std::cerr << "installed pswallet " << report.tag << "\n";
         }
         catch (const std::exception &)
         {

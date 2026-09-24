@@ -33,7 +33,7 @@ namespace pisecured
     private:
         std::atomic<bool> running_{false};
         std::thread worker_;
-        int rpc_port_ = 3142;
+        int rpc_port_ = 3144;
 
         // Component references
         Storage *storage_ = nullptr;

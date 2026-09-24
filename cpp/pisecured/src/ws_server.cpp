@@ -397,16 +397,6 @@ namespace pisecured
                 // Validation does not depend on this host being a Pi, and does not mine.
                 result = rpc_submitblock(*storage, p2p, params);
             }
-            else if (method == "pinsregister")
-            {
-                // PiNS service registration stub (Phase 3)
-                std::string service_name = params.size() > 0 ? params[0].get<std::string>() : "unknown";
-                std::string service_host = params.size() > 1 ? params[1].get<std::string>() : "localhost";
-                int service_port = params.size() > 2 ? params[2].get<int>() : 0;
-                result["service"] = service_name;
-                result["registered"] = true;
-                result["endpoint"] = service_host + ":" + std::to_string(service_port);
-            }
             else if (method == "checkupdate")
             {
                 const auto report = pisecure_update::check_release(PISECURE_RELEASE);
@@ -428,14 +418,6 @@ namespace pisecured
                 {
                     pisecure_update::write_available("/var/lib/pisecure/update-available.json", report);
                 }
-            }
-            else if (method == "pinsresolve")
-            {
-                // PiNS name resolution stub (Phase 3)
-                std::string service_name = params.size() > 0 ? params[0].get<std::string>() : "unknown";
-                result["service"] = service_name;
-                result["endpoint"] = "localhost:9999"; // Placeholder
-                result["found"] = false;
             }
             else
             {

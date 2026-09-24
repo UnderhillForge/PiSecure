@@ -39,10 +39,6 @@ namespace pisecured
         double validator_rewards_percentage = 0.01;  // 1% of block reward
         std::string validator_wallet_address = "";   // Linked wallet for rewards
         std::filesystem::path validator_bucket_path; // Validator bucket path
-
-        // PiSecure Name System (PiNS) - Phase 3 service registry
-        bool pins_enabled = false; // Disabled by default in prototype
-        int pins_port = 3143;      // PiNS P2P discovery port
     };
 
     Config load_config(int argc, char *argv[]);

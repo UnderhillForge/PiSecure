@@ -148,9 +148,15 @@ namespace pisecured
             {
                 cfg.no_update_check = true;
             }
-            else if (arg == "--apply-update")
+            else if (arg == "--apply-update" || arg.rfind("--apply-update=", 0) == 0)
             {
-                cfg.apply_update = true;
+                std::string value = "yes";
+                const auto eq = arg.find('=');
+                if (eq != std::string::npos)
+                {
+                    value = arg.substr(eq + 1);
+                }
+                cfg.apply_update = !(value == "ask" || value == "log" || value == "0" || value == "no" || value == "false");
             }
             else if (arg == "--no-validator-rewards")
             {
@@ -210,14 +216,6 @@ namespace pisecured
             {
                 cfg.validator_bucket_path = next(arg);
                 explicit_validator_path = true;
-            }
-            else if (arg == "--pins-enabled")
-            {
-                cfg.pins_enabled = true;
-            }
-            else if (arg == "--pins-port")
-            {
-                cfg.pins_port = std::stoi(next(arg));
             }
             else if (arg == "-h" || arg == "--help")
             {
