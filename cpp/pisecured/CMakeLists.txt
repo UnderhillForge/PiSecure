@@ -42,7 +42,7 @@ set(PISECURED_SOURCES
 )
 
 add_executable(pisecured ${PISECURED_SOURCES})
-target_compile_definitions(pisecured PRIVATE PISECURE_RELEASE="0.2.2")
+target_compile_definitions(pisecured PRIVATE PISECURE_RELEASE="0.2.3")
 
 target_link_libraries(pisecured
     Threads::Threads

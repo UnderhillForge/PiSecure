@@ -623,7 +623,7 @@ namespace pisecured
             }
             if (e.foundation > 0)
             {
-                outs.push_back(CbOut{"foundation", "foundation", e.foundation});
+                outs.push_back(CbOut{"foundation", kFoundationPayout, e.foundation});
             }
             return outs;
         }
@@ -1049,10 +1049,7 @@ namespace pisecured
 
         std::string canonical_name(const std::string &name)
         {
-            if (is_reserved_name(name))
-            {
-                return fold_name(name);
-            }
+            // Reserved checks stay case-insensitive. The stored spelling is the one registered.
             return name;
         }
 
@@ -2166,7 +2163,13 @@ namespace pisecured
             else if (o.role == "loans")
                 paid_loans += o.units;
             else if (o.role == "foundation")
+            {
+                if (o.address != kFoundationPayout)
+                {
+                    return rejected("coinbase foundation address");
+                }
                 paid_foundation += o.units;
+            }
             else
             {
                 return rejected("coinbase exceeds emission rules");
@@ -2174,7 +2177,7 @@ namespace pisecured
         }
         const uint64_t minted = paid_miner + paid_validator + paid_stakers + paid_loans + paid_foundation;
         const uint64_t mint_cap = kSubsidyUnits + emit.miner_fee + emit.stakers + emit.loans + emit.foundation;
-        if (paid_miner > emit.miner_cap() || paid_validator > kValidatorUnits || paid_stakers > emit.stakers || paid_loans > emit.loans || paid_foundation > emit.foundation || minted > mint_cap)
+        if (paid_miner > emit.miner_cap() || paid_validator > kValidatorUnits || paid_stakers > emit.stakers || paid_loans > emit.loans || paid_foundation != emit.foundation || minted > mint_cap)
         {
             return rejected("coinbase exceeds emission rules");
         }

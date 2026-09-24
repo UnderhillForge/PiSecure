@@ -18,12 +18,12 @@ sudo systemctl daemon-reload
 
 There is no Docker install and no mock-hardware mode.
 
-An x86_64 validator is `pisecure-v0.2.1-x86_64.tar.gz` on the same release, or a later `pisecure-v*-x86_64.tar.gz`. It is `pisecured` only. Run it with `--validate-only`. Set `PISECURE_NODE_ID` to a name that is not `pisecure-pi5-validator`.
+An x86_64 validator is `pisecure-v*-x86_64.tar.gz` on the same release. It is `pisecured` only. Run it with `--validate-only`. The first start writes a new node id in the data directory. Do not copy that file, `/etc/pisecure/pisecure.env`, or `blk*.dat` onto another machine.
 
-An extra node syncs from this Pi over P2P. Bootstrap is not required:
+An extra node that can accept inbound port 3141 is dialed by nodes that already have the chain. Bootstrap only introduces addresses. Blocks are not downloaded over HTTPS.
 
 ```bash
-/opt/pisecure/pisecured --validate-only --peer 192.168.68.77:3141
+/opt/pisecure/pisecured --validate-only --host 0.0.0.0 --port 3144 --p2p-port 3141
 ```
 
 ## Run

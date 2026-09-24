@@ -19,6 +19,9 @@ namespace pisecured
     constexpr uint64_t kSubsidyUnits = 200;
     constexpr uint64_t kValidatorUnits = 2;
 
+    // 7% of transaction fees. Stakers, loans, and burn are unchanged.
+    inline constexpr char kFoundationPayout[] = "ps154bc21d4a37549c5a599a16b4822bf771ed29001095e241d05ef8ebf709854ee";
+
     using json = nlohmann::json;
 
     // Reload headers and the UTXO set from blk*.dat. Safe on an empty chain.

@@ -313,6 +313,8 @@ namespace pisecured
         mutable std::mutex hintMutex_;
         std::vector<std::pair<std::string, int>> bootstrapHints_;
         std::string bootstrapNodeId_;
+        bool bootstrapIdOwned_ = false;
+        std::vector<std::pair<std::string, int>> rememberedPublic_;
         struct AdvertisedP2P
         {
             std::string host;
@@ -320,6 +322,10 @@ namespace pisecured
             const char *source = "lan";
         };
         AdvertisedP2P advertisedP2P() const;
+        bool publicUnicastHost(const std::string &host) const;
+        bool connectedTo(const std::string &host, int port) const;
+        void dialDirectoryPeers(const std::vector<std::pair<std::string, int>> &targets);
+        void loadBootstrapNodeId();
         void registerBootstrapNode();
         void postBootstrapStatus();
         void reportBootstrapChain();
