@@ -1340,8 +1340,54 @@ namespace pisecured
         }
     }
 
+    bool P2PServer::isOwnAddress(uint32_t addr) const
+    {
+        if (addr == htonl(INADDR_LOOPBACK))
+        {
+            return false;
+        }
+        const AdvertisedP2P self = advertisedP2P();
+        in_addr advertised{};
+        if (inet_pton(AF_INET, self.host.c_str(), &advertised) == 1 && advertised.s_addr == addr && publicUnicastHost(self.host))
+        {
+            return true;
+        }
+        ifaddrs *list = nullptr;
+        if (getifaddrs(&list) != 0)
+        {
+            return false;
+        }
+        bool own = false;
+        for (ifaddrs *ifa = list; ifa != nullptr; ifa = ifa->ifa_next)
+        {
+            if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != AF_INET)
+            {
+                continue;
+            }
+            auto *in = reinterpret_cast<sockaddr_in *>(ifa->ifa_addr);
+            if (in->sin_addr.s_addr == addr && in->sin_addr.s_addr != htonl(INADDR_LOOPBACK))
+            {
+                own = true;
+                break;
+            }
+        }
+        freeifaddrs(list);
+        return own;
+    }
+
     void P2PServer::connectToPeer(const PeerAddr &addr)
     {
+        const uint16_t destPort = ntohs(addr.addr.sin_port);
+        const AdvertisedP2P self = advertisedP2P();
+        in_addr advertised{};
+        const bool advertisedMatch = inet_pton(AF_INET, self.host.c_str(), &advertised) == 1 && advertised.s_addr == addr.addr.sin_addr.s_addr && destPort == static_cast<uint16_t>(self.port);
+        const bool localListen = destPort == static_cast<uint16_t>(config_.p2p_port) && (addr.addr.sin_addr.s_addr == htonl(INADDR_LOOPBACK) || isOwnAddress(addr.addr.sin_addr.s_addr));
+        if (advertisedMatch || localListen)
+        {
+            std::cout << "Skipping self-peer " << inet_ntoa(addr.addr.sin_addr) << ":" << destPort << std::endl;
+            return;
+        }
+
         int sockFd = socket(AF_INET, SOCK_STREAM, 0);
         if (sockFd < 0)
         {
@@ -1438,11 +1484,17 @@ namespace pisecured
             uint32_t len = peer->recvBuffer[1] | (peer->recvBuffer[2] << 8) |
                            (peer->recvBuffer[3] << 16) | (peer->recvBuffer[4] << 24);
 
-            if (len > 32 * 1024 * 1024)
+            if (len > kMaxMessageBytes)
             {
-                peer->increaseBanScore(100);
-                disconnectPeer(peer, "Message too large");
-                return;
+                const uint32_t buffered = peer->recvBuffer.size() > 5 ? static_cast<uint32_t>(peer->recvBuffer.size() - 5) : 0;
+                std::cout << "Message too large type=" << static_cast<unsigned>(type)
+                          << " declared=" << len << " buffered=" << buffered << std::endl;
+                if (buffered > kMaxMessageBytes)
+                {
+                    disconnectPeer(peer, "Message too large");
+                    return;
+                }
+                break;
             }
 
             if (peer->recvBuffer.size() < 5 + len)
@@ -1594,6 +1646,13 @@ namespace pisecured
 
         std::cout << "Peer " << inet_ntoa(peer->address.addr.sin_addr)
                   << " version: " << version << " agent: " << userAgent << std::endl;
+
+        if (peer->inbound && isOwnAddress(peer->address.addr.sin_addr.s_addr))
+        {
+            std::cout << "Ignoring inbound handshake from our own address" << std::endl;
+            disconnectPeer(peer, "self-peer");
+            return;
+        }
 
         sendVerack(peer);
 
@@ -1819,23 +1878,12 @@ namespace pisecured
                 return;
             }
 
-            // Validate PoW
-            if (!storage_->validate_block_pow(header.hash, header.difficulty))
+            // Compact headers are a prev-hash chain only. PiHash2 and hw_proof
+            // run later, on the full block.
+            if (prev_header && header.prevBlockHash != prev_header->hash)
             {
-                std::cout << "Invalid PoW for header at height " << header.height << std::endl;
-                peer->increaseBanScore(20);
+                std::cout << "Invalid header chain at height " << header.height << std::endl;
                 return;
-            }
-
-            // Validate chain linkage
-            if (prev_header)
-            {
-                if (!storage_->validate_block_header(header, prev_header))
-                {
-                    std::cout << "Invalid header chain at height " << header.height << std::endl;
-                    peer->increaseBanScore(20);
-                    return;
-                }
             }
 
             // Check if we already have this block
@@ -1856,7 +1904,13 @@ namespace pisecured
         {
             auto getdata_msg = MessageSerializer::serializeGetData(blocks_to_request);
             peer->sendMessage(P2PMsgType::GETDATA, getdata_msg);
-            std::cout << "Requesting " << blocks_to_request.size() << " blocks" << std::endl;
+            std::cout << "getdata " << blocks_to_request.size() << std::endl;
+        }
+        if (headers.size() == 2000)
+        {
+            std::vector<std::array<uint8_t, 32>> locator{headers.back().hash};
+            std::array<uint8_t, 32> hashStop{};
+            peer->sendMessage(P2PMsgType::GETHEADERS, MessageSerializer::serializeGetHeaders(locator, hashStop));
         }
     }
 
@@ -1880,13 +1934,14 @@ namespace pisecured
                 if (status == "accepted")
                 {
                     bestHeight_ = storage_->get_best_height();
-                    std::cout << "Synced block height " << result.value("height", 0) << " hash " << result.value("hash", "") << std::endl;
+                    std::cout << "accepted block height " << result.value("height", 0) << " hash " << result.value("hash", "") << std::endl;
                 }
                 else
                 {
                     const std::string reason = result.value("reason", "");
-                    std::cout << "Rejected synced block: " << reason << std::endl;
-                    if (reason.find("does not link") == std::string::npos && reason.find("does not extend") == std::string::npos)
+                    const std::string hash = result.value("hash", block.value("hash", ""));
+                    std::cout << "Rejected synced block hash " << hash << " reason " << reason << std::endl;
+                    if (reason.find("does not link") == std::string::npos && reason.find("does not extend") == std::string::npos && reason.find("pihash") == std::string::npos && reason.find("PoW") == std::string::npos && reason.find("hw_proof") == std::string::npos)
                     {
                         peer->increaseBanScore(20);
                     }

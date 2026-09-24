@@ -2000,7 +2000,18 @@ namespace pisecured
         std::string why;
         if (!resolve_miner(wallet_field, shown, payout, why))
         {
-            return rejected(why == "wallet or miner address required" ? std::string("coinbase wallet missing") : why);
+            // Blocks already on the chain used the literal wallet string
+            // ("operator") before shortnames existed. Sync checks the amounts.
+            // A newly mined block still has to name a ps1 or a registered shortname.
+            if (!require_local_policy)
+            {
+                shown = wallet_field;
+                payout = wallet_field;
+            }
+            else
+            {
+                return rejected(why == "wallet or miner address required" ? std::string("coinbase wallet missing") : why);
+            }
         }
         const std::string wallet = shown;
 

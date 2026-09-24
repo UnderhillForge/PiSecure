@@ -29,6 +29,9 @@ namespace pisecured
     constexpr int BAN_SCORE_THRESHOLD = 100;
     constexpr int PING_INTERVAL_SECONDS = 120;
     constexpr int MAX_INV_SIZE = 50000;
+    // Largest accepted P2P payload. A declared length above this does not
+    // disconnect the peer until that many payload bytes are actually buffered.
+    constexpr uint32_t kMaxMessageBytes = 32u * 1024u * 1024u;
 
     // --- P2P Message Types ---
     enum class P2PMsgType : uint8_t
@@ -323,6 +326,7 @@ namespace pisecured
         };
         AdvertisedP2P advertisedP2P() const;
         bool publicUnicastHost(const std::string &host) const;
+        bool isOwnAddress(uint32_t addr) const;
         bool connectedTo(const std::string &host, int port) const;
         void dialDirectoryPeers(const std::vector<std::pair<std::string, int>> &targets);
         void loadBootstrapNodeId();
