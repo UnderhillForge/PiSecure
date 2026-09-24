@@ -19,7 +19,8 @@ static void print_usage()
     std::cout << "pisecured [--validate-only] [--host 0.0.0.0] [--port 3144] [--p2p-port 3141]\n"
               << "          [--peer HOST:PORT] [--datadir PATH] [--no-update-check]\n"
               << "Set PISECURE_NODE_ID to a unique name on every machine.\n"
-              << "Do not reuse pisecure-pi5-validator except on that Pi.\n";
+              << "Do not reuse pisecure-pi5-validator except on that Pi.\n"
+              << "Coordinated defense stays off unless PISECURE_SENTINEL=1.\n";
 }
 
 int main(int argc, char *argv[])

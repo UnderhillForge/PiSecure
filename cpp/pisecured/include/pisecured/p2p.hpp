@@ -33,6 +33,10 @@ namespace pisecured
     // disconnect the peer until that many payload bytes are actually buffered.
     constexpr uint32_t kMaxMessageBytes = 32u * 1024u * 1024u;
 
+    // Coordinated defense and ML sybil checks. True only for
+    // PISECURE_SENTINEL=1, true, yes, or on. Default is off.
+    bool sentinelEnabled();
+
     // --- P2P Message Types ---
     enum class P2PMsgType : uint8_t
     {

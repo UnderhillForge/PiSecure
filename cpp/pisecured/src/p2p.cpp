@@ -23,6 +23,21 @@
 
 namespace pisecured
 {
+    bool sentinelEnabled()
+    {
+        const char *raw = std::getenv("PISECURE_SENTINEL");
+        if (raw == nullptr || raw[0] == '\0')
+        {
+            return false;
+        }
+        std::string value(raw);
+        for (char &ch : value)
+        {
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        }
+        return value == "1" || value == "true" || value == "yes" || value == "on";
+    }
+
     // --- Message Serialization Implementation ---
 
     void MessageSerializer::writeUint32(std::vector<uint8_t> &buf, uint32_t val)
@@ -958,7 +973,7 @@ namespace pisecured
 
     void BootstrapWebSocketClient::reportThreat(const std::string &threatType, const std::string &severity, const std::string &details)
     {
-        if (!connected_.load())
+        if (!sentinelEnabled() || !connected_.load())
         {
             return;
         }
@@ -1170,6 +1185,7 @@ namespace pisecured
                   << " source=" << advertised.source
                   << " accepts_inbound=" << (publicUnicastHost(advertised.host) ? "true" : "false")
                   << std::endl;
+        std::cout << "coordinated defense " << (sentinelEnabled() ? "on" : "off") << std::endl;
         return true;
     }
 
@@ -2115,6 +2131,10 @@ namespace pisecured
 
     void P2PServer::handleThreatAlert(std::shared_ptr<Peer> peer, const std::vector<uint8_t> &payload)
     {
+        if (!sentinelEnabled())
+        {
+            return;
+        }
         ThreatAlert alert;
         if (MessageSerializer::deserializeThreatAlert(payload, alert))
         {
@@ -2469,6 +2489,10 @@ namespace pisecured
 
     void P2PServer::broadcastThreatAlert(const ThreatAlert &alert)
     {
+        if (!sentinelEnabled())
+        {
+            return;
+        }
         auto payload = MessageSerializer::serializeThreatAlert(alert);
 
         std::lock_guard<std::mutex> lock(peersMutex_);
@@ -2507,6 +2531,10 @@ namespace pisecured
 
     void P2PServer::activateCoordinatedDefense(const ThreatAlert &alert)
     {
+        if (!sentinelEnabled())
+        {
+            return;
+        }
         std::cout << "🛡️  COORDINATED DEFENSE ACTIVATED" << std::endl;
         std::cout << "   Threat: " << alert.threatType << " | Severity: " << alert.severity << std::endl;
 
@@ -3039,6 +3067,10 @@ namespace pisecured
 
     void P2PServer::onBootstrapThreatDetected(const std::string &threatType, const std::string &severity, const std::string &details)
     {
+        if (!sentinelEnabled())
+        {
+            return;
+        }
         std::cout << "🚨 SENTINEL AI ALERT: " << severity << " - " << threatType << std::endl;
         std::cout << "   Details: " << details << std::endl;
 
@@ -3078,6 +3110,10 @@ namespace pisecured
 
     void P2PServer::onBootstrapDefenseActivated(const std::string &defenseType, const std::string &details)
     {
+        if (!sentinelEnabled())
+        {
+            return;
+        }
         std::cout << "🛡️  DEFENSE ACTIVATED: " << defenseType << std::endl;
         std::cout << "   Details: " << details << std::endl;
 
@@ -3103,6 +3139,10 @@ namespace pisecured
         while (running_)
         {
             sleepWhileRunning(std::chrono::seconds(10)); // Run analysis every 10 seconds
+            if (!running_ || !sentinelEnabled())
+            {
+                continue;
+            }
 
             std::vector<std::shared_ptr<Peer>> peersCopy;
             {

@@ -312,9 +312,16 @@ namespace pisecured
                 {
                     ip = (a << 24) | (b << 16) | (c << 8) | d;
                 }
-                ThreatAlert alert{type, severity, ip, (uint64_t)std::time(nullptr), details, "local", 0.8};
-                p2p->broadcastThreatAlert(alert);
-                result["status"] = "recorded";
+                if (!sentinelEnabled())
+                {
+                    result["status"] = "disabled";
+                }
+                else
+                {
+                    ThreatAlert alert{type, severity, ip, (uint64_t)std::time(nullptr), details, "local", 0.8};
+                    p2p->broadcastThreatAlert(alert);
+                    result["status"] = "recorded";
+                }
             }
             else if (method == "getvalidatorstats")
             {
