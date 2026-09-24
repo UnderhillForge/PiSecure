@@ -1215,9 +1215,7 @@ namespace pisecured
             return false;
         }
 
-        probeAdvertisedP2P();
-
-        // Start threads
+        // Start threads. The bootstrap thread probes once, then every hour.
         acceptThread_ = std::thread(&P2PServer::acceptLoop, this);
         messageThread_ = std::thread(&P2PServer::messageLoop, this);
         connectThread_ = std::thread(&P2PServer::connectLoop, this);
