@@ -219,6 +219,15 @@ namespace pisecured
             {
                 cfg.pins_port = std::stoi(next(arg));
             }
+            else if (arg == "-h" || arg == "--help")
+            {
+                continue;
+            }
+            else if (!arg.empty() && arg[0] == '-')
+            {
+                std::cerr << "Unknown option " << arg << "\n";
+                std::exit(2);
+            }
         }
 
         // Apply testnet datadir if flagged

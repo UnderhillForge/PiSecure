@@ -50,13 +50,19 @@ namespace pisecured
     {
         if (!running_.exchange(false))
             return;
+        // Wake the service thread and let it leave lws_service before the
+        // context is destroyed. Destroying it from this thread aborts.
+        if (context_)
+        {
+            lws_cancel_service(context_);
+        }
+        if (worker_.joinable())
+            worker_.join();
         if (context_)
         {
             lws_context_destroy(context_);
             context_ = nullptr;
         }
-        if (worker_.joinable())
-            worker_.join();
         // Clean up connection tracking
         {
             std::lock_guard<std::mutex> lock(conns_mutex_);

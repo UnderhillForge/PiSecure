@@ -13,11 +13,11 @@ namespace pisecured
     {
         std::filesystem::path datadir;
         std::filesystem::path conf_file;
-        std::string rpc_bind = "127.0.0.1";
-        int rpc_port = 3142;
+        std::string rpc_bind = "0.0.0.0";
+        int rpc_port = 3144;
         // WebSocket RPC (Phase 3)
-        std::string ws_bind = "127.0.0.1";
-        int ws_port = 3142;
+        std::string ws_bind = "0.0.0.0";
+        int ws_port = 3144;
         bool ws_enabled = true;              // Replace HTTP by default
         bool http_enabled = false;           // Disable HTTP fallback by default
         bool ws_tls = false;                 // Enable TLS for WebSocket

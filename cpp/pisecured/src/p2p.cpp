@@ -11,6 +11,7 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <cstring>
+#include <cctype>
 #include <iostream>
 #include <cstdio>
 #include <cstdlib>
@@ -1085,8 +1086,27 @@ namespace pisecured
         }
         if (bootstrapNodeId_.empty())
         {
-            bootstrapNodeId_ = "pisecure-pi5-validator";
+            char hostbuf[256] = {};
+            std::string id = "pisecured-node";
+            if (gethostname(hostbuf, sizeof(hostbuf) - 1) == 0 && hostbuf[0] != '\0')
+            {
+                id = "pisecured-";
+                for (const char *p = hostbuf; *p != '\0' && *p != '.'; ++p)
+                {
+                    const unsigned char c = static_cast<unsigned char>(*p);
+                    if (std::isalnum(c) || c == '-' || c == '_')
+                    {
+                        id.push_back(static_cast<char>(c));
+                    }
+                }
+                if (id.size() < 11)
+                {
+                    id = "pisecured-node";
+                }
+            }
+            bootstrapNodeId_ = id;
         }
+        std::cout << "bootstrap node_id " << bootstrapNodeId_ << std::endl;
 
         // Generate node ID from hardware or config
         nodeId_ = "pisecured-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
@@ -2232,10 +2252,6 @@ namespace pisecured
         {
             return (hostOrder & 0xFFFF0000u) == 0xA9FE0000u;
         };
-        auto tailnet = [](uint32_t hostOrder)
-        {
-            return hostOrder >= 0x64400000u && hostOrder <= 0x647FFFFFu;
-        };
         auto dockerOrDummy = [](const char *name)
         {
             if (name == nullptr || name[0] == '\0')
@@ -2243,10 +2259,9 @@ namespace pisecured
                 return true;
             }
             const std::string iface(name);
-            return iface == "docker0" || iface.rfind("docker", 0) == 0 || iface.rfind("br-", 0) == 0 || iface.rfind("dummy", 0) == 0;
+            return iface == "docker0" || iface.rfind("docker", 0) == 0 || iface.rfind("br-", 0) == 0 || iface.rfind("dummy", 0) == 0 || iface == "tailscale0";
         };
 
-        std::string tailscale;
         std::string lan;
         ifaddrs *list = nullptr;
         if (getifaddrs(&list) == 0)
@@ -2258,6 +2273,10 @@ namespace pisecured
                     continue;
                 }
                 if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0)
+                {
+                    continue;
+                }
+                if (dockerOrDummy(ifa->ifa_name))
                 {
                     continue;
                 }
@@ -2273,22 +2292,10 @@ namespace pisecured
                 {
                     continue;
                 }
-                if (ifa->ifa_name != nullptr && std::strcmp(ifa->ifa_name, "tailscale0") == 0 && tailnet(hostOrder))
-                {
-                    tailscale = host;
-                }
-                if (lan.empty() && !dockerOrDummy(ifa->ifa_name) && std::strcmp(ifa->ifa_name, "tailscale0") != 0)
-                {
-                    lan = host;
-                }
+                lan = host;
+                break;
             }
             freeifaddrs(list);
-        }
-        if (!tailscale.empty())
-        {
-            out.host = tailscale;
-            out.source = "tailscale";
-            return out;
         }
         out.host = lan;
         out.source = "lan";

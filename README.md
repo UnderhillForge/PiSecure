@@ -18,6 +18,8 @@ sudo systemctl daemon-reload
 
 There is no Docker install and no mock-hardware mode.
 
+An x86_64 validator is `pisecure-v0.2.1-x86_64.tar.gz` on the same release, or a later `pisecure-v*-x86_64.tar.gz`. It is `pisecured` only. Run it with `--validate-only`. Set `PISECURE_NODE_ID` to a name that is not `pisecure-pi5-validator`.
+
 An extra node syncs from this Pi over P2P. Bootstrap is not required:
 
 ```bash

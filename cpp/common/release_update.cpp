@@ -167,8 +167,13 @@ namespace pisecure_update
 
         bool asset_name_ok(const std::string &name)
         {
+#if defined(__x86_64__)
+            const std::string prefix = "pisecure-v";
+            const std::string suffix = "-x86_64.tar.gz";
+#else
             const std::string prefix = "pisecure-pi5-v";
             const std::string suffix = "-aarch64.tar.gz";
+#endif
             return name.size() > prefix.size() + suffix.size() && name.compare(0, prefix.size(), prefix) == 0 && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
         }
 
