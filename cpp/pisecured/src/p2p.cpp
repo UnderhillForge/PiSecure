@@ -20,6 +20,7 @@
 #include <chrono>
 #include <algorithm>
 #include <openssl/sha.h>
+#include <poll.h>
 
 namespace pisecured
 {
@@ -212,6 +213,7 @@ namespace pisecured
         writeVarInt(payload, headers.size());
         for (const auto &header : headers)
         {
+            const size_t begin = payload.size();
             writeUint32(payload, header.version);
             payload.insert(payload.end(), header.prevBlockHash.begin(), header.prevBlockHash.end());
             payload.insert(payload.end(), header.merkleRoot.begin(), header.merkleRoot.end());
@@ -219,6 +221,10 @@ namespace pisecured
             writeUint32(payload, header.difficulty);
             writeUint64(payload, header.nonce);
             payload.insert(payload.end(), header.hash.begin(), header.hash.end());
+            if (payload.size() - begin != kCompactHeaderBytes)
+            {
+                return {};
+            }
         }
         return payload;
     }
@@ -361,31 +367,41 @@ namespace pisecured
         return true;
     }
 
-    bool MessageSerializer::deserializeHeaders(const std::vector<uint8_t> &data, std::vector<BlockHeader> &headers)
+    bool MessageSerializer::deserializeHeaders(const std::vector<uint8_t> &data, std::vector<BlockHeader> &headers, size_t &consumed)
     {
+        headers.clear();
+        consumed = 0;
         if (data.empty())
             return false;
         size_t offset = 0;
         uint64_t count = readVarInt(data.data(), offset, data.size());
-        if (count > 2000)
+        if (count == 0 || count > 2000)
+            return false;
+        if (data.size() < offset || (data.size() - offset) != count * kCompactHeaderBytes)
             return false;
         for (uint64_t i = 0; i < count; i++)
         {
-            if (offset + 116 > data.size())
+            const size_t begin = offset;
+            if (offset + kCompactHeaderBytes > data.size())
                 return false;
-            BlockHeader header;
+            BlockHeader header{};
             header.version = readUint32(data.data(), offset);
-            std::copy(data.begin() + offset, data.begin() + offset + 32, header.prevBlockHash.begin());
+            std::copy_n(data.begin() + static_cast<std::ptrdiff_t>(offset), 32, header.prevBlockHash.begin());
             offset += 32;
-            std::copy(data.begin() + offset, data.begin() + offset + 32, header.merkleRoot.begin());
+            std::copy_n(data.begin() + static_cast<std::ptrdiff_t>(offset), 32, header.merkleRoot.begin());
             offset += 32;
             header.timestamp = readUint64(data.data(), offset);
             header.difficulty = readUint32(data.data(), offset);
             header.nonce = readUint64(data.data(), offset);
-            std::copy(data.begin() + offset, data.begin() + offset + 32, header.hash.begin());
+            std::copy_n(data.begin() + static_cast<std::ptrdiff_t>(offset), 32, header.hash.begin());
             offset += 32;
+            if (offset - begin != kCompactHeaderBytes)
+                return false;
             headers.push_back(header);
         }
+        if (offset != data.size())
+            return false;
+        consumed = offset;
         return true;
     }
 
@@ -657,13 +673,41 @@ namespace pisecured
 
     bool Peer::sendRawData(const std::vector<uint8_t> &data)
     {
-        ssize_t sent = send(fd, data.data(), data.size(), MSG_NOSIGNAL);
-        if (sent > 0)
+        if (fd < 0)
         {
-            lastSendTime = std::chrono::steady_clock::now().time_since_epoch().count();
-            return sent == static_cast<ssize_t>(data.size());
+            return false;
         }
-        return false;
+        size_t off = 0;
+        while (off < data.size())
+        {
+            const ssize_t sent = ::send(fd, data.data() + off, data.size() - off, MSG_NOSIGNAL);
+            if (sent > 0)
+            {
+                off += static_cast<size_t>(sent);
+                continue;
+            }
+            if (sent < 0 && errno == EINTR)
+            {
+                continue;
+            }
+            if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            {
+                pollfd pfd{};
+                pfd.fd = fd;
+                pfd.events = POLLOUT;
+                const int ready = ::poll(&pfd, 1, 20000);
+                if (ready > 0 && (pfd.revents & POLLOUT) != 0)
+                {
+                    continue;
+                }
+            }
+            std::cout << "Short write, closing socket" << std::endl;
+            ::close(fd);
+            fd = -1;
+            return false;
+        }
+        lastSendTime = std::chrono::steady_clock::now().time_since_epoch().count();
+        return true;
     }
 
     void Peer::increaseBanScore(int amount)
@@ -1478,6 +1522,10 @@ namespace pisecured
 
     void P2PServer::processMessages(std::shared_ptr<Peer> peer)
     {
+        if (peer->fd < 0)
+        {
+            return;
+        }
         uint8_t buffer[4096];
         ssize_t received = recv(peer->fd, buffer, sizeof(buffer), MSG_DONTWAIT);
 
@@ -1493,24 +1541,22 @@ namespace pisecured
         peer->lastRecvTime = std::chrono::steady_clock::now().time_since_epoch().count();
         peer->recvBuffer.insert(peer->recvBuffer.end(), buffer, buffer + received);
 
-        // Process complete messages
-        while (peer->recvBuffer.size() >= 5)
+        // Process complete messages. A bad length or an unknown type ends the
+        // connection; leftover bytes are not parsed as a later frame.
+        while (peer->fd >= 0 && peer->recvBuffer.size() >= 5)
         {
             uint8_t type = peer->recvBuffer[0];
             uint32_t len = peer->recvBuffer[1] | (peer->recvBuffer[2] << 8) |
                            (peer->recvBuffer[3] << 16) | (peer->recvBuffer[4] << 24);
+            const bool known = type <= static_cast<uint8_t>(P2PMsgType::THREAT_ALERT);
 
-            if (len > kMaxMessageBytes)
+            if (!known || len > kMaxMessageBytes)
             {
-                const uint32_t buffered = peer->recvBuffer.size() > 5 ? static_cast<uint32_t>(peer->recvBuffer.size() - 5) : 0;
-                std::cout << "Message too large type=" << static_cast<unsigned>(type)
-                          << " declared=" << len << " buffered=" << buffered << std::endl;
-                if (buffered > kMaxMessageBytes)
-                {
-                    disconnectPeer(peer, "Message too large");
-                    return;
-                }
-                break;
+                std::cout << "Message rejected type=" << static_cast<unsigned>(type)
+                          << " declared=" << len << std::endl;
+                peer->recvBuffer.clear();
+                disconnectPeer(peer, !known ? "Unknown message type" : "Message too large");
+                return;
             }
 
             if (peer->recvBuffer.size() < 5 + len)
@@ -1562,14 +1608,25 @@ namespace pisecured
             case P2PMsgType::THREAT_ALERT:
                 handleThreatAlert(peer, payload);
                 break;
-            default:
-                peer->increaseBanScore(1);
+            case P2PMsgType::REJECT:
+            case P2PMsgType::GETBLOCKS:
                 break;
+            default:
+                peer->recvBuffer.clear();
+                disconnectPeer(peer, "Unknown message type");
+                return;
+            }
+
+            if (peer->fd < 0)
+            {
+                peer->recvBuffer.clear();
+                return;
             }
 
             if (peer->shouldBan())
             {
                 addrman_.ban(peer->address);
+                peer->recvBuffer.clear();
                 disconnectPeer(peer, "Banned");
                 return;
             }
@@ -1606,6 +1663,11 @@ namespace pisecured
 
     void P2PServer::sendVersion(std::shared_ptr<Peer> peer)
     {
+        if (peer->versionSent || peer->fd < 0)
+        {
+            return;
+        }
+        peer->versionSent = true;
         if (storage_ && storage_->has_tip())
         {
             bestHeight_ = storage_->get_best_height();
@@ -1620,6 +1682,11 @@ namespace pisecured
 
     void P2PServer::sendVerack(std::shared_ptr<Peer> peer)
     {
+        if (peer->verackSent || peer->fd < 0)
+        {
+            return;
+        }
+        peer->verackSent = true;
         auto payload = MessageSerializer::serializeVerack();
         peer->sendMessage(P2PMsgType::VERACK, payload);
     }
@@ -1645,6 +1712,10 @@ namespace pisecured
 
     void P2PServer::handleVersion(std::shared_ptr<Peer> peer, const std::vector<uint8_t> &payload)
     {
+        if (peer->versionReceived)
+        {
+            return;
+        }
         uint32_t version, services, startHeight;
         uint64_t timestamp;
         std::string userAgent;
@@ -1655,6 +1726,7 @@ namespace pisecured
             return;
         }
 
+        peer->versionReceived = true;
         peer->version = version;
         peer->services = services;
         peer->startHeight = startHeight;
@@ -1680,6 +1752,11 @@ namespace pisecured
 
     void P2PServer::handleVerack(std::shared_ptr<Peer> peer)
     {
+        if (peer->verackReceived || peer->handshakeComplete)
+        {
+            return;
+        }
+        peer->verackReceived = true;
         peer->handshakeComplete = true;
         std::cout << "Handshake complete with " << inet_ntoa(peer->address.addr.sin_addr) << std::endl;
 
@@ -1852,9 +1929,12 @@ namespace pisecured
     void P2PServer::handleHeaders(std::shared_ptr<Peer> peer, const std::vector<uint8_t> &payload)
     {
         std::vector<BlockHeader> headers;
-        if (!MessageSerializer::deserializeHeaders(payload, headers))
+        size_t consumed = 0;
+        if (!MessageSerializer::deserializeHeaders(payload, headers, consumed) || consumed != payload.size())
         {
-            peer->increaseBanScore(10);
+            std::cout << "Invalid header payload" << std::endl;
+            peer->recvBuffer.clear();
+            disconnectPeer(peer, "invalid header payload");
             return;
         }
 
@@ -1891,6 +1971,8 @@ namespace pisecured
             else
             {
                 std::cout << "Header does not connect to local tip" << std::endl;
+                peer->recvBuffer.clear();
+                disconnectPeer(peer, "invalid header chain");
                 return;
             }
 
@@ -1899,6 +1981,8 @@ namespace pisecured
             if (prev_header && header.prevBlockHash != prev_header->hash)
             {
                 std::cout << "Invalid header chain at height " << header.height << std::endl;
+                peer->recvBuffer.clear();
+                disconnectPeer(peer, "invalid header chain");
                 return;
             }
 

@@ -42,7 +42,7 @@ set(PISECURED_SOURCES
 )
 
 add_executable(pisecured ${PISECURED_SOURCES})
-target_compile_definitions(pisecured PRIVATE PISECURE_RELEASE="0.2.6")
+target_compile_definitions(pisecured PRIVATE PISECURE_RELEASE="0.2.7")
 
 target_link_libraries(pisecured
     Threads::Threads
@@ -52,6 +52,19 @@ target_link_libraries(pisecured
 )
 
 install(TARGETS pisecured DESTINATION /usr/local/bin)
+
+if(NOT CMAKE_CROSSCOMPILING)
+    set(PISECURED_TEST_SOURCES ${PISECURED_SOURCES})
+    list(REMOVE_ITEM PISECURED_TEST_SOURCES src/main.cpp)
+    add_executable(header_frame_test tests/header_frame_test.cpp ${PISECURED_TEST_SOURCES})
+    target_compile_definitions(header_frame_test PRIVATE PISECURE_RELEASE="0.2.7")
+    target_link_libraries(header_frame_test
+        Threads::Threads
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        ${LWS_LIBRARIES}
+    )
+endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set_target_properties(pisecured PROPERTIES

@@ -29,9 +29,12 @@ namespace pisecured
     constexpr int BAN_SCORE_THRESHOLD = 100;
     constexpr int PING_INTERVAL_SECONDS = 120;
     constexpr int MAX_INV_SIZE = 50000;
-    // Largest accepted P2P payload. A declared length above this does not
-    // disconnect the peer until that many payload bytes are actually buffered.
-    constexpr uint32_t kMaxMessageBytes = 32u * 1024u * 1024u;
+    // Largest accepted P2P payload. A declared length above this closes the socket.
+    constexpr uint32_t kMaxMessageBytes = 2u * 1024u * 1024u;
+    // Compact header wire size. version u32, prev 32, merkle 32,
+    // timestamp u64, difficulty u32, nonce u64, hash 32. No height.
+    constexpr size_t kCompactHeaderBytes = 4u + 32u + 32u + 8u + 4u + 8u + 32u;
+    static_assert(kCompactHeaderBytes == 120u, "compact header is 120 bytes");
 
     // Coordinated defense and ML sybil checks. True only for
     // PISECURE_SENTINEL=1, true, yes, or on. Default is off.
@@ -157,7 +160,7 @@ namespace pisecured
         static bool deserializeAddr(const std::vector<uint8_t> &data, std::vector<PeerAddr> &addrs);
         static bool deserializeInv(const std::vector<uint8_t> &data, std::vector<InvVect> &invs);
         static bool deserializeGetHeaders(const std::vector<uint8_t> &data, std::vector<std::array<uint8_t, 32>> &locatorHashes, std::array<uint8_t, 32> &hashStop);
-        static bool deserializeHeaders(const std::vector<uint8_t> &data, std::vector<BlockHeader> &headers);
+        static bool deserializeHeaders(const std::vector<uint8_t> &data, std::vector<BlockHeader> &headers, size_t &consumed);
         static bool deserializePing(const std::vector<uint8_t> &data, uint64_t &nonce);
         static bool deserializePong(const std::vector<uint8_t> &data, uint64_t &nonce);
         static bool deserializeThreatAlert(const std::vector<uint8_t> &data, ThreatAlert &alert);
@@ -183,6 +186,10 @@ namespace pisecured
         PeerAddr address;
         bool inbound;
         bool handshakeComplete;
+        bool versionReceived = false;
+        bool verackReceived = false;
+        bool versionSent = false;
+        bool verackSent = false;
         int64_t lastPingTime;
         int64_t lastPongTime;
         int64_t lastRecvTime;
