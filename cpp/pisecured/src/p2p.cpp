@@ -1215,6 +1215,8 @@ namespace pisecured
             return false;
         }
 
+        probeAdvertisedP2P();
+
         // Start threads
         acceptThread_ = std::thread(&P2PServer::acceptLoop, this);
         messageThread_ = std::thread(&P2PServer::messageLoop, this);
@@ -1226,9 +1228,7 @@ namespace pisecured
         std::cout << "P2P server started on port " << cfg.p2p_port << std::endl;
         const AdvertisedP2P advertised = advertisedP2P();
         std::cout << "advertising p2p at " << advertised.host << ":" << advertised.port
-                  << " source=" << advertised.source
-                  << " accepts_inbound=" << (publicUnicastHost(advertised.host) ? "true" : "false")
-                  << std::endl;
+                  << " source=" << advertised.source << std::endl;
         std::cout << "coordinated defense " << (sentinelEnabled() ? "on" : "off") << std::endl;
         return true;
     }
@@ -2393,7 +2393,7 @@ namespace pisecured
                 return true;
             }
             const std::string iface(name);
-            return iface == "docker0" || iface.rfind("docker", 0) == 0 || iface.rfind("br-", 0) == 0 || iface.rfind("dummy", 0) == 0 || iface == "tailscale0";
+            return iface == "docker0" || iface.rfind("docker", 0) == 0 || iface.rfind("br-", 0) == 0 || iface.rfind("dummy", 0) == 0;
         };
 
         std::string lan;
@@ -2460,10 +2460,6 @@ namespace pisecured
         {
             return false;
         }
-        if (value >= 0x64400000u && value <= 0x647FFFFFu)
-        {
-            return false;
-        }
         if ((value & 0xF0000000u) == 0xE0000000u)
         {
             return false;
@@ -2502,7 +2498,11 @@ namespace pisecured
             }
             const std::string &host = target.first;
             const int port = target.second;
-            if (port <= 0 || port > 65535 || !publicUnicastHost(host))
+            if (port <= 0 || port > 65535 || host.empty() || host == "0.0.0.0" || host == "::" || host == "127.0.0.1" || host == "::1")
+            {
+                continue;
+            }
+            if (host == "bootstrap.pisecure.org" || host == "bootstrap-testnet.pisecure.org")
             {
                 continue;
             }
@@ -2796,6 +2796,34 @@ namespace pisecured
         }
     }
 
+    void P2PServer::probeAdvertisedP2P()
+    {
+        const AdvertisedP2P advertised = advertisedP2P();
+        bool reachable = false;
+        if (!advertised.host.empty())
+        {
+            const char *base = config_.testnet ? "https://bootstrap-testnet.pisecure.org" : "https://bootstrap.pisecure.org";
+            const json body = {{"host", advertised.host}, {"port", advertised.port}};
+            std::string response;
+            const int code = bootstrapHttp("POST", std::string(base) + "/api/v1/nodes/probe", body.dump(), response);
+            if (code == 200)
+            {
+                try
+                {
+                    const json doc = json::parse(response);
+                    reachable = doc.value("reachable", false);
+                }
+                catch (const std::exception &)
+                {
+                    reachable = false;
+                }
+            }
+        }
+        probeReachable_ = reachable;
+        std::cout << "p2p probe reachable=" << (reachable ? "yes" : "no")
+                  << " host=" << advertised.host << ":" << advertised.port << std::endl;
+    }
+
     void P2PServer::registerBootstrapNode()
     {
         try
@@ -2815,7 +2843,7 @@ namespace pisecured
                 {"p2p_host", advertised.host},
                 {"p2p_port", advertised.port},
                 {"rpc_port", config_.ws_port},
-                {"accepts_inbound", publicUnicastHost(advertised.host)},
+                {"accepts_inbound", probeReachable_},
                 {"height", bestHeight_},
                 {"tip", tip},
             };
@@ -2863,7 +2891,7 @@ namespace pisecured
                 {"status", "active"},
                 {"mining_active", false},
                 {"peers_connected", static_cast<int>(getPeerCount())},
-                {"accepts_inbound", publicUnicastHost(advertised.host)},
+                {"accepts_inbound", probeReachable_},
             };
             std::string response;
             int code = bootstrapHttp("POST", std::string(base) + "/api/v1/nodes/status", body.dump(), response);
@@ -2996,8 +3024,11 @@ namespace pisecured
         try
         {
             const char *base = config_.testnet ? "https://bootstrap-testnet.pisecure.org" : "https://bootstrap.pisecure.org";
+            const AdvertisedP2P advertised = advertisedP2P();
             const std::string self = reachableHost();
             std::vector<std::pair<std::string, int>> hints;
+            std::vector<std::pair<std::string, int>> preferred;
+            std::vector<std::pair<std::string, int>> others;
             std::vector<std::pair<std::string, int>> dialable;
             auto absorb = [&](const std::string &payload)
             {
@@ -3040,7 +3071,7 @@ namespace pisecured
                         continue;
                     }
                     const std::string hintHost = node["p2p_host"].get<std::string>();
-                    if (hintHost.empty() || hintHost == "0.0.0.0" || hintHost == self)
+                    if (hintHost.empty() || hintHost == "0.0.0.0" || hintHost == "::" || hintHost == "127.0.0.1" || hintHost == "::1" || hintHost == self || hintHost == advertised.host || hintHost == "bootstrap.pisecure.org" || hintHost == "bootstrap-testnet.pisecure.org")
                     {
                         continue;
                     }
@@ -3049,20 +3080,47 @@ namespace pisecured
                     {
                         hintPort = node["p2p_port"].get<int>();
                     }
+                    else if (node.contains("port") && node["port"].is_number_integer())
+                    {
+                        hintPort = node["port"].get<int>();
+                    }
                     hints.emplace_back(hintHost, hintPort);
-                    bool inbound = publicUnicastHost(hintHost);
+                    bool specified = false;
+                    bool inbound = false;
                     if (node.contains("accepts_inbound") && node["accepts_inbound"].is_boolean())
                     {
-                        inbound = node["accepts_inbound"].get<bool>() && inbound;
+                        specified = true;
+                        inbound = node["accepts_inbound"].get<bool>();
+                    }
+                    else if (node.contains("inbound") && node["inbound"].is_boolean())
+                    {
+                        specified = true;
+                        inbound = node["inbound"].get<bool>();
                     }
                     if (inbound)
                     {
-                        dialable.emplace_back(hintHost, hintPort);
+                        preferred.emplace_back(hintHost, hintPort);
+                    }
+                    else if (!specified)
+                    {
+                        others.emplace_back(hintHost, hintPort);
+                    }
+                }
+            };
+            auto pushUnique = [](std::vector<std::pair<std::string, int>> &dest, const std::vector<std::pair<std::string, int>> &src)
+            {
+                for (const auto &target : src)
+                {
+                    const bool known = std::any_of(dest.begin(), dest.end(), [&](const std::pair<std::string, int> &item)
+                                                   { return item.first == target.first && item.second == target.second; });
+                    if (!known)
+                    {
+                        dest.push_back(target);
                     }
                 }
             };
             std::string peersBody;
-            if (bootstrapHttp("GET", std::string(base) + "/api/v1/bootstrap/peers", "", peersBody) == 200)
+            if (bootstrapHttp("GET", std::string(base) + "/api/v1/bootstrap/peers?inbound=1", "", peersBody) == 200)
             {
                 try
                 {
@@ -3083,19 +3141,11 @@ namespace pisecured
                 {
                 }
             }
+            pushUnique(dialable, preferred);
+            pushUnique(dialable, others);
             {
                 std::lock_guard<std::mutex> lock(hintMutex_);
                 bootstrapHints_ = hints;
-                for (const auto &target : dialable)
-                {
-                    const bool known = std::any_of(rememberedPublic_.begin(), rememberedPublic_.end(), [&](const std::pair<std::string, int> &item)
-                                                   { return item.first == target.first && item.second == target.second; });
-                    if (!known)
-                    {
-                        rememberedPublic_.push_back(target);
-                    }
-                }
-                dialable.insert(dialable.end(), rememberedPublic_.begin(), rememberedPublic_.end());
             }
             dialDirectoryPeers(dialable);
         }
@@ -3117,12 +3167,22 @@ namespace pisecured
             reportBootstrapChain();
         }
         auto nextStatus = std::chrono::steady_clock::now() + std::chrono::seconds(300);
+        auto nextProbe = std::chrono::steady_clock::now() + std::chrono::seconds(3600);
         while (running_)
         {
             sleepWhileRunning(std::chrono::seconds(30));
             if (!running_)
             {
                 break;
+            }
+            if (std::chrono::steady_clock::now() >= nextProbe)
+            {
+                probeAdvertisedP2P();
+                nextProbe = std::chrono::steady_clock::now() + std::chrono::seconds(3600);
+                if (publish)
+                {
+                    postBootstrapStatus();
+                }
             }
             refreshBootstrapHints();
             if (publish)

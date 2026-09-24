@@ -328,6 +328,7 @@ namespace pisecured
         std::vector<std::pair<std::string, int>> bootstrapHints_;
         std::string bootstrapNodeId_;
         bool bootstrapIdOwned_ = false;
+        bool probeReachable_ = false;
         std::vector<std::pair<std::string, int>> rememberedPublic_;
         struct AdvertisedP2P
         {
@@ -341,6 +342,7 @@ namespace pisecured
         bool connectedTo(const std::string &host, int port) const;
         void dialDirectoryPeers(const std::vector<std::pair<std::string, int>> &targets);
         void loadBootstrapNodeId();
+        void probeAdvertisedP2P();
         void registerBootstrapNode();
         void postBootstrapStatus();
         void reportBootstrapChain();
