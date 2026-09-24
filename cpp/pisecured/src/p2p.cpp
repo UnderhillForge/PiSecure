@@ -2843,6 +2843,7 @@ namespace pisecured
                 {"p2p_host", advertised.host},
                 {"p2p_port", advertised.port},
                 {"rpc_port", config_.ws_port},
+                {"inbound", probeReachable_},
                 {"accepts_inbound", probeReachable_},
                 {"height", bestHeight_},
                 {"tip", tip},
@@ -2851,6 +2852,7 @@ namespace pisecured
             int code = bootstrapHttp("POST", std::string(base) + "/api/v1/nodes/register", body.dump(), response);
             if (code == 400)
             {
+                body.erase("inbound");
                 body.erase("accepts_inbound");
                 code = bootstrapHttp("POST", std::string(base) + "/api/v1/nodes/register", body.dump(), response);
             }
@@ -2891,12 +2893,14 @@ namespace pisecured
                 {"status", "active"},
                 {"mining_active", false},
                 {"peers_connected", static_cast<int>(getPeerCount())},
+                {"inbound", probeReachable_},
                 {"accepts_inbound", probeReachable_},
             };
             std::string response;
             int code = bootstrapHttp("POST", std::string(base) + "/api/v1/nodes/status", body.dump(), response);
             if (code == 400)
             {
+                body.erase("inbound");
                 body.erase("accepts_inbound");
                 code = bootstrapHttp("POST", std::string(base) + "/api/v1/nodes/status", body.dump(), response);
             }
