@@ -2821,7 +2821,7 @@ namespace pisecured
         }
         probeReachable_ = reachable;
         std::cout << "p2p probe reachable=" << (reachable ? "yes" : "no")
-                  << " host=" << advertised.host << ":" << advertised.port << std::endl;
+                  << " host=" << advertised.host << std::endl;
     }
 
     void P2PServer::registerBootstrapNode()
@@ -3160,6 +3160,10 @@ namespace pisecured
         // An explicit --peer is a sync client. It must not publish under this
         // process id or it would overwrite the primary host and ports.
         const bool publish = config_.peers.empty();
+        if (publish)
+        {
+            probeAdvertisedP2P();
+        }
         refreshBootstrapHints();
         if (publish)
         {
