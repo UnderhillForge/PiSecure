@@ -1,6 +1,6 @@
 # PiSecure
 
-PiSecure is a low-power chain for Raspberry Pi. Each block pays **0.200 314ST**. Official Pi 2, 3, 4, and 5 can mine. Any CPU can validate.
+PiSecure is a low-power chain for Raspberry Pi. From block 1 each block pays **0.218 314ST** (miner 0.216, validator 0.002). v0.2.8 starts difficulty at 4 bits and retargets in the band 2–24. Official Pi 2, 3, 4, and 5 can mine. Any CPU can validate.
 
 ## Install
 

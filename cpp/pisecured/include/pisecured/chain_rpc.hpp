@@ -8,19 +8,18 @@ namespace pisecured
 {
     class P2PServer;
 
-    // Leading-zero bits for a 60 second target. Clamped to this band
-    // for every block before kDifficultyActivationHeight.
+    // Old one-step band. Unused once activation is height 1.
     constexpr uint32_t kMinDifficultyBits = 2;
     constexpr uint32_t kMaxDifficultyBits = 4;
     constexpr uint32_t kInitialDifficultyBits = 4;
     constexpr uint32_t kTargetBlockSeconds = 60;
 
-    // Tip height was 23363 when this constant was chosen. From block 23863
-    // the subsidy is 218 units and difficulty is the 2–24 bit retarget.
-    constexpr uint32_t kDifficultyActivationHeight = 23863;
+    // Block 1 is the first block. It starts at 4 bits. Later blocks retarget
+    // in the 2–24 band. The subsidy is 218 units from block 1.
+    constexpr uint32_t kDifficultyActivationHeight = 1;
 
-    // 1 unit = 0.001 314ST. Base subsidy is 0.200 314ST per block until
-    // activation, then 0.218. Miner receives subsidy minus the validator 2 units.
+    // 1 unit = 0.001 314ST. Subsidy is 0.218 314ST from block 1.
+    // Miner receives subsidy minus the validator 2 units (216).
     constexpr uint64_t kSubsidyUnits = 200;
     constexpr uint64_t kSubsidyUnitsAfterActivation = 218;
     constexpr uint64_t kValidatorUnits = 2;
