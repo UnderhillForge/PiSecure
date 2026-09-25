@@ -64,6 +64,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         OpenSSL::Crypto
         ${LWS_LIBRARIES}
     )
+    add_executable(retarget_test tests/retarget_test.cpp)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")

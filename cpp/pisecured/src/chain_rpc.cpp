@@ -1,4 +1,5 @@
 #include "pisecured/chain_rpc.hpp"
+#include "pisecured/retarget.hpp"
 #include "pisecured/p2p.hpp"
 #include "pihash.h"
 
@@ -557,6 +558,8 @@ namespace pisecured
 
         struct Emission
         {
+            uint64_t subsidy = kSubsidyUnits;
+            uint64_t miner_subsidy = kSubsidyUnits - kValidatorUnits;
             uint64_t fee = 0;
             uint64_t miner_fee = 0;
             uint64_t stakers = 0;
@@ -564,12 +567,19 @@ namespace pisecured
             uint64_t foundation = 0;
             uint64_t burn = 0;
 
-            uint64_t miner_cap() const { return (kSubsidyUnits - kValidatorUnits) + miner_fee; }
+            uint64_t miner_cap() const { return miner_subsidy + miner_fee; }
         };
 
-        Emission emission_for(uint64_t fee)
+        uint64_t subsidy_units_for(uint32_t height)
+        {
+            return height >= kDifficultyActivationHeight ? kSubsidyUnitsAfterActivation : kSubsidyUnits;
+        }
+
+        Emission emission_for(uint32_t height, uint64_t fee)
         {
             Emission e;
+            e.subsidy = subsidy_units_for(height);
+            e.miner_subsidy = e.subsidy - kValidatorUnits;
             e.fee = fee;
             e.miner_fee = fee * 60 / 100;
             e.stakers = fee * 20 / 100;
@@ -656,8 +666,8 @@ namespace pisecured
                 {"height", height},
                 {"txid", to_hex(cb.txid)},
                 {"unit", "0.001 314ST"},
-                {"subsidy", units_314st(kSubsidyUnits)},
-                {"subsidy_units", kSubsidyUnits},
+                {"subsidy", units_314st(e.subsidy)},
+                {"subsidy_units", e.subsidy},
                 {"outputs", outputs},
                 {"fee_units", e.fee},
                 {"shares_units", {{"miner", e.miner_fee}, {"stakers", e.stakers}, {"loans", e.loans}, {"foundation", e.foundation}, {"burn", e.burn}}},
@@ -678,7 +688,8 @@ namespace pisecured
         }
 
         // 60s target. One step per block, never outside 2–4 leading-zero bits.
-        uint32_t next_difficulty(Storage &storage)
+        // Used for every block at or before the activation height.
+        uint32_t next_difficulty_legacy(Storage &storage)
         {
             if (!storage.has_tip())
             {
@@ -706,6 +717,48 @@ namespace pisecured
                 --diff;
             }
             return diff;
+        }
+
+        // Last 10 timestamps, 9 gaps, 540s target, 4x clamp, bits 2–24.
+        // Block kDifficultyActivationHeight still uses the legacy value.
+        uint32_t next_difficulty_window(Storage &storage)
+        {
+            if (!storage.has_tip())
+            {
+                return kInitialDifficultyBits;
+            }
+            const uint32_t tip_bits = storage.tip_difficulty();
+            uint32_t bits = tip_bits == 0 ? kInitialDifficultyBits : tip_bits;
+            if (bits < kRetargetMinBits)
+            {
+                bits = kRetargetMinBits;
+            }
+            if (bits > kRetargetMaxBits)
+            {
+                bits = kRetargetMaxBits;
+            }
+            auto tip = storage.get_header_by_hash(storage.get_best_block_hash());
+            if (!tip || tip->height < 10)
+            {
+                return bits;
+            }
+            auto older = storage.get_header_by_height(tip->height - 9);
+            if (!older)
+            {
+                return bits;
+            }
+            const int64_t elapsed = static_cast<int64_t>(tip->timestamp) - static_cast<int64_t>(older->timestamp);
+            return retarget_difficulty_bits(bits, elapsed);
+        }
+
+        uint32_t next_difficulty(Storage &storage)
+        {
+            const uint32_t next_height = storage.has_tip() ? storage.get_best_height() + 1 : 1;
+            if (next_height <= kDifficultyActivationHeight)
+            {
+                return next_difficulty_legacy(storage);
+            }
+            return next_difficulty_window(storage);
         }
 
         bool units_of(const json &item, uint64_t &units)
@@ -1805,7 +1858,7 @@ namespace pisecured
                 txids.push_back(tx.txid);
             }
         }
-        const Emission emit = emission_for(fee_units);
+        const Emission emit = emission_for(next_height, fee_units);
         const std::vector<CbOut> cb_outs = template_coinbase(payout, emit);
         Tx cb = coinbase_from(next_height, cb_outs);
         std::vector<std::array<uint8_t, 32>> ids{cb.txid};
@@ -1819,6 +1872,7 @@ namespace pisecured
             {"prev_block_hash", to_hex(prev)},
             {"timestamp", now_seconds()},
             {"difficulty", difficulty},
+            {"subsidy_units", emit.subsidy},
             {"coinbase", coinbase},
             {"coinbase_txid", to_hex(cb.txid)},
             {"merkle_root", to_hex(root)},
@@ -2068,7 +2122,8 @@ namespace pisecured
         }
         const uint64_t timestamp = block["timestamp"].get<uint64_t>();
         const uint64_t now = now_seconds();
-        if (timestamp == 0 || timestamp > now + kFutureSkewSeconds)
+        const uint64_t future_skew = height >= kDifficultyActivationHeight ? 120 : kFutureSkewSeconds;
+        if (timestamp == 0 || timestamp > now + future_skew)
         {
             return rejected("timestamp invalid");
         }
@@ -2125,7 +2180,7 @@ namespace pisecured
         {
             fee_units += tx.fee;
         }
-        const Emission emit = emission_for(fee_units);
+        const Emission emit = emission_for(height, fee_units);
         std::vector<CbOut> cb_outs;
         if (coinbase.contains("outputs") && coinbase["outputs"].is_array())
         {
@@ -2187,7 +2242,7 @@ namespace pisecured
             }
         }
         const uint64_t minted = paid_miner + paid_validator + paid_stakers + paid_loans + paid_foundation;
-        const uint64_t mint_cap = kSubsidyUnits + emit.miner_fee + emit.stakers + emit.loans + emit.foundation;
+        const uint64_t mint_cap = emit.subsidy + emit.miner_fee + emit.stakers + emit.loans + emit.foundation;
         if (paid_miner > emit.miner_cap() || paid_validator > kValidatorUnits || paid_stakers > emit.stakers || paid_loans > emit.loans || paid_foundation != emit.foundation || minted > mint_cap)
         {
             return rejected("coinbase exceeds emission rules");

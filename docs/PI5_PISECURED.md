@@ -94,9 +94,19 @@ systemd runs `/opt/pisecure/pisecured`. Wallets use `/opt/pisecure/pswallet` aga
 
 `getblockcount` result `count` is the tip height. It is `0` when no block has been accepted. The first block is height `1`. Its `prev_block_hash` is 64 zero hex digits (the genesis anchor, not a stored block). Later blocks must link the stored tip.
 
-Difficulty is leading zero bits in the band **2–4**, aimed at a **60 second** block. The first template uses 4. After two stored blocks, the next template steps by one: faster than 60s raises difficulty (cap 4), slower lowers it (floor 2). `submitblock` must use that exact value. 146 is not accepted.
+Difficulty is leading zero bits. Through height **23862** the band is **2–4**, aimed at a **60 second** block. The first template uses 4. After two stored blocks, the next template steps by one: faster than 60s raises difficulty (cap 4), slower lowers it (floor 2). `submitblock` must use that exact value. 146 is not accepted.
 
-Base subsidy is **0.200 314ST** per block (`subsidy_units` 200, where 1 unit = 0.001 314ST). About 288 blocks/day at the 60s target. The miner output is the subsidy minus the validator 1% (198 units, 0.198 314ST). The validator output is 2 units (0.002 314ST). Transaction fees, in the same units, split 60% miner, 20% stakers, 8% loans, 7% foundation, and the remainder (at least 5%) is burn and is not an output. Integer division is `fee * percent / 100` for the four paid shares; burn is whatever is left, so a block cannot mint more than the subsidy plus the paid fee shares. There is no foundation output when fees are zero. When the 7% is at least 1 unit, that output is paid to the Foundation wallet `ps154bc21d4a37549c5a599a16b4822bf771ed29001095e241d05ef8ebf709854ee` and the amount must match. Any other foundation address is rejected with `coinbase foundation address`. Stakers stay the address `stakers`, loans stay `loans`, and burn stays out of the coinbase. A coinbase over any of those caps is rejected with `coinbase exceeds emission rules`.
+Base subsidy through height **23862** is **0.200 314ST** per block (`subsidy_units` 200, where 1 unit = 0.001 314ST). The miner output is the subsidy minus the validator 2 units (198 units, 0.198 314ST). The validator output is 2 units (0.002 314ST). Transaction fees, in the same units, split 60% miner, 20% stakers, 8% loans, 7% foundation, and the remainder (at least 5%) is burn and is not an output. Integer division is `fee * percent / 100` for the four paid shares; burn is whatever is left, so a block cannot mint more than the subsidy plus the paid fee shares. There is no foundation output when fees are zero. When the 7% is at least 1 unit, that output is paid to the Foundation wallet `ps154bc21d4a37549c5a599a16b4822bf771ed29001095e241d05ef8ebf709854ee` and the amount must match. Any other foundation address is rejected with `coinbase foundation address`. Stakers stay the address `stakers`, loans stay `loans`, and burn stays out of the coinbase. A coinbase over any of those caps is rejected with `coinbase exceeds emission rules`.
+
+### Activation height 23863
+
+`kDifficultyActivationHeight` is **23863** (tip 23363 plus 500). Blocks before that height are unchanged.
+
+At height 23863 and after, the subsidy is **218 units** (0.218 314ST): miner **216**, validator **2**. With `fee_units` 0 there are no other coinbase outputs. The fee split stays 60% miner, 20% stakers, 8% loans, 7% foundation, remainder burn. A coinbase that pays the miner more than 216 plus the miner's fee share, or the validator more than 2, is rejected with `coinbase exceeds emission rules`.
+
+Block 23863 still uses the pre-activation difficulty (the 2–4, one-step, 60 second rule). From height 23864, difficulty is leading-zero bits in **2–24**. Each block retargets from the last 10 timestamps: `elapsed = time[tip] - time[tip-9]` (9 gaps). Fewer than 10 blocks keeps the previous bits. A non-positive elapsed is ignored. `elapsed` is clamped to `[540/4, 540*4]` and work `2^bits` is then multiplied by `540 / elapsed`, and that product is clamped to `[work/4, work*4]`. `next_bits` is `round(log2(next_work))` clamped to 2–24. Fast spans raise bits. Slow spans lower them. A block at or after 23863 whose timestamp is more than **120 seconds** ahead of this node's clock is rejected.
+
+`getblocktemplate` returns the `difficulty` and `subsidy_units` (200 or 218) that `submitblock` will enforce for the height it is building. A miner-supplied difficulty that disagrees is `difficulty mismatch`.
 
 ### getblocktemplate
 
@@ -337,7 +347,7 @@ Miner:
 - The daemon does not mine. Mining is the separate `psminer` release binary.
 - With no `--peer`, DNS still resolves `bootstrap.pisecure.org` onto P2P port 3141. Directory `p2p_host:p2p_port` values are hints. Blocks are not downloaded over HTTPS.
 
-Left untouched on purpose: emission, PiHash2, hw_proof, Ed25519 spend checks, namelookup, and the `blk*.dat` layout.
+Left untouched on purpose: PiHash2, hw_proof, Ed25519 spend checks, namelookup, and the `blk*.dat` layout. Emission and difficulty change only at height 23863, as written above. Blocks already stored keep the 200-unit subsidy and the 2–4 bit band.
 
 ## Name backup
 
