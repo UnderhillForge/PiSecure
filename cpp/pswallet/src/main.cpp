@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <termios.h>
@@ -36,6 +37,9 @@ namespace
     PassOpt g_pass;
     bool g_dry_run = false;
     bool g_no_update_check = false;
+    bool g_json = false;
+    std::string g_ws_host;
+    int g_ws_port = 0;
 
     void maybe_check_update()
     {
@@ -103,6 +107,10 @@ namespace
 
     std::string ws_host()
     {
+        if (!g_ws_host.empty())
+        {
+            return g_ws_host;
+        }
         const char *env = std::getenv("PISECURED_HOST");
         std::string host = (env != nullptr && env[0] != '\0') ? env : "127.0.0.1";
         if (host == "0.0.0.0" || host == "::")
@@ -114,6 +122,10 @@ namespace
 
     int ws_port()
     {
+        if (g_ws_port > 0)
+        {
+            return g_ws_port;
+        }
         const char *env = std::getenv("PISECURED_PORT");
         if (env == nullptr || env[0] == '\0')
         {
@@ -316,9 +328,18 @@ namespace
         addr.sin_port = htons(static_cast<uint16_t>(port));
         if (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1)
         {
-            ::close(fd);
-            err = "wallet speaks to " + host + ":" + std::to_string(port);
-            return false;
+            addrinfo hints{};
+            hints.ai_family = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+            addrinfo *resolved = nullptr;
+            if (getaddrinfo(host.c_str(), nullptr, &hints, &resolved) != 0 || resolved == nullptr)
+            {
+                ::close(fd);
+                err = "DNS failed";
+                return false;
+            }
+            addr.sin_addr = reinterpret_cast<sockaddr_in *>(resolved->ai_addr)->sin_addr;
+            freeaddrinfo(resolved);
         }
         if (connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0)
         {
@@ -1011,8 +1032,7 @@ namespace
                                                return true;
                                            }
                                        }
-                                       return false;
-                                   }),
+                                       return false; }),
                     coins.end());
         for (const auto &tx : txs)
         {
@@ -1170,6 +1190,17 @@ namespace
 
     int cmd_list()
     {
+        std::string marked;
+        bool default_ok = false;
+        const std::string default_raw = read_file_maybe_sudo(data_dir() + "/wallets/default", default_ok);
+        if (default_ok)
+        {
+            marked = default_raw;
+            while (!marked.empty() && (marked.back() == '\n' || marked.back() == '\r' || marked.back() == ' '))
+            {
+                marked.pop_back();
+            }
+        }
         const std::string dir = data_dir() + "/wallets";
         const std::string cmd = "sudo -n ls -1 '" + dir + "'";
         FILE *pipe = popen(cmd.c_str(), "r");
@@ -1188,7 +1219,13 @@ namespace
             }
             if (name.size() > 5 && name.substr(name.size() - 5) == ".json")
             {
-                std::cout << name.substr(0, name.size() - 5) << "\n";
+                const std::string stem = name.substr(0, name.size() - 5);
+                std::cout << stem;
+                if (!marked.empty() && stem == marked)
+                {
+                    std::cout << " default";
+                }
+                std::cout << "\n";
             }
         }
         pclose(pipe);
@@ -1501,9 +1538,217 @@ namespace
         return 0;
     }
 
+    int cmd_tip()
+    {
+        std::string err;
+        json count;
+        if (!rpc("getblockcount", json::object(), count, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        const int height = count.value("count", 0);
+        json header;
+        if (!rpc("getheader", json{{"height", height}}, header, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        if (g_json)
+        {
+            std::cout << json{{"height", height}, {"hash", header.value("hash", "")}}.dump() << "\n";
+        }
+        else
+        {
+            std::cout << height << " " << header.value("hash", "") << "\n";
+        }
+        return 0;
+    }
+
+    int cmd_lookup(const std::string &name)
+    {
+        std::string err;
+        json result;
+        if (!rpc("namelookup", json{{"name", name}}, result, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        if (result.value("found", false) == false)
+        {
+            std::cout << (g_json ? result.dump() : std::string("found false")) << "\n";
+            return 0;
+        }
+        if (g_json)
+        {
+            std::cout << result.dump() << "\n";
+            return 0;
+        }
+        std::cout << "found true\nreserved " << (result.value("reserved", false) ? "true" : "false") << "\n"
+                  << result.value("address", "") << "\n";
+        return 0;
+    }
+
+    int cmd_block(const std::string &height_text)
+    {
+        int height = 0;
+        try
+        {
+            height = std::stoi(height_text);
+        }
+        catch (const std::exception &)
+        {
+            std::cerr << "block height required\n";
+            return 1;
+        }
+        std::string err;
+        json result;
+        if (!rpc("getblock", json{{"height", height}}, result, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        std::cout << result.dump() << "\n";
+        return 0;
+    }
+
+    int cmd_mempool()
+    {
+        std::string err;
+        json result;
+        if (!rpc("getmempool", json::object(), result, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        if (g_json)
+        {
+            std::cout << json{{"count", result.value("count", 0)}}.dump() << "\n";
+        }
+        else
+        {
+            std::cout << "count " << result.value("count", 0) << "\n";
+        }
+        return 0;
+    }
+
+    int cmd_peers()
+    {
+        std::string err;
+        json result;
+        if (!rpc("getpeers", json::object(), result, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        if (g_json)
+        {
+            std::cout << result.dump() << "\n";
+            return 0;
+        }
+        std::cout << "count " << result.value("count", 0) << "\n";
+        if (result.contains("self") && result["self"].is_object())
+        {
+            const auto &self = result["self"];
+            std::cout << self.value("address", "") << ":" << self.value("port", 0) << "\n";
+        }
+        return 0;
+    }
+
+    int cmd_export(const std::string &who)
+    {
+        std::string err;
+        json looked;
+        if (!rpc("namelookup", json{{"name", who}}, looked, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        const std::string address = looked.value("address", who);
+        json doc;
+        if (!read_wallet_doc(address, doc, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        const json pub = {{"address", address}, {"public_key", doc.value("public_key", "")}};
+        std::cout << pub.dump() << "\n";
+        return 0;
+    }
+
+    int cmd_history(const std::string &who, int limit)
+    {
+        if (limit < 1)
+        {
+            limit = 1;
+        }
+        std::string err;
+        const std::string address = resolve_address(who, err);
+        if (address.empty())
+        {
+            std::cerr << (err.empty() ? "unknown name" : err) << "\n";
+            return 1;
+        }
+        json count;
+        if (!rpc("getblockcount", json::object(), count, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        int height = count.value("count", 0);
+        int scanned = 0;
+        while (scanned < limit && height >= 1)
+        {
+            json block;
+            if (!rpc("getblock", json{{"height", height}}, block, err))
+            {
+                std::cerr << err << "\n";
+                return 1;
+            }
+            ++scanned;
+            const std::string body = block.dump();
+            if (body.find(address) != std::string::npos)
+            {
+                std::cout << "height " << height << "\n";
+            }
+            --height;
+        }
+        return 0;
+    }
+
+    int cmd_default()
+    {
+        bool ok = false;
+        std::string text = read_file_maybe_sudo(data_dir() + "/wallets/default", ok);
+        if (!ok)
+        {
+            std::cerr << "no default wallet\n";
+            return 1;
+        }
+        while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' '))
+        {
+            text.pop_back();
+        }
+        if (text.find("secret") != std::string::npos)
+        {
+            std::cerr << "default wallet is not a name\n";
+            return 1;
+        }
+        std::cout << text << "\n";
+        return 0;
+    }
+
     void usage()
     {
-        std::cerr << "pswallet talks to ws://127.0.0.1:3144\n"
+        std::cerr << "pswallet [--url ws://127.0.0.1:3144] [--json] [--no-update-check]\n"
+                  << "  tip\n"
+                  << "  block HEIGHT\n"
+                  << "  mempool\n"
+                  << "  peers\n"
+                  << "  history NAME [--limit N]\n"
+                  << "  lookup NAME\n"
+                  << "  export NAME\n"
+                  << "  default\n"
                   << "  create\n"
                   << "  encrypt NAME [--passphrase TEXT]\n"
                   << "  register NAME ps1... [--grant]\n"
@@ -1513,7 +1758,7 @@ namespace
                   << "  utxos NAME|ps1\n"
                   << "  send SRC DST AMOUNT [--fee 0.001] [--dry-run]\n"
                   << "Amounts are 314ST. 0.001 is 1 unit.\n"
-                  << "A tty prompt or PISECURE_WALLET_PASS unlocks secret_key_enc.\n";
+                  << "A tty prompt or PISECURE_WALLET_PASS unlocks an encrypted wallet.\n";
     }
 }
 
@@ -1522,6 +1767,7 @@ int main(int argc, char **argv)
     std::vector<std::string> positional;
     bool grant = false;
     std::string fee = "0.001";
+    int history_limit = 20;
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg = argv[i];
@@ -1529,6 +1775,44 @@ int main(int argc, char **argv)
         {
             usage();
             return 0;
+        }
+        if (arg == "--json")
+        {
+            g_json = true;
+            continue;
+        }
+        if (arg == "--url" && i + 1 < argc)
+        {
+            const std::string url = argv[++i];
+            const std::string prefix = "ws://";
+            if (url.compare(0, prefix.size(), prefix) != 0)
+            {
+                std::cerr << "DNS failed\n";
+                return 1;
+            }
+            const std::string rest = url.substr(prefix.size());
+            const auto colon = rest.rfind(':');
+            if (colon == std::string::npos || colon == 0)
+            {
+                g_ws_host = rest;
+                g_ws_port = 3144;
+            }
+            else
+            {
+                g_ws_host = rest.substr(0, colon);
+                g_ws_port = std::atoi(rest.substr(colon + 1).c_str());
+            }
+            if (g_ws_host.empty() || g_ws_port <= 0)
+            {
+                std::cerr << "DNS failed\n";
+                return 1;
+            }
+            continue;
+        }
+        if (arg == "--limit" && i + 1 < argc)
+        {
+            history_limit = std::atoi(argv[++i]);
+            continue;
         }
         if (arg == "--version")
         {
@@ -1571,6 +1855,38 @@ int main(int argc, char **argv)
     const std::string cmd = positional[0];
     try
     {
+        if (cmd == "tip" && positional.size() == 1)
+        {
+            return cmd_tip();
+        }
+        if (cmd == "lookup" && positional.size() == 2)
+        {
+            return cmd_lookup(positional[1]);
+        }
+        if (cmd == "block" && positional.size() == 2)
+        {
+            return cmd_block(positional[1]);
+        }
+        if (cmd == "mempool" && positional.size() == 1)
+        {
+            return cmd_mempool();
+        }
+        if (cmd == "peers" && positional.size() == 1)
+        {
+            return cmd_peers();
+        }
+        if (cmd == "export" && positional.size() == 2)
+        {
+            return cmd_export(positional[1]);
+        }
+        if (cmd == "history" && positional.size() == 2)
+        {
+            return cmd_history(positional[1], history_limit);
+        }
+        if (cmd == "default" && positional.size() == 1)
+        {
+            return cmd_default();
+        }
         if (cmd == "create" && positional.size() == 1)
         {
             maybe_check_update();

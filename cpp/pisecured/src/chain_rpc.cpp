@@ -24,7 +24,6 @@ namespace pisecured
     {
         constexpr uint64_t kMaxTxBytes = 100000;
         constexpr uint64_t kMaxBlockBytes = 1000000;
-        constexpr uint64_t kFutureSkewSeconds = 2 * 60 * 60;
 
         json rejected(const std::string &reason)
         {
@@ -720,7 +719,6 @@ namespace pisecured
         }
 
         // Last 10 timestamps, 9 gaps, 540s target, 4x clamp, bits 2–24.
-        // Block kDifficultyActivationHeight still uses the legacy value.
         uint32_t next_difficulty_window(Storage &storage)
         {
             if (!storage.has_tip())
@@ -754,7 +752,7 @@ namespace pisecured
         uint32_t next_difficulty(Storage &storage)
         {
             const uint32_t next_height = storage.has_tip() ? storage.get_best_height() + 1 : 1;
-            if (next_height <= kDifficultyActivationHeight)
+            if (next_height < kDifficultyActivationHeight)
             {
                 return next_difficulty_legacy(storage);
             }
@@ -2122,8 +2120,7 @@ namespace pisecured
         }
         const uint64_t timestamp = block["timestamp"].get<uint64_t>();
         const uint64_t now = now_seconds();
-        const uint64_t future_skew = height >= kDifficultyActivationHeight ? 120 : kFutureSkewSeconds;
-        if (timestamp == 0 || timestamp > now + future_skew)
+        if (timestamp == 0 || timestamp > now + 120)
         {
             return rejected("timestamp invalid");
         }

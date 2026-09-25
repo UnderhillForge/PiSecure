@@ -15,9 +15,8 @@ namespace pisecured
     constexpr uint32_t kInitialDifficultyBits = 4;
     constexpr uint32_t kTargetBlockSeconds = 60;
 
-    // Tip height was 23363 when this constant was chosen. Block 23863 is the
-    // first block with the 218-unit subsidy. Its difficulty is still the
-    // pre-activation value. The 10-block retarget starts on the next block.
+    // Tip height was 23363 when this constant was chosen. From block 23863
+    // the subsidy is 218 units and difficulty is the 2–24 bit retarget.
     constexpr uint32_t kDifficultyActivationHeight = 23863;
 
     // 1 unit = 0.001 314ST. Base subsidy is 0.200 314ST per block until
