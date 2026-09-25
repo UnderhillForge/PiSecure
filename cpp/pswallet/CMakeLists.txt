@@ -39,7 +39,7 @@ set(PSWALLET_SOURCES
 
 # Main executable
 add_executable(pswallet ${PSWALLET_SOURCES})
-target_compile_definitions(pswallet PRIVATE PSWALLET_VERSION="${PROJECT_VERSION}" PISECURE_RELEASE="0.2.8")
+target_compile_definitions(pswallet PRIVATE PSWALLET_VERSION="${PROJECT_VERSION}" PISECURE_RELEASE="0.2.9")
 
 target_link_libraries(pswallet
     Threads::Threads

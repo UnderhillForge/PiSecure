@@ -1,15 +1,15 @@
 # PiSecure
 
-PiSecure is a low-power chain for Raspberry Pi. From block 1 each block pays **0.218 314ST** (miner 0.216, validator 0.002). v0.2.8 starts difficulty at 4 bits and retargets in the band 2–24. Official Pi 2, 3, 4, and 5 can mine. Any CPU can validate.
+PiSecure is a low-power chain for Raspberry Pi. From block 1 each block pays **0.218 314ST** (miner 0.216, validator 0.002). v0.2.9 starts difficulty at 4 bits and retargets in the band 2–24. Official Pi 2, 3, 4, and 5 can mine. Any CPU can validate.
 
 ## Install
 
-Download the v0.2.8 archive from this repo's GitHub Releases and check the sha256 printed on that release:
+Download the v0.2.9 archive from this repo's GitHub Releases and check the sha256 printed on that release:
 
 ```bash
-curl -fL -O https://github.com/UnderhillForge/PiSecure/releases/download/v0.2.8/pisecure-pi5-v0.2.8-aarch64.tar.gz
-sha256sum pisecure-pi5-v0.2.8-aarch64.tar.gz
-tar -xzf pisecure-pi5-v0.2.8-aarch64.tar.gz
+curl -fL -O https://github.com/UnderhillForge/PiSecure/releases/download/v0.2.9/pisecure-pi5-v0.2.9-aarch64.tar.gz
+sha256sum pisecure-pi5-v0.2.9-aarch64.tar.gz
+tar -xzf pisecure-pi5-v0.2.9-aarch64.tar.gz
 sudo install -d /opt/pisecure
 sudo install -m 0755 pisecured pswallet psminer /opt/pisecure/
 sudo cp pisecured.service /etc/systemd/system/pisecured.service
@@ -20,7 +20,7 @@ sudo systemctl daemon-reload
 
 There is no Docker install and no mock-hardware mode.
 
-An x86_64 validator is [pisecure-v0.2.8-x86_64.tar.gz](https://github.com/UnderhillForge/PiSecure/releases/download/v0.2.8/pisecure-v0.2.8-x86_64.tar.gz). It is `pisecured` only. Run it with `--validate-only`. The first start writes a new node id in the data directory. Do not copy that file, `/etc/pisecure/pisecure.env`, or `blk*.dat` onto another machine.
+An x86_64 validator is [pisecure-v0.2.9-x86_64.tar.gz](https://github.com/UnderhillForge/PiSecure/releases/download/v0.2.9/pisecure-v0.2.9-x86_64.tar.gz). It is `pisecured` only. Run it with `--validate-only`. The first start writes a new node id in the data directory. Do not copy that file, `/etc/pisecure/pisecure.env`, or `blk*.dat` onto another machine.
 
 An extra node that can accept inbound port 3141 is dialed by nodes that already have the chain. Bootstrap only introduces addresses. Blocks are not downloaded over HTTPS.
 

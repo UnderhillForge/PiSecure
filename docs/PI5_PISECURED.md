@@ -100,7 +100,7 @@ Difficulty is leading zero bits in **2–24**. Block 1 starts at **4** bits. Aft
 
 `kDifficultyActivationHeight` is **1**. v0.2.8 applies the 218-unit subsidy and the 2–24 bit retarget from block 1. There is no block below height 1.
 
-The subsidy is **218 units** (0.218 314ST): miner **216**, validator **2**. With `fee_units` 0 there are no other coinbase outputs. Transaction fees split 60% miner, 20% stakers, 8% loans, 7% foundation, and the remainder (at least 5%) is burn and is not an output. Integer division is `fee * percent / 100` for the four paid shares. There is no foundation output when fees are zero. When the 7% is at least 1 unit, that output is paid to the Foundation wallet `ps154bc21d4a37549c5a599a16b4822bf771ed29001095e241d05ef8ebf709854ee` and the amount must match. Any other foundation address is rejected with `coinbase foundation address`. Stakers stay the address `stakers`, loans stay `loans`, and burn stays out of the coinbase. A coinbase that pays the miner more than 216 plus the miner's fee share, or the validator more than 2, is rejected with `coinbase exceeds emission rules`.
+The subsidy is **218 units** (0.218 314ST): miner **216**, validator **2**. With `fee_units` 0 there are no other coinbase outputs. Transaction fees split 60% miner, 20% stakers, 8% loans, 7% foundation, and the remainder (at least 5%) is burn and is not an output. Integer division is `fee * percent / 100` for the four paid shares. There is no foundation output when fees are zero. When the 7% is at least 1 unit, that output is paid to the Foundation wallet `ps1a404246a1e6154e96bd02728fe1a988ae2abe6c6609426e2da7b71ab3dccb4f7` and the amount must match. Any other foundation address is rejected with `coinbase foundation address`. Stakers stay the address `stakers`, loans stay `loans`, and burn stays out of the coinbase. A coinbase that pays the miner more than 216 plus the miner's fee share, or the validator more than 2, is rejected with `coinbase exceeds emission rules`.
 
 The blocks already stored on this Pi were mined before this schedule. Reloading them does not rewrite `blk*.dat`. A new chain starts at height 1 with these rules.
 
@@ -345,7 +345,7 @@ Miner:
 - The daemon does not mine. Mining is the separate `psminer` release binary.
 - With no `--peer`, DNS still resolves `bootstrap.pisecure.org` onto P2P port 3141. Directory `p2p_host:p2p_port` values are hints. Blocks are not downloaded over HTTPS.
 
-Left untouched on purpose: PiHash2, hw_proof, Ed25519 spend checks, namelookup, and the `blk*.dat` layout. v0.2.8 uses activation height 1, as written above.
+Left untouched on purpose: PiHash2, hw_proof, Ed25519 spend checks, namelookup, and the `blk*.dat` layout. v0.2.9 keeps activation height 1 and pays the Foundation fee share to `ps1a404246a1e6154e96bd02728fe1a988ae2abe6c6609426e2da7b71ab3dccb4f7`.
 
 ## Name backup
 
@@ -353,7 +353,7 @@ A long address is `ps1` plus hex(SHA256(ed25519 public key)). Key files are mode
 
 On this Pi:
 
-- `Foundation` → `ps154bc21d4a37549c5a599a16b4822bf771ed29001095e241d05ef8ebf709854ee` at `/var/lib/pisecure/wallets/ps154bc21d4a37549c5a599a16b4822bf771ed29001095e241d05ef8ebf709854ee.json`
+- `Foundation` → `ps1a404246a1e6154e96bd02728fe1a988ae2abe6c6609426e2da7b71ab3dccb4f7` at `/var/lib/pisecure/wallets/ps1a404246a1e6154e96bd02728fe1a988ae2abe6c6609426e2da7b71ab3dccb4f7.json`
 - `OperatorX` → `ps1ff97b6682d9748878990a6f2b1dbac3554c38a3e64ffc18bf77159fbb80e86cb` at `/var/lib/pisecure/wallets/ps1ff97b6682d9748878990a6f2b1dbac3554c38a3e64ffc18bf77159fbb80e86cb.json`
 
 `/var/lib/pisecure/names.json` stores the reserved bind. A fresh node learns names by replaying `type: register` transactions during blk restore, from the `names` snapshot written on blocks accepted after this, and from the `names` array on the bootstrap chain report. Heights 1–9 were not rewritten. The register transactions stay in the mempool until a miner includes them.

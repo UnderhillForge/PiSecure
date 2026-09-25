@@ -25,7 +25,7 @@ namespace pisecured
     constexpr uint64_t kValidatorUnits = 2;
 
     // 7% of transaction fees. Stakers, loans, and burn are unchanged.
-    inline constexpr char kFoundationPayout[] = "ps154bc21d4a37549c5a599a16b4822bf771ed29001095e241d05ef8ebf709854ee";
+    inline constexpr char kFoundationPayout[] = "ps1a404246a1e6154e96bd02728fe1a988ae2abe6c6609426e2da7b71ab3dccb4f7";
 
     using json = nlohmann::json;
 
