@@ -1690,6 +1690,102 @@ namespace pisecured
             }
             return true;
         }
+
+        // Accepted spends live in memory. A restart used to drop them, so the
+        // next block was mined with an empty tx list and the payment never
+        // became a UTXO. The file is replayed after the chain UTXO set exists.
+        void save_mempool(Storage &storage)
+        {
+            json arr = json::array();
+            for (const auto &stored : storage.get_mempool_transactions(1000))
+            {
+                try
+                {
+                    arr.push_back(json::parse(stored.data.begin(), stored.data.end()));
+                }
+                catch (const std::exception &)
+                {
+                }
+            }
+            const auto path = storage.datadir() / "mempool.json";
+            const auto tmp = storage.datadir() / "mempool.json.tmp";
+            {
+                std::ofstream out(tmp, std::ios::trunc);
+                if (!out)
+                {
+                    std::cerr << "mempool save failed\n";
+                    return;
+                }
+                out << arr.dump();
+            }
+            std::error_code ec;
+            std::filesystem::rename(tmp, path, ec);
+            if (ec)
+            {
+                std::cerr << "mempool save failed\n";
+            }
+        }
+
+        void load_mempool(Storage &storage)
+        {
+            const auto path = storage.datadir() / "mempool.json";
+            std::ifstream in(path);
+            if (!in)
+            {
+                return;
+            }
+            json arr;
+            try
+            {
+                in >> arr;
+            }
+            catch (const std::exception &)
+            {
+                return;
+            }
+            if (!arr.is_array())
+            {
+                return;
+            }
+            uint32_t kept = 0;
+            for (const auto &obj : arr)
+            {
+                Tx tx;
+                std::string reason;
+                if (!parse_user_tx(obj, tx, reason))
+                {
+                    continue;
+                }
+                resolve_output_names(tx);
+                if (storage.has_transaction(tx.txid))
+                {
+                    continue;
+                }
+                if (tx.inputs.empty() || !check_spendable(storage, tx, reason, nullptr) || !verify_input_signatures(storage, tx, reason, true, nullptr))
+                {
+                    continue;
+                }
+                const json stored_tx = tx_to_json(tx);
+                const auto dumped = stored_tx.dump();
+                Transaction stored;
+                stored.hash = tx.txid;
+                stored.data.assign(dumped.begin(), dumped.end());
+                stored.timestamp = now_seconds();
+                stored.fee = tx.fee;
+                if (storage.add_transaction(stored))
+                {
+                    ++kept;
+                }
+            }
+            if (kept != arr.size())
+            {
+                save_mempool(storage);
+            }
+            if (kept > 0)
+            {
+                std::cout << "mempool restored " << kept << "\n";
+            }
+        }
     }
 
     bool restore_chain(Storage &storage)
@@ -1831,6 +1927,7 @@ namespace pisecured
         {
             std::cout << "Chain restore: tip height " << storage.get_best_height() << "\n";
         }
+        load_mempool(storage);
         return true;
     }
 
@@ -1963,6 +2060,8 @@ namespace pisecured
         {
             return rejected("malformed transaction");
         }
+        save_mempool(storage);
+        std::cout << "accepted tx " << to_hex(tx.txid) << "\n";
         if (tx.reg)
         {
             const std::string kind = is_reserved_name(tx.name) ? "reserved_bind" : "register";
@@ -2398,6 +2497,7 @@ namespace pisecured
         if (!txs.empty())
         {
             save_names(storage.datadir());
+            save_mempool(storage);
         }
 
         if (p2p != nullptr && p2p->getPeerCount() > 0)
