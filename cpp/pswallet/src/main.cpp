@@ -1011,7 +1011,7 @@ namespace
         uint64_t units = 0;
     };
 
-    bool coins_for(const std::string &address, std::vector<Coin> &coins, std::string &err)
+    bool coins_for(const std::string &address, std::vector<Coin> &coins, std::string &err, bool confirmed_only = false)
     {
         json listed;
         if (!rpc("listunspent", json{{"address", address}}, listed, err))
@@ -1054,6 +1054,11 @@ namespace
                                        }
                                        return false; }),
                     coins.end());
+        if (confirmed_only)
+        {
+            err.clear();
+            return true;
+        }
         for (const auto &tx : txs)
         {
             const std::string txid = tx.value("txid", "");
@@ -1482,25 +1487,38 @@ namespace
             return 1;
         }
         std::vector<Coin> coins;
-        if (!coins_for(src_addr, coins, err))
+        if (!coins_for(src_addr, coins, err, true))
         {
             std::cerr << err << "\n";
             return 1;
         }
         std::sort(coins.begin(), coins.end(), [](const Coin &a, const Coin &b)
                   { return a.units > b.units; });
-        std::vector<Coin> chosen;
-        uint64_t sum = 0;
+        uint64_t confirmed = 0;
         for (const auto &coin : coins)
         {
-            if (sum >= pay + fee)
-            {
-                break;
-            }
-            chosen.push_back(coin);
-            sum += coin.units;
+            confirmed += coin.units;
         }
-        if (sum < pay + fee)
+        std::vector<Coin> chosen;
+        uint64_t sum = 0;
+        if (!coins.empty() && coins.front().units >= pay + fee)
+        {
+            chosen.push_back(coins.front());
+            sum = coins.front().units;
+        }
+        else
+        {
+            for (const auto &coin : coins)
+            {
+                if (sum >= pay + fee)
+                {
+                    break;
+                }
+                chosen.push_back(coin);
+                sum += coin.units;
+            }
+        }
+        if (confirmed < pay + fee || sum < pay + fee)
         {
             if (g_dry_run)
             {
@@ -1514,13 +1532,6 @@ namespace
                 return 0;
             }
             std::cerr << src << " has no coin covering " << amount << " 314ST plus fee " << fee_text << "\n";
-            return 1;
-        }
-        // One payment stays one transaction. Fold the 0.216 outputs first
-        // when the payment would gather more than 20 of them.
-        if (chosen.size() > 20)
-        {
-            std::cerr << "run: pswallet consolidate " << src << "\n";
             return 1;
         }
         const uint64_t change = sum - pay - fee;
