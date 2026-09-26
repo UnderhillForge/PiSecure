@@ -1556,6 +1556,24 @@ namespace pisecured
                 disconnectPeer(peer, !known ? "Unknown message type" : "Message too large");
                 return;
             }
+            // Know the type from the 5-byte header. Do not wait for a body
+            // that is already over the transaction or block cap.
+            if (type == static_cast<uint8_t>(P2PMsgType::BLOCK) && len > kMaxBlockBytes)
+            {
+                std::cout << "Message rejected type=" << static_cast<unsigned>(type)
+                          << " declared=" << len << std::endl;
+                peer->recvBuffer.clear();
+                disconnectPeer(peer, "block too large");
+                return;
+            }
+            if (type == static_cast<uint8_t>(P2PMsgType::TX) && len > kMaxTxJsonBytes)
+            {
+                std::cout << "Message rejected type=" << static_cast<unsigned>(type)
+                          << " declared=" << len << std::endl;
+                peer->recvBuffer.clear();
+                disconnectPeer(peer, "tx too large");
+                return;
+            }
 
             if (peer->recvBuffer.size() < 5 + len)
             {
@@ -2023,6 +2041,12 @@ namespace pisecured
 
         if (!payload.empty() && payload[0] == '{')
         {
+            if (payload.size() > kMaxBlockBytes)
+            {
+                std::cout << "Rejected synced block reason block too large" << std::endl;
+                peer->increaseBanScore(20);
+                return;
+            }
             try
             {
                 const std::string text(payload.begin(), payload.end());
@@ -2159,11 +2183,26 @@ namespace pisecured
             return;
         }
 
-        // Basic validation (size check)
-        if (payload.size() > 1024 * 1024) // 1MB max tx size
+        // Over the cap is not stored and is not parsed into the mempool.
+        if (payload.size() > kMaxTxJsonBytes)
         {
             peer->increaseBanScore(10);
             return;
+        }
+        if (!payload.empty() && payload[0] == '{')
+        {
+            try
+            {
+                const json obj = json::parse(payload.begin(), payload.end());
+                if (obj.contains("inputs") && obj["inputs"].is_array() && obj["inputs"].size() > kMaxTxInputs)
+                {
+                    peer->increaseBanScore(10);
+                    return;
+                }
+            }
+            catch (const std::exception &)
+            {
+            }
         }
 
         // Create transaction object

@@ -215,7 +215,7 @@ Reject reasons:
 - `malformed transaction`
 - `transaction output invalid`
 - `transaction inputs missing`
-- `transaction too large`
+- `tx too large`
 - `fee too low`
 - `unknown input`
 - `insufficient funds`

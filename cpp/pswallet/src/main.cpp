@@ -424,6 +424,7 @@ namespace
             return false;
         }
 
+        std::string message;
         while (true)
         {
             if (buf.size() < 2 && !recv_some(fd, buf))
@@ -473,6 +474,13 @@ namespace
                 }
                 cursor = 10;
             }
+            // One block plus a short JSON-RPC envelope. Do not read a larger frame.
+            if (len > (256ull * 1024ull) + 4096ull)
+            {
+                ::close(fd);
+                err = "block too large";
+                return false;
+            }
             if ((b1 & 0x80) != 0)
             {
                 header += 4;
@@ -490,18 +498,30 @@ namespace
             std::string text = buf.substr(header, static_cast<size_t>(len));
             buf.erase(0, header + static_cast<size_t>(len));
             const uint8_t opcode = b0 & 0x0f;
+            const bool final_frame = (b0 & 0x80) != 0;
             if (opcode == 0x8)
             {
                 ::close(fd);
                 err = "websocket closed";
                 return false;
             }
-            if (opcode != 0x1)
+            if (opcode != 0x1 && opcode != 0x0)
+            {
+                continue;
+            }
+            message.append(text);
+            if (message.size() > (256u * 1024u) + 4096u)
+            {
+                ::close(fd);
+                err = "block too large";
+                return false;
+            }
+            if (!final_frame)
             {
                 continue;
             }
             ::close(fd);
-            json reply = json::parse(text);
+            json reply = json::parse(message);
             if (reply.contains("error"))
             {
                 err = reply["error"].value("message", "rpc error");
@@ -1496,6 +1516,13 @@ namespace
             std::cerr << src << " has no coin covering " << amount << " 314ST plus fee " << fee_text << "\n";
             return 1;
         }
+        // One payment stays one transaction. Fold the 0.216 outputs first
+        // when the payment would gather more than 20 of them.
+        if (chosen.size() > 20)
+        {
+            std::cerr << "run: pswallet consolidate " << src << "\n";
+            return 1;
+        }
         const uint64_t change = sum - pay - fee;
         json inputs = json::array();
         for (const auto &coin : chosen)
@@ -1535,6 +1562,93 @@ namespace
             return 1;
         }
         std::cout << result.value("txid", "") << "\n";
+        return 0;
+    }
+
+    int cmd_consolidate(const std::string &src, const std::string &fee_text)
+    {
+        std::string err;
+        uint64_t fee = 0;
+        if (!parse_314st(fee_text, fee, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        const std::string src_addr = resolve_address(src, err);
+        if (src_addr.empty())
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        Key key;
+        if (!load_key(src_addr, key, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        std::vector<Coin> coins;
+        if (!coins_for(src_addr, coins, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        if (coins.size() < 2)
+        {
+            std::cout << "nothing to consolidate\n";
+            return 0;
+        }
+        std::sort(coins.begin(), coins.end(), [](const Coin &a, const Coin &b)
+                  { return a.units < b.units; });
+        const size_t limit = std::min(coins.size(), static_cast<size_t>(200));
+        // Same caps the node enforces: 200 inputs and 64 KB of signed JSON.
+        for (size_t n = limit; n >= 2; --n)
+        {
+            uint64_t sum = 0;
+            json inputs = json::array();
+            for (size_t i = 0; i < n; ++i)
+            {
+                sum += coins[i].units;
+                inputs.push_back({{"prev_txid", coins[i].txid}, {"vout", coins[i].vout}});
+            }
+            if (sum <= fee)
+            {
+                continue;
+            }
+            json tx = {
+                {"version", 1},
+                {"fee", fee},
+                {"inputs", inputs},
+                {"outputs", json::array({{{"address", src_addr}, {"value", sum - fee}}})},
+            };
+            if (!sign_tx(tx, key, err))
+            {
+                std::cerr << err << "\n";
+                return 1;
+            }
+            if (tx.dump().size() > 64u * 1024u)
+            {
+                continue;
+            }
+            if (g_dry_run)
+            {
+                std::cout << "signed\n";
+                return 0;
+            }
+            json result;
+            if (!rpc("sendtransaction", tx, result, err))
+            {
+                std::cerr << err << "\n";
+                return 1;
+            }
+            if (result.value("status", "") != "accepted")
+            {
+                std::cerr << result.value("reason", "send rejected") << "\n";
+                return 1;
+            }
+            std::cout << result.value("txid", "") << "\n";
+            return 0;
+        }
+        std::cout << "nothing to consolidate\n";
         return 0;
     }
 
@@ -1757,6 +1871,7 @@ namespace
                   << "  balance NAME|ps1\n"
                   << "  utxos NAME|ps1\n"
                   << "  send SRC DST AMOUNT [--fee 0.001] [--dry-run]\n"
+                  << "  consolidate ADDR [--fee 0.001]\n"
                   << "Amounts are 314ST. 0.001 is 1 unit.\n"
                   << "A tty prompt or PISECURE_WALLET_PASS unlocks an encrypted wallet.\n";
     }
@@ -1922,6 +2037,11 @@ int main(int argc, char **argv)
         {
             maybe_check_update();
             return cmd_send(positional[1], positional[2], positional[3], fee);
+        }
+        if (cmd == "consolidate" && positional.size() == 2)
+        {
+            maybe_check_update();
+            return cmd_consolidate(positional[1], fee);
         }
     }
     catch (const std::exception &ex)

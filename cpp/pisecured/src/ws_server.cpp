@@ -12,6 +12,30 @@ namespace pisecured
     // Global instance pointer for lightweight cross-component notifications
     static WebSocketServer *g_ws_instance = nullptr;
 
+    // One stored block, plus a short JSON-RPC envelope. The receive buffer
+    // never grows past this, and an over-cap message is not parsed.
+    static constexpr size_t kMaxWsMessage = static_cast<size_t>(kMaxBlockBytes) + 4096u;
+
+    static bool head_method(const std::string &msg, const char *name)
+    {
+        const size_t n = std::min(msg.size(), static_cast<size_t>(512));
+        const std::string head = msg.substr(0, n);
+        if (head.find(std::string("\"method\":\"") + name + "\"") != std::string::npos)
+        {
+            return true;
+        }
+        return head.find(std::string("\"method\": \"") + name + "\"") != std::string::npos;
+    }
+
+    static const char *limit_reason(const std::string &msg)
+    {
+        if (head_method(msg, "sendtransaction") || !head_method(msg, "submitblock"))
+        {
+            return "tx too large";
+        }
+        return "block too large";
+    }
+
     static int lws_protocol_callback(struct lws *wsi,
                                      enum lws_callback_reasons reason,
                                      void *user,
@@ -78,9 +102,11 @@ namespace pisecured
         lws_context_creation_info info;
         memset(&info, 0, sizeof(info));
 
+        // Chunk size. The callback reassembles up to kMaxWsMessage and does
+        // not parse until the websocket message is complete.
         static const struct lws_protocols protocols[] = {
-            {"pisecure", lws_protocol_callback, sizeof(WsConnData), 4096},
-            {NULL, NULL, 0, 0}};
+            {"pisecure", lws_protocol_callback, sizeof(WsConnData), 16384, 0, NULL, 16384},
+            LWS_PROTOCOL_LIST_TERM};
 
         info.port = port_;
         info.protocols = protocols;
@@ -125,6 +151,11 @@ namespace pisecured
         {
         case LWS_CALLBACK_ESTABLISHED:
             ud->wsi = wsi;
+            ud->skip = false;
+            if (ud->rx == nullptr)
+            {
+                ud->rx = new std::string();
+            }
             // Track connection
             if (g_ws_instance)
             {
@@ -135,7 +166,64 @@ namespace pisecured
         case LWS_CALLBACK_RECEIVE:
             try
             {
-                std::string msg(reinterpret_cast<const char *>(in), len);
+                const bool final = lws_is_final_fragment(wsi) && lws_remaining_packet_payload(wsi) == 0;
+                if (ud->rx == nullptr)
+                {
+                    ud->rx = new std::string();
+                }
+                if (ud->skip)
+                {
+                    if (final)
+                    {
+                        ud->skip = false;
+                        ud->rx->clear();
+                    }
+                    break;
+                }
+                if (ud->rx->size() + len > kMaxWsMessage)
+                {
+                    const char *why = limit_reason(*ud->rx);
+                    ud->rx->clear();
+                    ud->skip = !final;
+                    json err;
+                    err["jsonrpc"] = "2.0";
+                    err["id"] = nullptr;
+                    err["error"]["code"] = -32600;
+                    err["error"]["message"] = why;
+                    send_json(wsi, err);
+                    break;
+                }
+                ud->rx->append(reinterpret_cast<const char *>(in), len);
+                if (!final)
+                {
+                    break;
+                }
+                std::string msg = std::move(*ud->rx);
+                ud->rx->clear();
+                const bool submit = head_method(msg, "submitblock");
+                const bool spend = head_method(msg, "sendtransaction");
+                // The JSON-RPC envelope sits outside the transaction. A 200-input
+                // spend is under 64 KB; the extra 1 KB is only that envelope.
+                if ((spend || !submit) && msg.size() > kMaxTxJsonBytes + 1024u)
+                {
+                    json err;
+                    err["jsonrpc"] = "2.0";
+                    err["id"] = nullptr;
+                    err["error"]["code"] = -32600;
+                    err["error"]["message"] = "tx too large";
+                    send_json(wsi, err);
+                    break;
+                }
+                if (submit && msg.size() > kMaxWsMessage)
+                {
+                    json err;
+                    err["jsonrpc"] = "2.0";
+                    err["id"] = nullptr;
+                    err["error"]["code"] = -32600;
+                    err["error"]["message"] = "block too large";
+                    send_json(wsi, err);
+                    break;
+                }
                 auto req = json::parse(msg);
                 auto resp = handle_request(req,
                                            g_ws_instance ? g_ws_instance->storage_ : nullptr,
@@ -190,6 +278,8 @@ namespace pisecured
             // No-op; we write immediately upon requests
             break;
         case LWS_CALLBACK_CLOSED:
+            delete ud->rx;
+            ud->rx = nullptr;
             // Remove from connection tracking
             if (g_ws_instance)
             {

@@ -27,6 +27,14 @@ namespace pisecured
     // 7% of transaction fees. Stakers, loans, and burn are unchanged.
     inline constexpr char kFoundationPayout[] = "ps1a404246a1e6154e96bd02728fe1a988ae2abe6c6609426e2da7b71ab3dccb4f7";
 
+    // One transaction as JSON, including the public key and signature on
+    // every input. At most 200 inputs. Anything larger is rejected whole,
+    // before the signature check and the balance check.
+    constexpr uint64_t kMaxTxJsonBytes = 64ull * 1024ull;
+    constexpr size_t kMaxTxInputs = 200;
+    // Stored block JSON. A larger body is not parsed and is not written.
+    constexpr uint64_t kMaxBlockBytes = 256ull * 1024ull;
+
     using json = nlohmann::json;
 
     // Reload headers and the UTXO set from blk*.dat. Safe on an empty chain.

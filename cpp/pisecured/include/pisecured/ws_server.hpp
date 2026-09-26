@@ -5,6 +5,7 @@
 #include "p2p.hpp"
 #include "validator_purse.hpp"
 #include <atomic>
+#include <string>
 #include <thread>
 #include <vector>
 #include <mutex>
@@ -23,6 +24,11 @@ namespace pisecured
         bool sub_threats = false;
         bool sub_bucket = false;
         lws *wsi = nullptr;
+        // libwebsockets allocates this struct with calloc, so the buffer is
+        // created in ESTABLISHED and freed in CLOSED. skip drops the rest of
+        // a message that already exceeded the cap, until its final fragment.
+        std::string *rx = nullptr;
+        bool skip = false;
     };
 
     class WebSocketServer

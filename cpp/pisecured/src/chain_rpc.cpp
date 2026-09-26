@@ -23,7 +23,6 @@ namespace pisecured
     namespace
     {
         constexpr uint64_t kMaxTxBytes = 100000;
-        constexpr uint64_t kMaxBlockBytes = 1000000;
 
         json rejected(const std::string &reason)
         {
@@ -471,6 +470,13 @@ namespace pisecured
                 reason = "malformed transaction";
                 return false;
             }
+            // The signed record, public key and signature included. Checked
+            // before the input walk, the balance check, and the signature check.
+            if (obj.dump().size() > kMaxTxJsonBytes)
+            {
+                reason = "tx too large";
+                return false;
+            }
             if (!obj.contains("version") || !obj["version"].is_number_unsigned() || obj["version"].get<uint32_t>() != 1)
             {
                 reason = "malformed transaction";
@@ -537,6 +543,11 @@ namespace pisecured
                 reason = "malformed transaction";
                 return false;
             }
+            if (obj["inputs"].is_array() && obj["inputs"].size() > kMaxTxInputs)
+            {
+                reason = "tx too large";
+                return false;
+            }
             if (!parse_inputs(obj["inputs"], tx.inputs, reason))
             {
                 return false;
@@ -548,7 +559,7 @@ namespace pisecured
             auto raw = canonical_tx(tx);
             if (raw.size() > kMaxTxBytes)
             {
-                reason = "transaction too large";
+                reason = "tx too large";
                 return false;
             }
             tx.txid = sha256(raw);
