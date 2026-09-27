@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -1273,6 +1274,30 @@ namespace
             return 1;
         }
         std::cout << result.value("amount", "0.000") << " 314ST\n";
+        json pool;
+        std::string pool_err;
+        if (rpc("getmempool", json::object(), pool, pool_err))
+        {
+            uint64_t pending = 0;
+            for (const auto &tx : pool.value("transactions", json::array()))
+            {
+                for (const auto &out : tx.value("outputs", json::array()))
+                {
+                    if (out.value("address", "") == address)
+                    {
+                        pending += out.value("value", 0ull);
+                    }
+                }
+            }
+            if (pending > 0)
+            {
+                char buf[32];
+                std::snprintf(buf, sizeof(buf), "%llu.%03llu",
+                              static_cast<unsigned long long>(pending / 1000),
+                              static_cast<unsigned long long>(pending % 1000));
+                std::cout << "unconfirmed " << buf << " 314ST\n";
+            }
+        }
         return 0;
     }
 
@@ -1510,7 +1535,7 @@ namespace
         {
             for (const auto &coin : coins)
             {
-                if (sum >= pay + fee)
+                if (sum >= pay + fee || chosen.size() >= 200)
                 {
                     break;
                 }
@@ -1520,17 +1545,6 @@ namespace
         }
         if (confirmed < pay + fee || sum < pay + fee)
         {
-            if (g_dry_run)
-            {
-                std::string sig;
-                if (!ed25519_sign(key.secret_hex, src_addr, sig, err))
-                {
-                    std::cerr << err << "\n";
-                    return 1;
-                }
-                std::cout << "signed\n";
-                return 0;
-            }
             std::cerr << src << " has no coin covering " << amount << " 314ST plus fee " << fee_text << "\n";
             return 1;
         }

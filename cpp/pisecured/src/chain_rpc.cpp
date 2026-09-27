@@ -2255,7 +2255,6 @@ namespace pisecured
             {
                 return rejected("malformed transaction");
             }
-            std::vector<Tx> prior;
             for (const auto &txj : block["txs"])
             {
                 Tx tx;
@@ -2265,21 +2264,15 @@ namespace pisecured
                     return rejected(reason);
                 }
                 resolve_output_names(tx);
-                if (!check_spendable(storage, tx, reason, &prior))
-                {
-                    return rejected(reason);
-                }
-                if (!verify_input_signatures(storage, tx, reason, require_local_policy, &prior))
-                {
-                    return rejected(reason);
-                }
-                if (!admit_register(storage, tx, reason, require_local_policy, &prior))
-                {
-                    return rejected(reason);
-                }
-                prior.push_back(tx);
                 txs.push_back(tx);
             }
+        }
+        // A miner that already has a confirmed output must fold it with this
+        // block's coinbase. An empty list is not stored. Blocks already on
+        // disk are restored without this check.
+        if (txs.empty() && !storage.list_utxos(payout).empty())
+        {
+            return rejected("purse missing");
         }
 
         uint64_t fee_units = 0;
@@ -2363,6 +2356,27 @@ namespace pisecured
         if (coinbase.contains("txid") && coinbase["txid"].is_string() && coinbase["txid"].get<std::string>() != to_hex(cb.txid))
         {
             return rejected("coinbase missing");
+        }
+
+        // The purse spends this block's coinbase. It is not in the UTXO set
+        // yet, and it does not have to have been in the last template.
+        std::vector<Tx> prior{cb};
+        for (const auto &tx : txs)
+        {
+            std::string reason;
+            if (!check_spendable(storage, tx, reason, &prior))
+            {
+                return rejected(reason);
+            }
+            if (!verify_input_signatures(storage, tx, reason, require_local_policy, &prior))
+            {
+                return rejected(reason);
+            }
+            if (!admit_register(storage, tx, reason, require_local_policy, &prior))
+            {
+                return rejected(reason);
+            }
+            prior.push_back(tx);
         }
 
         std::vector<std::array<uint8_t, 32>> ids{cb.txid};
