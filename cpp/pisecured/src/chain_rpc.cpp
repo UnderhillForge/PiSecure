@@ -688,7 +688,7 @@ namespace pisecured
 
         uint64_t subsidy_units_for(uint32_t height)
         {
-            return height >= kDifficultyActivationHeight ? kSubsidyUnitsAfterActivation : kSubsidyUnits;
+            return height >= kMiner216ActivationHeight ? kSubsidyUnitsAfterActivation : kSubsidyUnits;
         }
 
         Emission emission_for(uint32_t height, uint64_t fee)
@@ -2614,10 +2614,23 @@ namespace pisecured
             }
         }
         const uint64_t minted = paid_miner + paid_validator + paid_stakers + paid_loans + paid_foundation;
-        const uint64_t mint_cap = emit.subsidy + emit.miner_fee + emit.stakers + emit.loans + emit.foundation;
-        if (paid_miner > emit.miner_cap() || paid_validator > kValidatorUnits || paid_stakers > emit.stakers || paid_loans > emit.loans || paid_foundation != emit.foundation || minted > mint_cap)
+        const uint64_t miner_full = (kSubsidyUnitsAfterActivation - kValidatorUnits) + emit.miner_fee;
+        const uint64_t miner_legacy = kLegacyMinerSubsidy + emit.miner_fee;
+        const uint64_t mint_cap = kSubsidyUnitsAfterActivation + emit.miner_fee + emit.stakers + emit.loans + emit.foundation;
+        if (paid_miner > miner_full || paid_validator > kValidatorUnits || paid_stakers > emit.stakers || paid_loans > emit.loans || paid_foundation != emit.foundation || minted > mint_cap)
         {
             return rejected("coinbase exceeds emission rules");
+        }
+        if (height >= kMiner216ActivationHeight)
+        {
+            if (paid_miner != miner_full)
+            {
+                return rejected("coinbase subsidy mismatch");
+            }
+        }
+        else if (paid_miner != miner_legacy && paid_miner != miner_full)
+        {
+            return rejected("coinbase subsidy mismatch");
         }
 
         Tx cb = coinbase_from(height, cb_outs);

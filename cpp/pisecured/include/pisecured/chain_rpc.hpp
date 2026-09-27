@@ -15,10 +15,15 @@ namespace pisecured
     constexpr uint32_t kTargetBlockSeconds = 60;
 
     // Block 1 is the first block. It starts at 4 bits. Later blocks retarget
-    // in the 2–24 band. The subsidy is 218 units from block 1.
+    // in the 2–24 band.
     constexpr uint32_t kDifficultyActivationHeight = 1;
 
-    // 1 unit = 0.001 314ST. Subsidy is 0.218 314ST from block 1.
+    // Tip 31 on 2026-09-27. Heights 1 through 31 still validate a miner subsidy
+    // of 198 or 216 (validator 2). From height 32 the miner subsidy is 216.
+    constexpr uint32_t kMiner216ActivationHeight = 32;
+    constexpr uint64_t kLegacyMinerSubsidy = 198;
+
+    // 1 unit = 0.001 314ST. From block 32 the subsidy is 0.218 314ST.
     // Miner receives subsidy minus the validator 2 units (216).
     constexpr uint64_t kSubsidyUnits = 200;
     constexpr uint64_t kSubsidyUnitsAfterActivation = 218;

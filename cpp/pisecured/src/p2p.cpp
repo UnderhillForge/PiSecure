@@ -3061,6 +3061,7 @@ namespace pisecured
                     break;
                 }
                 std::string miner;
+                std::string reward = "0.000";
                 int txCount = 0;
                 auto index = storage_->block_index(header->hash);
                 if (index)
@@ -3086,6 +3087,19 @@ namespace pisecured
                                         if (out.value("role", "") == "miner" && out.contains("address"))
                                         {
                                             miner = out["address"].get<std::string>();
+                                            if (out.contains("amount") && out["amount"].is_string())
+                                            {
+                                                reward = out["amount"].get<std::string>();
+                                            }
+                                            else if (out.contains("units") && out["units"].is_number_unsigned())
+                                            {
+                                                const uint64_t units = out["units"].get<uint64_t>();
+                                                char buf[32];
+                                                std::snprintf(buf, sizeof(buf), "%llu.%03llu",
+                                                              static_cast<unsigned long long>(units / 1000),
+                                                              static_cast<unsigned long long>(units % 1000));
+                                                reward = buf;
+                                            }
                                             break;
                                         }
                                     }
@@ -3106,7 +3120,7 @@ namespace pisecured
                                   {"timestamp", header->timestamp},
                                   {"miner", miner},
                                   {"tx_count", txCount},
-                                  {"reward", "0.198"},
+                                  {"reward", reward},
                                   {"subsidy", "0.200"},
                                   {"difficulty", header->difficulty}});
                 ++kept;
