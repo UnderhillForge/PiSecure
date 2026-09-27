@@ -100,7 +100,9 @@ Difficulty is leading zero bits in **2–24**. Block 1 starts at **4** bits. Aft
 
 `kDifficultyActivationHeight` is **1**. v0.2.8 applies the 218-unit subsidy and the 2–24 bit retarget from block 1. There is no block below height 1.
 
-The subsidy is **218 units** (0.218 314ST): miner **216**, validator **2**. With `fee_units` 0 there are no other coinbase outputs. Transaction fees split 60% miner, 20% stakers, 8% loans, 7% foundation, and the remainder (at least 5%) is burn and is not an output. Integer division is `fee * percent / 100` for the four paid shares. There is no foundation output when fees are zero. When the 7% is at least 1 unit, that output is paid to the Foundation wallet `ps1522db177e6452cbb6e48f296b19e6f2bdeb5b5e7a41a9552eb60a01464c3a5ba` and the amount must match. Any other foundation address is rejected with `coinbase foundation address`. Stakers stay the address `stakers`, loans stay `loans`, and burn stays out of the coinbase. A coinbase that pays the miner more than 216 plus the miner's fee share, or the validator more than 2, is rejected with `coinbase exceeds emission rules`.
+The subsidy is **218 units** (0.218 314ST): miner **216**, validator **2**. With `fee_units` 0 there are no other coinbase outputs. Transaction fees split 60% miner, 20% stakers, 8% loans, 7% foundation, and the remainder (at least 5%) is burn and is not an output. Integer division is `fee * percent / 100` for the four paid shares. There is no foundation output when the 7% share is 0. When the 7% is at least 1 unit, that output is paid to the Foundation wallet `ps1522db177e6452cbb6e48f296b19e6f2bdeb5b5e7a41a9552eb60a01464c3a5ba` and the amount must match. Any other foundation address is rejected with `coinbase foundation address`. Stakers stay the address `stakers`, loans stay `loans`, and burn stays out of the coinbase.
+
+From height 32 the miner output must be exactly 216 plus the miner's fee share. Any other miner amount, including 198, is `coinbase subsidy mismatch`. The validator amount must be exactly 2 or the block is `coinbase validator amount`. That output may name any ps1. `getblocktemplate` takes an optional `validator` param: a ps1, or a registered name that resolves to a ps1. Omitted, the 2 units go to Foundation. A new coinbase does not use the bare word `validator`. Heights before 32 still accept a miner subsidy of 198 or 216 plus the miner fee share, so the blocks already stored keep loading. A stakers, loans, or foundation amount above its share is `coinbase exceeds emission rules`.
 
 The blocks already stored on this Pi were mined before this schedule. Reloading them does not rewrite `blk*.dat`. A new chain starts at height 1 with these rules.
 
@@ -163,7 +165,7 @@ u64 fee              (0 for coinbase, >= 1 otherwise)
 u32 height           (coinbase height, else 0)
 ```
 
-Coinbase has no inputs. Its outputs are the non-zero emission outputs, in role order `miner`, `validator`, `stakers`, `loans`, `foundation`. Burn is not an output. With no fees the outputs are miner 216 units and validator 2 units.
+Coinbase has no inputs. Its outputs are the non-zero emission outputs, in role order `miner`, `validator`, `stakers`, `loans`, `foundation`. Burn is not an output. With no fees the outputs are miner 216 units and validator 2 units to a ps1. The height-1 sample above is an earlier template: from height 32, `subsidy_units` is 218 and the validator address is not the word `validator`.
 
 Merkle root: start with `coinbase_txid`, then each included `txid`. While more than one id remains, if the count is odd duplicate the last id, then replace the list with `SHA256(left || right)` for each pair. One id is itself the root.
 
@@ -345,7 +347,7 @@ Miner:
 - The daemon does not mine. Mining is the separate `psminer` release binary.
 - With no `--peer`, DNS still resolves `bootstrap.pisecure.org` onto P2P port 3141. Directory `p2p_host:p2p_port` values are hints. Blocks are not downloaded over HTTPS.
 
-Left untouched on purpose: PiHash2, hw_proof, Ed25519 spend checks, namelookup, and the `blk*.dat` layout. v0.2.11 keeps activation height 1 and pays the Foundation fee share to `ps1522db177e6452cbb6e48f296b19e6f2bdeb5b5e7a41a9552eb60a01464c3a5ba`. Accepted spends are reloaded from `mempool.json`. A mined block keeps those spends.
+Left untouched on purpose: PiHash2, hw_proof, Ed25519 spend checks, namelookup, and the `blk*.dat` layout. v0.2.12 keeps difficulty activation height 1. From block 32 the miner subsidy is 216 units and the validator 2 units go to a ps1, Foundation when `validator` is omitted. The 7% foundation fee share is paid to `ps1522db177e6452cbb6e48f296b19e6f2bdeb5b5e7a41a9552eb60a01464c3a5ba` only when that share is at least 1 unit. Accepted spends are reloaded from `mempool.json`. A mined block keeps those spends.
 
 ## Name backup
 

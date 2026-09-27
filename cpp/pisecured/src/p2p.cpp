@@ -3062,6 +3062,7 @@ namespace pisecured
                 }
                 std::string miner;
                 std::string reward = "0.000";
+                std::string subsidy = "0.000";
                 int txCount = 0;
                 auto index = storage_->block_index(header->hash);
                 if (index)
@@ -3108,6 +3109,19 @@ namespace pisecured
                                 {
                                     miner = coinbase["wallet"].get<std::string>();
                                 }
+                                if (coinbase.contains("subsidy") && coinbase["subsidy"].is_string())
+                                {
+                                    subsidy = coinbase["subsidy"].get<std::string>();
+                                }
+                                else if (coinbase.contains("subsidy_units") && coinbase["subsidy_units"].is_number_unsigned())
+                                {
+                                    const uint64_t units = coinbase["subsidy_units"].get<uint64_t>();
+                                    char buf[32];
+                                    std::snprintf(buf, sizeof(buf), "%llu.%03llu",
+                                                  static_cast<unsigned long long>(units / 1000),
+                                                  static_cast<unsigned long long>(units % 1000));
+                                    subsidy = buf;
+                                }
                             }
                         }
                         catch (const std::exception &)
@@ -3121,7 +3135,7 @@ namespace pisecured
                                   {"miner", miner},
                                   {"tx_count", txCount},
                                   {"reward", reward},
-                                  {"subsidy", "0.200"},
+                                  {"subsidy", subsidy},
                                   {"difficulty", header->difficulty}});
                 ++kept;
                 if (height == 1)

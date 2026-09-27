@@ -734,11 +734,11 @@ namespace pisecured
             return tx;
         }
 
-        std::vector<CbOut> template_coinbase(const std::string &wallet, const Emission &e)
+        std::vector<CbOut> template_coinbase(const std::string &wallet, const std::string &validator, const Emission &e)
         {
             std::vector<CbOut> outs;
             outs.push_back(CbOut{"miner", wallet, e.miner_cap()});
-            outs.push_back(CbOut{"validator", "validator", kValidatorUnits});
+            outs.push_back(CbOut{"validator", validator, kValidatorUnits});
             if (e.stakers > 0)
             {
                 outs.push_back(CbOut{"stakers", "stakers", e.stakers});
@@ -1171,6 +1171,23 @@ namespace pisecured
                 }
             }
             return true;
+        }
+
+        bool is_ps1_payout(const std::string &address)
+        {
+            if (address.size() != 67)
+            {
+                return false;
+            }
+            std::string lower = address;
+            for (char &c : lower)
+            {
+                if (c >= 'A' && c <= 'Z')
+                {
+                    c = static_cast<char>(c - 'A' + 'a');
+                }
+            }
+            return is_long_address(lower);
         }
 
         std::string long_address(const std::vector<uint8_t> &pubkey)
@@ -2200,6 +2217,31 @@ namespace pisecured
         {
             throw std::runtime_error(why);
         }
+        // Omitted validator pays Foundation. A ps1, or a name that resolves to
+        // one, is the 2-unit output. The bare word "validator" is not written.
+        std::string validator_payout = kFoundationPayout;
+        {
+            const json obj = as_object_param(params);
+            if (obj.is_object() && obj.contains("validator") && !obj["validator"].is_null())
+            {
+                if (!obj["validator"].is_string())
+                {
+                    throw std::runtime_error("unknown shortname");
+                }
+                const std::string asked = obj["validator"].get<std::string>();
+                if (!asked.empty())
+                {
+                    std::string vshown;
+                    std::string vpayout;
+                    std::string vwhy;
+                    if (!resolve_miner(asked, vshown, vpayout, vwhy) || !is_ps1_payout(vpayout))
+                    {
+                        throw std::runtime_error(vwhy.empty() ? std::string("unknown shortname") : vwhy);
+                    }
+                    validator_payout = vpayout;
+                }
+            }
+        }
 
         const bool tipped = storage.has_tip();
         // Empty chain reports height 0, so the next block is height 1.
@@ -2224,7 +2266,7 @@ namespace pisecured
             }
         }
         const Emission emit = emission_for(next_height, fee_units);
-        const std::vector<CbOut> cb_outs = template_coinbase(payout, emit);
+        const std::vector<CbOut> cb_outs = template_coinbase(payout, validator_payout, emit);
         Tx cb = coinbase_from(next_height, cb_outs);
         std::vector<std::array<uint8_t, 32>> ids{cb.txid};
         ids.insert(ids.end(), txids.begin(), txids.end());
@@ -2613,19 +2655,28 @@ namespace pisecured
                 return rejected("coinbase exceeds emission rules");
             }
         }
-        const uint64_t minted = paid_miner + paid_validator + paid_stakers + paid_loans + paid_foundation;
-        const uint64_t miner_full = (kSubsidyUnitsAfterActivation - kValidatorUnits) + emit.miner_fee;
-        const uint64_t miner_legacy = kLegacyMinerSubsidy + emit.miner_fee;
-        const uint64_t mint_cap = kSubsidyUnitsAfterActivation + emit.miner_fee + emit.stakers + emit.loans + emit.foundation;
-        if (paid_miner > miner_full || paid_validator > kValidatorUnits || paid_stakers > emit.stakers || paid_loans > emit.loans || paid_foundation != emit.foundation || minted > mint_cap)
+        if (paid_stakers > emit.stakers || paid_loans > emit.loans || paid_foundation != emit.foundation)
         {
             return rejected("coinbase exceeds emission rules");
         }
+        if (paid_validator != kValidatorUnits)
+        {
+            return rejected("coinbase validator amount");
+        }
+        const uint64_t miner_full = (kSubsidyUnitsAfterActivation - kValidatorUnits) + emit.miner_fee;
+        const uint64_t miner_legacy = kLegacyMinerSubsidy + emit.miner_fee;
         if (height >= kMiner216ActivationHeight)
         {
             if (paid_miner != miner_full)
             {
                 return rejected("coinbase subsidy mismatch");
+            }
+            for (const auto &o : cb_outs)
+            {
+                if (o.role == "validator" && !is_ps1_payout(o.address))
+                {
+                    return rejected("coinbase validator address");
+                }
             }
         }
         else if (paid_miner != miner_legacy && paid_miner != miner_full)

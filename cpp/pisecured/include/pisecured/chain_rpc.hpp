@@ -18,8 +18,10 @@ namespace pisecured
     // in the 2–24 band.
     constexpr uint32_t kDifficultyActivationHeight = 1;
 
-    // Tip 31 on 2026-09-27. Heights 1 through 31 still validate a miner subsidy
-    // of 198 or 216 (validator 2). From height 32 the miner subsidy is 216.
+    // Tip 31 on 2026-09-27. Heights before 32 still accept a miner subsidy of
+    // 198 or 216 plus the miner fee share, including the stored validator
+    // address. From height 32 the miner output is exactly 216 plus the miner
+    // fee share, and the validator output is exactly 2 units to a ps1.
     constexpr uint32_t kMiner216ActivationHeight = 32;
     constexpr uint64_t kLegacyMinerSubsidy = 198;
 
