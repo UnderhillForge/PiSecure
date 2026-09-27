@@ -897,6 +897,23 @@ namespace
             body["name"] = tx["name"];
             body["address"] = tx["address"];
         }
+        else if (tx.value("type", "") == "createflag")
+        {
+            body["type"] = "createflag";
+            body["flag_id"] = tx["flag_id"];
+            body["commitment"] = tx["commitment"];
+            body["awards_pubkey"] = tx["awards_pubkey"];
+            body["max_claims"] = tx["max_claims"];
+            body["expires_height"] = tx["expires_height"];
+            body["bounty_units"] = tx["bounty_units"];
+            body["note"] = tx["note"];
+        }
+        else if (tx.value("type", "") == "claimflag")
+        {
+            body["type"] = "claimflag";
+            body["flag_id"] = tx["flag_id"];
+            body["recipient"] = tx["recipient"];
+        }
         return body.dump();
     }
 
@@ -1877,6 +1894,310 @@ namespace
         return 0;
     }
 
+    std::string default_address()
+    {
+        bool ok = false;
+        std::string text = read_file_maybe_sudo(data_dir() + "/wallets/default", ok);
+        if (!ok)
+        {
+            return {};
+        }
+        while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' '))
+        {
+            text.pop_back();
+        }
+        return text;
+    }
+
+    std::string wallet_with_pubkey(const std::string &pubkey)
+    {
+        const std::string dir = data_dir() + "/wallets";
+        const std::string cmd = "sudo -n ls -1 '" + dir + "'";
+        FILE *pipe = popen(cmd.c_str(), "r");
+        if (pipe == nullptr)
+        {
+            return {};
+        }
+        std::string found;
+        char line[512];
+        while (fgets(line, sizeof(line), pipe) != nullptr)
+        {
+            std::string name = line;
+            while (!name.empty() && (name.back() == '\n' || name.back() == '\r'))
+            {
+                name.pop_back();
+            }
+            if (name.size() < 6 || name.substr(name.size() - 5) != ".json")
+            {
+                continue;
+            }
+            const std::string stem = name.substr(0, name.size() - 5);
+            json doc;
+            std::string err;
+            if (!read_wallet_doc(stem, doc, err))
+            {
+                continue;
+            }
+            std::string pub = doc.value("public_key", "");
+            for (char &c : pub)
+            {
+                if (c >= 'A' && c <= 'F')
+                {
+                    c = static_cast<char>(c - 'A' + 'a');
+                }
+            }
+            if (pub == pubkey)
+            {
+                found = stem;
+                break;
+            }
+        }
+        pclose(pipe);
+        return found;
+    }
+
+    bool take_units(const std::string &address, uint64_t need, std::vector<Coin> &chosen, uint64_t &change, std::string &err)
+    {
+        std::vector<Coin> coins;
+        if (!coins_for(address, coins, err, true))
+        {
+            return false;
+        }
+        std::sort(coins.begin(), coins.end(), [](const Coin &a, const Coin &b)
+                  { return a.units > b.units; });
+        uint64_t sum = 0;
+        chosen.clear();
+        for (const auto &coin : coins)
+        {
+            if (sum >= need || chosen.size() >= 200)
+            {
+                break;
+            }
+            chosen.push_back(coin);
+            sum += coin.units;
+        }
+        if (sum < need)
+        {
+            err = address + " has no coin covering the flag fee";
+            return false;
+        }
+        change = sum - need;
+        return true;
+    }
+
+    int cmd_flag_create(const std::string &id, const std::string &commitment, const std::string &awards,
+                        const std::string &max_text, const std::string &expires_text, const std::string &bounty_text,
+                        const std::string &note)
+    {
+        std::string err;
+        if (note.size() > 80)
+        {
+            std::cerr << "malformed transaction\n";
+            return 1;
+        }
+        char *end = nullptr;
+        const unsigned long max_claims = std::strtoul(max_text.c_str(), &end, 10);
+        if (end == max_text.c_str() || *end != '\0')
+        {
+            std::cerr << "malformed transaction\n";
+            return 1;
+        }
+        end = nullptr;
+        const unsigned long expires = std::strtoul(expires_text.c_str(), &end, 10);
+        if (end == expires_text.c_str() || *end != '\0')
+        {
+            std::cerr << "malformed transaction\n";
+            return 1;
+        }
+        end = nullptr;
+        const unsigned long bounty = std::strtoul(bounty_text.c_str(), &end, 10);
+        if (end == bounty_text.c_str() || *end != '\0')
+        {
+            std::cerr << "malformed transaction\n";
+            return 1;
+        }
+        if (max_claims == 0 && bounty != 0)
+        {
+            std::cerr << "unlimited flag cannot pay\n";
+            return 1;
+        }
+        const std::string awards_addr = resolve_address(awards, err);
+        if (awards_addr.empty())
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        json awards_doc;
+        if (!read_wallet_doc(awards_addr, awards_doc, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        std::string awards_pub = awards_doc.value("public_key", "");
+        for (char &c : awards_pub)
+        {
+            if (c >= 'A' && c <= 'F')
+            {
+                c = static_cast<char>(c - 'A' + 'a');
+            }
+        }
+        const std::string creator = default_address();
+        if (creator.empty())
+        {
+            std::cerr << "no spending key\n";
+            return 1;
+        }
+        Key key;
+        if (!load_key(creator, key, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        const uint64_t lock = bounty * max_claims;
+        const uint64_t fee = 1;
+        std::vector<Coin> chosen;
+        uint64_t change = 0;
+        if (!take_units(creator, lock + fee, chosen, change, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        json inputs = json::array();
+        for (const auto &coin : chosen)
+        {
+            inputs.push_back({{"prev_txid", coin.txid}, {"vout", coin.vout}});
+        }
+        json outputs = json::array();
+        if (change > 0)
+        {
+            outputs.push_back({{"address", creator}, {"value", change}});
+        }
+        json tx = {
+            {"version", 1},
+            {"fee", fee},
+            {"type", "createflag"},
+            {"flag_id", id},
+            {"commitment", commitment},
+            {"awards_pubkey", awards_pub},
+            {"max_claims", max_claims},
+            {"expires_height", expires},
+            {"bounty_units", bounty},
+            {"note", note},
+            {"inputs", inputs},
+            {"outputs", outputs},
+        };
+        if (!sign_tx(tx, key, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        json result;
+        if (!rpc("createflag", tx, result, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        if (result.value("status", "") != "accepted")
+        {
+            std::cerr << result.value("reason", "flag rejected") << "\n";
+            return 1;
+        }
+        std::cout << result.value("txid", "") << "\n";
+        return 0;
+    }
+
+    int cmd_flag_claim(const std::string &id, const std::string &recipient_text)
+    {
+        std::string err;
+        const std::string recipient = normalize_ps1(recipient_text);
+        if (recipient.empty())
+        {
+            std::cerr << "malformed transaction\n";
+            return 1;
+        }
+        json flag;
+        if (!rpc("listflags", json{{"flag_id", id}}, flag, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        if (!flag.value("found", false))
+        {
+            std::cerr << "unknown flag\n";
+            return 1;
+        }
+        std::string awards_pub = flag.value("awards_pubkey", "");
+        for (char &c : awards_pub)
+        {
+            if (c >= 'A' && c <= 'F')
+            {
+                c = static_cast<char>(c - 'A' + 'a');
+            }
+        }
+        const std::string awards = wallet_with_pubkey(awards_pub);
+        if (awards.empty())
+        {
+            std::cerr << "no spending key for awards\n";
+            return 1;
+        }
+        Key key;
+        if (!load_key(awards, key, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        const uint64_t bounty = flag.value("bounty_units", 0ull);
+        const uint64_t fee = 1;
+        std::vector<Coin> chosen;
+        uint64_t change = 0;
+        if (!take_units(awards, fee, chosen, change, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        json inputs = json::array();
+        for (const auto &coin : chosen)
+        {
+            inputs.push_back({{"prev_txid", coin.txid}, {"vout", coin.vout}});
+        }
+        json outputs = json::array();
+        if (bounty > 0)
+        {
+            outputs.push_back({{"address", recipient}, {"value", bounty}});
+        }
+        if (change > 0)
+        {
+            outputs.push_back({{"address", awards}, {"value", change}});
+        }
+        json tx = {
+            {"version", 1},
+            {"fee", fee},
+            {"type", "claimflag"},
+            {"flag_id", id},
+            {"recipient", recipient},
+            {"inputs", inputs},
+            {"outputs", outputs},
+        };
+        if (!sign_tx(tx, key, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        json result;
+        if (!rpc("claimflag", tx, result, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
+        if (result.value("status", "") != "accepted")
+        {
+            std::cerr << result.value("reason", "flag rejected") << "\n";
+            return 1;
+        }
+        std::cout << result.value("txid", "") << "\n";
+        return 0;
+    }
+
     void usage()
     {
         std::cerr << "pswallet [--url ws://127.0.0.1:3144] [--json] [--no-update-check]\n"
@@ -1896,8 +2217,9 @@ namespace
                   << "  balance NAME|ps1\n"
                   << "  utxos NAME|ps1\n"
                   << "  send SRC DST AMOUNT [--fee 0.001] [--dry-run]\n"
-                  << "  consolidate ADDR [--fee 0.001]\n"
-                  << "Amounts are 314ST. 0.001 is 1 unit.\n"
+                  << "  flag create ID COMMITMENT AWARDS MAX EXPIRES BOUNTY NOTE\n"
+                  << "  flag claim ID RECIPIENT\n"
+                  << "Amounts are 314ST. 0.001 is 1 unit. Flag bounty is units.\n"
                   << "A tty prompt or PISECURE_WALLET_PASS unlocks an encrypted wallet.\n";
     }
 }
@@ -2063,10 +2385,15 @@ int main(int argc, char **argv)
             maybe_check_update();
             return cmd_send(positional[1], positional[2], positional[3], fee);
         }
-        if (cmd == "consolidate" && positional.size() == 2)
+        if (cmd == "flag" && positional.size() == 9 && positional[1] == "create")
         {
             maybe_check_update();
-            return cmd_consolidate(positional[1], fee);
+            return cmd_flag_create(positional[2], positional[3], positional[4], positional[5], positional[6], positional[7], positional[8]);
+        }
+        if (cmd == "flag" && positional.size() == 4 && positional[1] == "claim")
+        {
+            maybe_check_update();
+            return cmd_flag_claim(positional[2], positional[3]);
         }
     }
     catch (const std::exception &ex)

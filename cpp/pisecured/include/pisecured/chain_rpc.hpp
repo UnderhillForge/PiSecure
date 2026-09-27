@@ -50,6 +50,9 @@ namespace pisecured
     json rpc_getheader(Storage &storage, const json &params);
     json rpc_listunspent(Storage &storage, const json &params);
     json rpc_namelookup(Storage &storage, const json &params);
+    json rpc_createflag(Storage &storage, const json &params);
+    json rpc_claimflag(Storage &storage, const json &params);
+    json rpc_listflags(Storage &storage, const json &params);
     // Name map for chain report and for the names snapshot stored on new blocks.
     json rpc_name_snapshot(Storage &storage);
 }

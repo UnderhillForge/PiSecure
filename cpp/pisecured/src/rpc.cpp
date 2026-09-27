@@ -182,6 +182,12 @@ namespace pisecured
                 return success_response(method_gettransaction(params), id);
             else if (method == "sendtransaction")
                 return success_response(method_sendtransaction(params), id);
+            else if (method == "createflag")
+                return success_response(storage_ ? rpc_createflag(*storage_, params) : json::object(), id);
+            else if (method == "claimflag")
+                return success_response(storage_ ? rpc_claimflag(*storage_, params) : json::object(), id);
+            else if (method == "listflags")
+                return success_response(storage_ ? rpc_listflags(*storage_, params) : json::object(), id);
             else if (method == "getmempool")
                 return success_response(method_getmempool(params), id);
             else if (method == "getpeers")

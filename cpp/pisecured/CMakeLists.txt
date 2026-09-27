@@ -65,6 +65,8 @@ if(NOT CMAKE_CROSSCOMPILING)
         ${LWS_LIBRARIES}
     )
     add_executable(retarget_test tests/retarget_test.cpp)
+    add_executable(flag_test tests/flag_test.cpp)
+    target_include_directories(flag_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")

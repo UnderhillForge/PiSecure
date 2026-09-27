@@ -1,4 +1,5 @@
 #include "pisecured/chain_rpc.hpp"
+#include "pisecured/flags.hpp"
 #include "pisecured/retarget.hpp"
 #include "pisecured/p2p.hpp"
 #include "pihash.h"
@@ -184,12 +185,31 @@ namespace pisecured
             uint64_t fee = 0;
             std::string name;
             std::string reg_address;
+            enum class FlagKind
+            {
+                None,
+                Create,
+                Claim
+            };
+            FlagKind flag_kind = FlagKind::None;
+            std::string flag_id;
+            std::string commitment;
+            std::string awards_pubkey;
+            uint32_t max_claims = 0;
+            uint32_t expires_height = 0;
+            uint64_t bounty_units = 0;
+            std::string note;
+            std::string recipient;
+            uint64_t escrow_lock = 0;
             std::vector<TxIn> inputs;
             std::vector<TxOut> outputs;
             std::array<uint8_t, 32> txid{};
         };
 
         // TX1 || u32 ver || u8 type || inputs || outputs || u64 fee || u32 height
+        bool decode_hex(const std::string &hex, std::vector<uint8_t> &out);
+        std::string lower_hex(std::string hex);
+        bool is_long_address(const std::string &address);
         std::vector<uint8_t> canonical_tx(const Tx &tx)
         {
             std::vector<uint8_t> out;
@@ -211,7 +231,32 @@ namespace pisecured
             }
             append_u64(out, tx.fee);
             append_u32(out, tx.coinbase ? tx.height : 0);
-            // Register fields are appended only. A spend's preimage stays TX1.
+            // Register and flag fields are appended only. A spend's preimage stays TX1.
+            if (tx.flag_kind == Tx::FlagKind::Create)
+            {
+                append_str(out, "FLAG1");
+                append_u16(out, static_cast<uint16_t>(tx.flag_id.size()));
+                out.insert(out.end(), tx.flag_id.begin(), tx.flag_id.end());
+                std::vector<uint8_t> raw;
+                decode_hex(tx.commitment, raw);
+                append_bytes(out, raw.data(), raw.size());
+                raw.clear();
+                decode_hex(tx.awards_pubkey, raw);
+                append_bytes(out, raw.data(), raw.size());
+                append_u32(out, tx.max_claims);
+                append_u32(out, tx.expires_height);
+                append_u64(out, tx.bounty_units);
+                append_u16(out, static_cast<uint16_t>(tx.note.size()));
+                out.insert(out.end(), tx.note.begin(), tx.note.end());
+            }
+            else if (tx.flag_kind == Tx::FlagKind::Claim)
+            {
+                append_str(out, "FLAG2");
+                append_u16(out, static_cast<uint16_t>(tx.flag_id.size()));
+                out.insert(out.end(), tx.flag_id.begin(), tx.flag_id.end());
+                append_u16(out, static_cast<uint16_t>(tx.recipient.size()));
+                out.insert(out.end(), tx.recipient.begin(), tx.recipient.end());
+            }
             if (tx.reg)
             {
                 append_str(out, "REG1");
@@ -460,6 +505,23 @@ namespace pisecured
                 doc["name"] = tx.name;
                 doc["address"] = tx.reg_address;
             }
+            if (tx.flag_kind == Tx::FlagKind::Create)
+            {
+                doc["type"] = "createflag";
+                doc["flag_id"] = tx.flag_id;
+                doc["commitment"] = tx.commitment;
+                doc["awards_pubkey"] = tx.awards_pubkey;
+                doc["max_claims"] = tx.max_claims;
+                doc["expires_height"] = tx.expires_height;
+                doc["bounty_units"] = tx.bounty_units;
+                doc["note"] = tx.note;
+            }
+            else if (tx.flag_kind == Tx::FlagKind::Claim)
+            {
+                doc["type"] = "claimflag";
+                doc["flag_id"] = tx.flag_id;
+                doc["recipient"] = tx.recipient;
+            }
             return doc;
         }
 
@@ -501,10 +563,54 @@ namespace pisecured
             }
             if (obj.contains("type") && obj["type"].is_string())
             {
-                if (obj["type"].get<std::string>() != "register")
+                const std::string kind = obj["type"].get<std::string>();
+                if (kind != "register" && kind != "createflag" && kind != "claimflag")
                 {
                     reason = "malformed transaction";
                     return false;
+                }
+                if (kind == "createflag" || kind == "claimflag")
+                {
+                    if (!obj.contains("flag_id") || !obj["flag_id"].is_string() || !flag_id_ok(obj["flag_id"].get<std::string>()))
+                    {
+                        reason = "flag id invalid";
+                        return false;
+                    }
+                    tx.flag_id = obj["flag_id"].get<std::string>();
+                    if (kind == "createflag")
+                    {
+                        if (!obj.contains("commitment") || !obj["commitment"].is_string() || !hex64(obj["commitment"].get<std::string>()) ||
+                            !obj.contains("awards_pubkey") || !obj["awards_pubkey"].is_string() || !hex64(obj["awards_pubkey"].get<std::string>()) ||
+                            !obj.contains("max_claims") || !obj["max_claims"].is_number_unsigned() ||
+                            !obj.contains("expires_height") || !obj["expires_height"].is_number_unsigned() ||
+                            !obj.contains("bounty_units") || !obj["bounty_units"].is_number_unsigned() ||
+                            !obj.contains("note") || !obj["note"].is_string() || obj["note"].get<std::string>().size() > 80)
+                        {
+                            reason = "malformed transaction";
+                            return false;
+                        }
+                        tx.flag_kind = Tx::FlagKind::Create;
+                        tx.commitment = lower_hex(obj["commitment"].get<std::string>());
+                        tx.awards_pubkey = lower_hex(obj["awards_pubkey"].get<std::string>());
+                        tx.max_claims = obj["max_claims"].get<uint32_t>();
+                        tx.expires_height = obj["expires_height"].get<uint32_t>();
+                        tx.bounty_units = obj["bounty_units"].get<uint64_t>();
+                        tx.note = obj["note"].get<std::string>();
+                        if (!escrow_lock(tx.max_claims, tx.bounty_units, tx.escrow_lock, reason))
+                        {
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        if (!obj.contains("recipient") || !obj["recipient"].is_string() || !is_long_address(obj["recipient"].get<std::string>()))
+                        {
+                            reason = "malformed transaction";
+                            return false;
+                        }
+                        tx.flag_kind = Tx::FlagKind::Claim;
+                        tx.recipient = obj["recipient"].get<std::string>();
+                    }
                 }
                 if (!obj.contains("name") || !obj["name"].is_string() || !obj.contains("address") || !obj["address"].is_string())
                 {
@@ -853,7 +959,7 @@ namespace pisecured
 
         bool find_outpoint(Storage &storage, const std::array<uint8_t, 32> &prev, uint32_t vout, uint64_t &value, std::string &owner, const std::vector<Tx> *prior);
 
-        bool check_spendable(Storage &storage, const Tx &tx, std::string &reason, const std::vector<Tx> *prior = nullptr)
+        bool check_spendable(Storage &storage, const Tx &tx, std::string &reason, const std::vector<Tx> *prior = nullptr, uint64_t release = 0)
         {
             if (tx.inputs.empty())
             {
@@ -891,7 +997,18 @@ namespace pisecured
             {
                 output_value += o.value;
             }
-            if (output_value + tx.fee > input_value)
+            const uint64_t need = output_value + tx.fee + tx.escrow_lock;
+            const uint64_t have = input_value + release;
+            if (tx.flag_kind != Tx::FlagKind::None)
+            {
+                if (have != need)
+                {
+                    reason = "insufficient funds";
+                    return false;
+                }
+                return true;
+            }
+            if (need > have)
             {
                 reason = "insufficient funds";
                 return false;
@@ -1600,6 +1717,23 @@ namespace pisecured
                 body["name"] = tx.name;
                 body["address"] = tx.reg_address;
             }
+            if (tx.flag_kind == Tx::FlagKind::Create)
+            {
+                body["type"] = "createflag";
+                body["flag_id"] = tx.flag_id;
+                body["commitment"] = tx.commitment;
+                body["awards_pubkey"] = tx.awards_pubkey;
+                body["max_claims"] = tx.max_claims;
+                body["expires_height"] = tx.expires_height;
+                body["bounty_units"] = tx.bounty_units;
+                body["note"] = tx.note;
+            }
+            else if (tx.flag_kind == Tx::FlagKind::Claim)
+            {
+                body["type"] = "claimflag";
+                body["flag_id"] = tx.flag_id;
+                body["recipient"] = tx.recipient;
+            }
             return body.dump();
         }
 
@@ -1691,6 +1825,122 @@ namespace pisecured
             return true;
         }
 
+        FlagBook g_flags;
+
+        uint64_t claim_release(const Tx &tx, const FlagBook &book, const std::vector<Tx> *prior)
+        {
+            if (tx.flag_kind != Tx::FlagKind::Claim)
+            {
+                return 0;
+            }
+            if (const Flag *flag = book.find(tx.flag_id))
+            {
+                return flag->bounty_units;
+            }
+            if (prior != nullptr)
+            {
+                for (const auto &earlier : *prior)
+                {
+                    if (earlier.flag_kind == Tx::FlagKind::Create && earlier.flag_id == tx.flag_id)
+                    {
+                        return earlier.bounty_units;
+                    }
+                }
+            }
+            return 0;
+        }
+
+        bool flag_outputs_ok(Storage &storage, const Tx &tx, const Flag *flag, const std::vector<Tx> *prior, std::string &reason)
+        {
+            if (tx.flag_kind == Tx::FlagKind::None)
+            {
+                return true;
+            }
+            uint64_t ignored = 0;
+            std::string payer;
+            if (!find_outpoint(storage, tx.inputs.front().prev, tx.inputs.front().vout, ignored, payer, prior))
+            {
+                reason = "unknown input";
+                return false;
+            }
+            if (tx.flag_kind == Tx::FlagKind::Create)
+            {
+                for (const auto &out : tx.outputs)
+                {
+                    if (out.address != payer)
+                    {
+                        reason = "malformed transaction";
+                        return false;
+                    }
+                }
+                return true;
+            }
+            if (flag == nullptr)
+            {
+                reason = "unknown flag";
+                return false;
+            }
+            std::vector<uint8_t> raw;
+            if (!decode_hex(flag->awards_pubkey, raw))
+            {
+                reason = "awards signature required";
+                return false;
+            }
+            const std::string awards = long_address(raw);
+            uint32_t paid = 0;
+            for (const auto &out : tx.outputs)
+            {
+                if (out.address == tx.recipient)
+                {
+                    if (flag->bounty_units == 0 || out.value != flag->bounty_units)
+                    {
+                        reason = "malformed transaction";
+                        return false;
+                    }
+                    ++paid;
+                }
+                else if (out.address != awards)
+                {
+                    reason = "malformed transaction";
+                    return false;
+                }
+            }
+            if (flag->bounty_units == 0 && paid != 0)
+            {
+                reason = "malformed transaction";
+                return false;
+            }
+            if (flag->bounty_units > 0 && paid != 1)
+            {
+                reason = "malformed transaction";
+                return false;
+            }
+            return true;
+        }
+
+        bool apply_flag_tx(FlagBook &book, const Tx &tx, uint32_t height, std::string &reason)
+        {
+            if (tx.flag_kind == Tx::FlagKind::Create)
+            {
+                Flag incoming;
+                incoming.id = tx.flag_id;
+                incoming.commitment = tx.commitment;
+                incoming.awards_pubkey = tx.awards_pubkey;
+                incoming.max_claims = tx.max_claims;
+                incoming.expires_height = tx.expires_height;
+                incoming.bounty_units = tx.bounty_units;
+                incoming.note = tx.note;
+                incoming.txid = to_hex(tx.txid);
+                return book.create(incoming, reason);
+            }
+            if (tx.flag_kind == Tx::FlagKind::Claim)
+            {
+                const std::string signer = tx.inputs.empty() ? std::string() : lower_hex(tx.inputs.front().public_key_hex);
+                return book.claim(tx.flag_id, tx.recipient, signer, height, to_hex(tx.txid), reason);
+            }
+            return true;
+        }
+
         // Accepted spends live in memory. A restart used to drop them, so the
         // next block was mined with an empty tx list and the payment never
         // became a UTXO. The file is replayed after the chain UTXO set exists.
@@ -1761,7 +2011,9 @@ namespace pisecured
                 {
                     continue;
                 }
-                if (tx.inputs.empty() || !check_spendable(storage, tx, reason, nullptr) || !verify_input_signatures(storage, tx, reason, true, nullptr))
+                const uint32_t height = storage.has_tip() ? storage.get_best_height() + 1 : 1;
+                const Flag *known = g_flags.find(tx.flag_id);
+                if (tx.inputs.empty() || !check_spendable(storage, tx, reason, nullptr, claim_release(tx, g_flags, nullptr)) || !verify_input_signatures(storage, tx, reason, true, nullptr) || !flag_outputs_ok(storage, tx, known, nullptr, reason) || !apply_flag_tx(g_flags, tx, height, reason))
                 {
                     continue;
                 }
@@ -1790,6 +2042,7 @@ namespace pisecured
 
     bool restore_chain(Storage &storage)
     {
+        g_flags = FlagBook();
         load_names_file(storage.datadir());
         const uint64_t count = storage.next_index();
         struct Found
@@ -1912,6 +2165,12 @@ namespace pisecured
                         std::cerr << "UTXO replay failed at height " << item.height << "\n";
                         return false;
                     }
+                    std::string flag_reason;
+                    if (!apply_flag_tx(g_flags, tx, item.height, flag_reason))
+                    {
+                        std::cerr << "flag replay failed at height " << item.height << "\n";
+                        return false;
+                    }
                 }
             }
             absorb_block_names(item.obj);
@@ -2020,9 +2279,17 @@ namespace pisecured
             return rejected("duplicate transaction");
         }
         const std::vector<Tx> prior = mempool_txs(storage);
+        FlagBook staged_flags = g_flags;
+        const uint32_t next_height = storage.has_tip() ? storage.get_best_height() + 1 : 1;
+        for (const auto &earlier : prior)
+        {
+            std::string ignored;
+            apply_flag_tx(staged_flags, earlier, next_height, ignored);
+        }
         if (!tx.inputs.empty())
         {
-            if (!check_spendable(storage, tx, reason, &prior))
+            const Flag *known = staged_flags.find(tx.flag_id);
+            if (!check_spendable(storage, tx, reason, &prior, claim_release(tx, staged_flags, &prior)))
             {
                 return rejected(reason);
             }
@@ -2031,6 +2298,10 @@ namespace pisecured
                 return rejected(reason);
             }
             if (!admit_register(storage, tx, reason, true, &prior))
+            {
+                return rejected(reason);
+            }
+            if (!flag_outputs_ok(storage, tx, known, &prior, reason) || !apply_flag_tx(staged_flags, tx, next_height, reason))
             {
                 return rejected(reason);
             }
@@ -2061,6 +2332,7 @@ namespace pisecured
             return rejected("malformed transaction");
         }
         save_mempool(storage);
+        g_flags = staged_flags;
         std::cout << "accepted tx " << to_hex(tx.txid) << "\n";
         if (tx.reg)
         {
@@ -2361,10 +2633,12 @@ namespace pisecured
         // The purse spends this block's coinbase. It is not in the UTXO set
         // yet, and it does not have to have been in the last template.
         std::vector<Tx> prior{cb};
+        FlagBook staged_flags = g_flags;
         for (const auto &tx : txs)
         {
             std::string reason;
-            if (!check_spendable(storage, tx, reason, &prior))
+            const Flag *known = staged_flags.find(tx.flag_id);
+            if (!check_spendable(storage, tx, reason, &prior, claim_release(tx, staged_flags, &prior)))
             {
                 return rejected(reason);
             }
@@ -2373,6 +2647,10 @@ namespace pisecured
                 return rejected(reason);
             }
             if (!admit_register(storage, tx, reason, require_local_policy, &prior))
+            {
+                return rejected(reason);
+            }
+            if (!flag_outputs_ok(storage, tx, known, &prior, reason) || !apply_flag_tx(staged_flags, tx, height, reason))
             {
                 return rejected(reason);
             }
@@ -2508,6 +2786,7 @@ namespace pisecured
                 remember_name(tx.name, tx.reg_address, kind, to_hex(tx.txid), !require_local_policy, ignored);
             }
         }
+        g_flags = staged_flags;
         if (!txs.empty())
         {
             save_names(storage.datadir());
@@ -2845,5 +3124,64 @@ namespace pisecured
         load_names_file(storage.datadir());
         std::lock_guard<std::mutex> lock(g_name_mu);
         return name_snapshot_unlocked();
+    }
+
+    json rpc_createflag(Storage &storage, const json &params)
+    {
+        json obj = as_object_param(params);
+        if (!obj.is_object() || obj.value("type", "") != "createflag")
+        {
+            return rejected("malformed transaction");
+        }
+        return rpc_sendtransaction(storage, obj);
+    }
+
+    json rpc_claimflag(Storage &storage, const json &params)
+    {
+        json obj = as_object_param(params);
+        if (!obj.is_object() || obj.value("type", "") != "claimflag")
+        {
+            return rejected("malformed transaction");
+        }
+        return rpc_sendtransaction(storage, obj);
+    }
+
+    json rpc_listflags(Storage &, const json &params)
+    {
+        json obj = as_object_param(params);
+        auto summary = [](const Flag &flag)
+        {
+            return json{{"flag_id", flag.id},
+                        {"max_claims", flag.max_claims},
+                        {"claim_count", flag.claimants.size()},
+                        {"expires_height", flag.expires_height},
+                        {"bounty_units", flag.bounty_units},
+                        {"note", flag.note}};
+        };
+        if (obj.is_object() && obj.contains("flag_id") && obj["flag_id"].is_string())
+        {
+            const Flag *flag = g_flags.find(obj["flag_id"].get<std::string>());
+            if (flag == nullptr)
+            {
+                return json{{"found", false}};
+            }
+            json one = summary(*flag);
+            one["found"] = true;
+            one["commitment"] = flag->commitment;
+            one["awards_pubkey"] = flag->awards_pubkey;
+            one["escrow"] = flag->escrow;
+            one["claimants"] = flag->claimants;
+            return one;
+        }
+        if (obj.is_object() && obj.contains("address") && obj["address"].is_string())
+        {
+            return json{{"flag_ids", g_flags.claimed_by(obj["address"].get<std::string>())}};
+        }
+        json flags = json::array();
+        for (const auto &flag : g_flags.all())
+        {
+            flags.push_back(summary(flag));
+        }
+        return json{{"flags", flags}};
     }
 }

@@ -474,6 +474,24 @@ namespace pisecured
                     throw std::runtime_error("storage not available");
                 result = rpc_sendtransaction(*storage, params);
             }
+            else if (method == "createflag")
+            {
+                if (!storage)
+                    throw std::runtime_error("storage not available");
+                result = rpc_createflag(*storage, params);
+            }
+            else if (method == "claimflag")
+            {
+                if (!storage)
+                    throw std::runtime_error("storage not available");
+                result = rpc_claimflag(*storage, params);
+            }
+            else if (method == "listflags")
+            {
+                if (!storage)
+                    throw std::runtime_error("storage not available");
+                result = rpc_listflags(*storage, params);
+            }
             else if (method == "getblocktemplate")
             {
                 if (!storage)
