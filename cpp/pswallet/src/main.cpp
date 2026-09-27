@@ -1528,39 +1528,77 @@ namespace
             std::cerr << err << "\n";
             return 1;
         }
-        std::vector<Coin> coins;
-        if (!coins_for(src_addr, coins, err, true))
+        json listed;
+        if (!rpc("listunspent", json{{"address", src_addr}}, listed, err))
         {
             std::cerr << err << "\n";
             return 1;
         }
-        std::sort(coins.begin(), coins.end(), [](const Coin &a, const Coin &b)
-                  { return a.units > b.units; });
-        uint64_t confirmed = 0;
-        for (const auto &coin : coins)
+        json pool;
+        if (!rpc("getmempool", json::object(), pool, err))
         {
-            confirmed += coin.units;
+            std::cerr << err << "\n";
+            return 1;
         }
-        std::vector<Coin> chosen;
-        uint64_t sum = 0;
-        if (!coins.empty() && coins.front().units >= pay + fee)
+        std::vector<std::pair<std::string, uint32_t>> reserved_outpoints;
+        for (const auto &tx : pool.value("transactions", json::array()))
         {
-            chosen.push_back(coins.front());
-            sum = coins.front().units;
-        }
-        else
-        {
-            for (const auto &coin : coins)
+            for (const auto &in : tx.value("inputs", json::array()))
             {
-                if (sum >= pay + fee || chosen.size() >= 200)
-                {
-                    break;
-                }
-                chosen.push_back(coin);
-                sum += coin.units;
+                reserved_outpoints.emplace_back(in.value("prev_txid", ""), in.value("vout", 0u));
             }
         }
-        if (confirmed < pay + fee || sum < pay + fee)
+        auto reserved = [&](const std::string &txid, uint32_t vout)
+        {
+            for (const auto &item : reserved_outpoints)
+            {
+                if (item.first == txid && item.second == vout)
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+        std::vector<Coin> available;
+        size_t confirmed_count = 0;
+        size_t reserved_count = 0;
+        for (const auto &row : listed.value("utxos", json::array()))
+        {
+            Coin coin;
+            coin.txid = row.value("txid", "");
+            coin.vout = row.value("vout", 0u);
+            coin.units = row.value("units", 0ull);
+            if (coin.txid.empty() || coin.units == 0)
+            {
+                continue;
+            }
+            ++confirmed_count;
+            if (reserved(coin.txid, coin.vout))
+            {
+                ++reserved_count;
+                continue;
+            }
+            available.push_back(coin);
+        }
+        if (available.empty() && confirmed_count > 0 && reserved_count == confirmed_count)
+        {
+            std::cerr << "coins reserved by an unconfirmed transaction\n";
+            return 1;
+        }
+        std::sort(available.begin(), available.end(), [](const Coin &a, const Coin &b)
+                  { return a.units > b.units; });
+        std::vector<Coin> chosen;
+        uint64_t sum = 0;
+        for (const auto &coin : available)
+        {
+            if (sum >= pay + fee || chosen.size() >= 200)
+            {
+                break;
+            }
+            chosen.push_back(coin);
+            sum += coin.units;
+        }
+        if (sum < pay + fee)
         {
             std::cerr << src << " has no coin covering " << amount << " 314ST plus fee " << fee_text << "\n";
             return 1;
