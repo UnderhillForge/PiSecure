@@ -1171,8 +1171,7 @@ namespace pisecured
         }
         else
         {
-            std::vector<std::string> bootstrapHosts = {"bootstrap.pisecure.org", "bootstrap-testnet.pisecure.org"};
-            addrman_.addBootstrapPeers(bootstrapHosts, cfg.p2p_port);
+            std::cout << "no --peer; discovering peers from bootstrap directory" << std::endl;
         }
 
         // Initialize Bootstrap WebSocket client for Sentinel AI coordination
@@ -1776,13 +1775,17 @@ namespace pisecured
         peer->handshakeComplete = true;
         std::cout << "Handshake complete with " << inet_ntoa(peer->address.addr.sin_addr) << std::endl;
 
-        // Exchange addresses
+        // Exchange addresses, then sync from this peer only.
         sendAddr(peer);
+        exchangeAddresses();
 
-        // Request headers for sync
-        if (peer->startHeight > bestHeight_)
+        if (storage_ && peer->startHeight > bestHeight_)
         {
-            requestHeaders(bestHeight_);
+            std::vector<std::array<uint8_t, 32>> locatorHashes = storage_->get_block_locator_hashes();
+            std::array<uint8_t, 32> hashStop{};
+            auto payload = MessageSerializer::serializeGetHeaders(locatorHashes, hashStop);
+            peer->sendMessage(P2PMsgType::GETHEADERS, payload);
+            std::cout << "Requested headers from " << inet_ntoa(peer->address.addr.sin_addr) << std::endl;
         }
     }
 
@@ -1791,11 +1794,19 @@ namespace pisecured
         std::vector<PeerAddr> addrs;
         if (MessageSerializer::deserializeAddr(payload, addrs))
         {
+            std::vector<std::pair<std::string, int>> learned;
             for (const auto &addr : addrs)
             {
                 addrman_.add(addr);
+                char host[INET_ADDRSTRLEN] = {};
+                if (inet_ntop(AF_INET, &addr.addr.sin_addr, host, sizeof(host)) == nullptr)
+                {
+                    continue;
+                }
+                learned.emplace_back(host, ntohs(addr.addr.sin_port));
             }
             std::cout << "Received " << addrs.size() << " addresses from peer" << std::endl;
+            dialDirectoryPeers(learned);
         }
     }
 
@@ -1996,7 +2007,20 @@ namespace pisecured
             // run later, on the full block.
             if (prev_header && header.prevBlockHash != prev_header->hash)
             {
-                std::cout << "Invalid header chain at height " << header.height << std::endl;
+                auto hex8 = [](const std::array<uint8_t, 32> &bytes)
+                {
+                    static const char *hexd = "0123456789abcdef";
+                    std::string out(16, '0');
+                    for (size_t i = 0; i < 8; ++i)
+                    {
+                        out[i * 2] = hexd[bytes[i] >> 4];
+                        out[i * 2 + 1] = hexd[bytes[i] & 0x0f];
+                    }
+                    return out;
+                };
+                std::cout << "Invalid header chain at height " << header.height
+                          << " prev " << hex8(header.prevBlockHash)
+                          << " expected " << hex8(prev_header->hash) << std::endl;
                 peer->recvBuffer.clear();
                 disconnectPeer(peer, "invalid header chain");
                 return;
@@ -2504,6 +2528,83 @@ namespace pisecured
         return true;
     }
 
+    bool P2PServer::privateUnicastHost(const std::string &host) const
+    {
+        in_addr parsed{};
+        if (inet_pton(AF_INET, host.c_str(), &parsed) != 1)
+        {
+            return false;
+        }
+        const uint32_t value = ntohl(parsed.s_addr);
+        if ((value & 0xFF000000u) == 0x0A000000u)
+        {
+            return true;
+        }
+        if ((value & 0xFFF00000u) == 0xAC100000u)
+        {
+            return true;
+        }
+        return (value & 0xFFFF0000u) == 0xC0A80000u;
+    }
+
+    bool P2PServer::onSamePrivateNetwork(const std::string &host) const
+    {
+        in_addr peer{};
+        if (inet_pton(AF_INET, host.c_str(), &peer) != 1)
+        {
+            return false;
+        }
+        const uint32_t peerHost = ntohl(peer.s_addr);
+        ifaddrs *list = nullptr;
+        if (getifaddrs(&list) != 0)
+        {
+            return false;
+        }
+        bool same = false;
+        for (ifaddrs *ifa = list; ifa != nullptr; ifa = ifa->ifa_next)
+        {
+            if (ifa->ifa_addr == nullptr || ifa->ifa_netmask == nullptr || ifa->ifa_addr->sa_family != AF_INET)
+            {
+                continue;
+            }
+            if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0)
+            {
+                continue;
+            }
+            const uint32_t local = ntohl(reinterpret_cast<sockaddr_in *>(ifa->ifa_addr)->sin_addr.s_addr);
+            const uint32_t mask = ntohl(reinterpret_cast<sockaddr_in *>(ifa->ifa_netmask)->sin_addr.s_addr);
+            if (mask != 0 && (local & mask) == (peerHost & mask))
+            {
+                same = true;
+                break;
+            }
+        }
+        freeifaddrs(list);
+        return same;
+    }
+
+    bool P2PServer::shouldDial(const std::string &host, int port) const
+    {
+        if (port <= 0 || port > 65535 || host.empty() || host == "0.0.0.0" || host == "::" || host == "127.0.0.1" || host == "::1")
+        {
+            return false;
+        }
+        if (host == "bootstrap.pisecure.org" || host == "bootstrap-testnet.pisecure.org")
+        {
+            return false;
+        }
+        const AdvertisedP2P self = advertisedP2P();
+        if (host == self.host || host == reachableHost())
+        {
+            return false;
+        }
+        if (publicUnicastHost(host))
+        {
+            return true;
+        }
+        return privateUnicastHost(host) && onSamePrivateNetwork(host);
+    }
+
     bool P2PServer::connectedTo(const std::string &host, int port) const
     {
         in_addr parsed{};
@@ -2525,8 +2626,6 @@ namespace pisecured
 
     void P2PServer::dialDirectoryPeers(const std::vector<std::pair<std::string, int>> &targets)
     {
-        const AdvertisedP2P self = advertisedP2P();
-        const std::string lan = reachableHost();
         for (const auto &target : targets)
         {
             if (getOutboundCount() >= MAX_OUTBOUND_CONNECTIONS)
@@ -2535,19 +2634,7 @@ namespace pisecured
             }
             const std::string &host = target.first;
             const int port = target.second;
-            if (port <= 0 || port > 65535 || host.empty() || host == "0.0.0.0" || host == "::" || host == "127.0.0.1" || host == "::1")
-            {
-                continue;
-            }
-            if (host == "bootstrap.pisecure.org" || host == "bootstrap-testnet.pisecure.org")
-            {
-                continue;
-            }
-            if (host == self.host || host == lan)
-            {
-                continue;
-            }
-            if (connectedTo(host, port))
+            if (!shouldDial(host, port) || connectedTo(host, port))
             {
                 continue;
             }
@@ -2840,7 +2927,7 @@ namespace pisecured
         if (!advertised.host.empty())
         {
             const char *base = config_.testnet ? "https://bootstrap-testnet.pisecure.org" : "https://bootstrap.pisecure.org";
-            const json body = {{"host", advertised.host}, {"port", advertised.port}};
+            const json body = {{"host", advertised.host}, {"port", 3141}};
             std::string response;
             const int code = bootstrapHttp("POST", std::string(base) + "/api/v1/nodes/probe", body.dump(), response);
             if (code == 200)
@@ -3069,7 +3156,6 @@ namespace pisecured
             const std::string self = reachableHost();
             std::vector<std::pair<std::string, int>> hints;
             std::vector<std::pair<std::string, int>> preferred;
-            std::vector<std::pair<std::string, int>> others;
             std::vector<std::pair<std::string, int>> dialable;
             auto absorb = [&](const std::string &payload)
             {
@@ -3142,10 +3228,7 @@ namespace pisecured
                     {
                         preferred.emplace_back(hintHost, hintPort);
                     }
-                    else if (!specified)
-                    {
-                        others.emplace_back(hintHost, hintPort);
-                    }
+                    (void)specified;
                 }
             };
             auto pushUnique = [](std::vector<std::pair<std::string, int>> &dest, const std::vector<std::pair<std::string, int>> &src)
@@ -3161,29 +3244,27 @@ namespace pisecured
                 }
             };
             std::string peersBody;
-            if (bootstrapHttp("GET", std::string(base) + "/api/v1/bootstrap/peers?inbound=1", "", peersBody) == 200)
+            const int code = bootstrapHttp("GET", std::string(base) + "/api/v1/bootstrap/peers?inbound=1", "", peersBody);
+            if (code != 200)
             {
-                try
-                {
-                    absorb(peersBody);
-                }
-                catch (const std::exception &)
-                {
-                }
+                std::cerr << "bootstrap peers failed HTTP " << code << std::endl;
+                return;
             }
-            std::string listBody;
-            if (bootstrapHttp("GET", std::string(base) + "/api/v1/nodes/list", "", listBody) == 200)
+            try
             {
-                try
-                {
-                    absorb(listBody);
-                }
-                catch (const std::exception &)
-                {
-                }
+                absorb(peersBody);
+            }
+            catch (const std::exception &ex)
+            {
+                std::cerr << "bootstrap peers failed parse: " << ex.what() << std::endl;
+                return;
+            }
+            if (preferred.empty())
+            {
+                std::cerr << "bootstrap peers returned no inbound peer " << peersBody << std::endl;
+                return;
             }
             pushUnique(dialable, preferred);
-            pushUnique(dialable, others);
             {
                 std::lock_guard<std::mutex> lock(hintMutex_);
                 bootstrapHints_ = hints;
@@ -3213,12 +3294,18 @@ namespace pisecured
         }
         auto nextStatus = std::chrono::steady_clock::now() + std::chrono::seconds(300);
         auto nextProbe = std::chrono::steady_clock::now() + std::chrono::seconds(3600);
+        auto nextExchange = std::chrono::steady_clock::now() + std::chrono::seconds(60);
         while (running_)
         {
             sleepWhileRunning(std::chrono::seconds(30));
             if (!running_)
             {
                 break;
+            }
+            if (std::chrono::steady_clock::now() >= nextExchange)
+            {
+                exchangeAddresses();
+                nextExchange = std::chrono::steady_clock::now() + std::chrono::seconds(60);
             }
             if (std::chrono::steady_clock::now() >= nextProbe)
             {
@@ -3279,6 +3366,33 @@ namespace pisecured
             std::cout << "   Monitoring network behavior" << std::endl;
             // TODO: Increase monitoring frequency
         }
+    }
+
+    void P2PServer::exchangeAddresses()
+    {
+        std::vector<std::shared_ptr<Peer>> current;
+        {
+            std::lock_guard<std::mutex> lock(peersMutex_);
+            current = peers_;
+        }
+        for (const auto &peer : current)
+        {
+            if (peer->handshakeComplete && peer->fd >= 0)
+            {
+                sendAddr(peer);
+            }
+        }
+        std::vector<std::pair<std::string, int>> learned;
+        for (const auto &addr : addrman_.getMany(32))
+        {
+            char host[INET_ADDRSTRLEN] = {};
+            if (inet_ntop(AF_INET, &addr.addr.sin_addr, host, sizeof(host)) == nullptr)
+            {
+                continue;
+            }
+            learned.emplace_back(host, ntohs(addr.addr.sin_port));
+        }
+        dialDirectoryPeers(learned);
     }
 
     void P2PServer::onBootstrapPeerDiscovery(const std::vector<PeerAddr> &peers)

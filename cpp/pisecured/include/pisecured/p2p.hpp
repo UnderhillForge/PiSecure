@@ -338,9 +338,13 @@ namespace pisecured
         };
         AdvertisedP2P advertisedP2P() const;
         bool publicUnicastHost(const std::string &host) const;
+        bool privateUnicastHost(const std::string &host) const;
+        bool onSamePrivateNetwork(const std::string &host) const;
+        bool shouldDial(const std::string &host, int port) const;
         bool isOwnAddress(uint32_t addr) const;
         bool connectedTo(const std::string &host, int port) const;
         void dialDirectoryPeers(const std::vector<std::pair<std::string, int>> &targets);
+        void exchangeAddresses();
         void loadBootstrapNodeId();
         void probeAdvertisedP2P();
         void registerBootstrapNode();

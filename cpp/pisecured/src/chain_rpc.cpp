@@ -2539,10 +2539,10 @@ namespace pisecured
                 txs.push_back(tx);
             }
         }
-        // A miner that already has a confirmed output must fold it with this
-        // block's coinbase. An empty list is not stored. Blocks already on
-        // disk are restored without this check.
-        if (txs.empty() && !storage.list_utxos(payout).empty())
+        // A block this node mines must fold a confirmed output into the purse.
+        // Historical blocks, including ones learned from a peer, are accepted
+        // as stored. Restore does not run this check.
+        if (require_local_policy && txs.empty() && !storage.list_utxos(payout).empty())
         {
             return rejected("purse missing");
         }
