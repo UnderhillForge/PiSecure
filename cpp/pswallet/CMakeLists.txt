@@ -39,7 +39,7 @@ set(PSWALLET_SOURCES
 
 # Main executable
 add_executable(pswallet ${PSWALLET_SOURCES})
-target_compile_definitions(pswallet PRIVATE PSWALLET_VERSION="${PROJECT_VERSION}" PISECURE_RELEASE="0.2.10")
+target_compile_definitions(pswallet PRIVATE PSWALLET_VERSION="${PROJECT_VERSION}" PISECURE_RELEASE="0.2.11")
 
 target_link_libraries(pswallet
     Threads::Threads
@@ -59,7 +59,7 @@ if(BUILD_TESTS)
 endif()
 
 # Release optimizations
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
+if(CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT CMAKE_CROSSCOMPILING)
     set_target_properties(pswallet PROPERTIES
         COMPILE_FLAGS "-O3 -march=native -DNDEBUG"
     )

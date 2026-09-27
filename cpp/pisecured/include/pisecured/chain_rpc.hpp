@@ -25,7 +25,7 @@ namespace pisecured
     constexpr uint64_t kValidatorUnits = 2;
 
     // 7% of transaction fees. Stakers, loans, and burn are unchanged.
-    inline constexpr char kFoundationPayout[] = "ps1a404246a1e6154e96bd02728fe1a988ae2abe6c6609426e2da7b71ab3dccb4f7";
+    inline constexpr char kFoundationPayout[] = "ps1522db177e6452cbb6e48f296b19e6f2bdeb5b5e7a41a9552eb60a01464c3a5ba";
 
     // One transaction as JSON, including the public key and signature on
     // every input. At most 200 inputs. Anything larger is rejected whole,
