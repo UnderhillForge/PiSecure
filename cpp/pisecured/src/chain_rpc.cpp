@@ -16,7 +16,7 @@
 #include <fstream>
 #include <iostream>
 #include <mutex>
-#include <unordered_set>
+#include <unordered_map>
 #include <utility>
 
 namespace pisecured
@@ -1059,25 +1059,80 @@ namespace pisecured
             return hex;
         }
 
-        std::mutex g_challenge_mu;
-        std::unordered_set<std::string> g_challenges;
+        // One challenge per tip, merkle root, and miner. A poll of the same
+        // template reuses it. A new one is issued when the tip or merkle
+        // changes, or when this one is 15 minutes old. Accepting a block
+        // retires the challenge it carried.
+        constexpr uint64_t kChallengeTtlSeconds = 15 * 60;
 
-        std::string issue_challenge()
+        struct IssuedChallenge
         {
+            std::string hex;
+            uint64_t issued_at = 0;
+        };
+
+        std::mutex g_challenge_mu;
+        std::unordered_map<std::string, uint64_t> g_challenges;
+        std::unordered_map<std::string, IssuedChallenge> g_outstanding;
+
+        bool challenge_expired(uint64_t issued_at, uint64_t now)
+        {
+            return now >= issued_at && now - issued_at >= kChallengeTtlSeconds;
+        }
+
+        void prune_challenges_locked(uint64_t now)
+        {
+            for (auto it = g_challenges.begin(); it != g_challenges.end();)
+            {
+                if (challenge_expired(it->second, now))
+                {
+                    it = g_challenges.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+            for (auto it = g_outstanding.begin(); it != g_outstanding.end();)
+            {
+                if (challenge_expired(it->second.issued_at, now))
+                {
+                    it = g_outstanding.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+        }
+
+        std::string challenge_for_template(const std::string &tip, const std::string &merkle, const std::string &miner)
+        {
+            const uint64_t now = now_seconds();
+            const std::string key = tip + "|" + merkle + "|" + miner;
+            std::lock_guard<std::mutex> lock(g_challenge_mu);
+            prune_challenges_locked(now);
+            const auto found = g_outstanding.find(key);
+            if (found != g_outstanding.end())
+            {
+                return found->second.hex;
+            }
             std::array<uint8_t, 32> raw{};
             if (RAND_bytes(raw.data(), static_cast<int>(raw.size())) != 1)
             {
                 return {};
             }
             const std::string hex = to_hex(raw);
-            std::lock_guard<std::mutex> lock(g_challenge_mu);
-            g_challenges.insert(hex);
+            g_challenges[hex] = now;
+            g_outstanding.emplace(key, IssuedChallenge{hex, now});
             return hex;
         }
 
         bool challenge_was_issued(const std::string &hex)
         {
+            const uint64_t now = now_seconds();
             std::lock_guard<std::mutex> lock(g_challenge_mu);
+            prune_challenges_locked(now);
             return g_challenges.find(hex) != g_challenges.end();
         }
 
@@ -1085,6 +1140,17 @@ namespace pisecured
         {
             std::lock_guard<std::mutex> lock(g_challenge_mu);
             g_challenges.erase(hex);
+            for (auto it = g_outstanding.begin(); it != g_outstanding.end();)
+            {
+                if (it->second.hex == hex)
+                {
+                    it = g_outstanding.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
         }
 
         bool pi_serial_text(const std::string &serial)
@@ -2287,7 +2353,7 @@ namespace pisecured
             {"hw_proof", next_height >= 4
                              ? json{{"model", ""},
                                    {"serial_commitment", ""},
-                                   {"challenge", issue_challenge()},
+                                   {"challenge", challenge_for_template(to_hex(prev), to_hex(root), payout)},
                                    {"serial_rule", "sha256(serial_utf8 || challenge_bytes)"}}
                              : json{{"model", ""}, {"serial_commitment", ""}}},
             {"pihash", next_height >= 5
