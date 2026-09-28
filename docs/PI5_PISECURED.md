@@ -286,7 +286,7 @@ The preimage is the same layout with domain `PiHash2`. `submitblock` rejects a h
 
 ## Height 4 serial binding
 
-Blocks 1–3 stay valid with the old rule: `serial_commitment` is any 32 non-zero bytes. From height 4, `getblocktemplate` returns one challenge for the same tip, merkle root, and miner. A later poll reuses it until a block carrying it is accepted or it is 15 minutes old. The template does not fill the serial:
+Blocks 1–3 stay valid with the old rule: `serial_commitment` is any 32 non-zero bytes. From height 4, `getblocktemplate` returns one challenge for the same tip, merkle root, and miner. A later poll reuses it until a block carrying it is accepted or the tip or merkle root changes. The template does not fill the serial:
 
 ```json
 "hw_proof": {
@@ -301,7 +301,7 @@ Blocks 1–3 stay valid with the old rule: `serial_commitment` is any 32 non-zer
 
 `serial_commitment = hex(SHA256(utf8(serial) || raw 32-byte challenge))`.
 
-The challenge has to be one this process issued and that is still inside that 15 minutes. `submitblock` still accepts that challenge after another poll of the same template. PiHash1 is unchanged: its preimage still ends with the model and the 32-byte commitment, not the serial plaintext. The accepted block JSON stores `challenge`, `serial`, and `serial_commitment` so a later check does not need the template cache.
+The challenge has to be one this process issued for this tip. `submitblock` accepts that challenge after another poll of the same work. A challenge this process never issued for this tip is `hw_proof challenge mismatch`. PiHash1 is unchanged: its preimage still ends with the model and the 32-byte commitment, not the serial plaintext. The accepted block JSON stores `challenge`, `serial`, and `serial_commitment` so a later check does not need the template cache.
 
 ## Spending keys
 

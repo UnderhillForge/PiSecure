@@ -1,6 +1,6 @@
 # PiSecure
 
-PiSecure is a low-power chain for Raspberry Pi. A new block pays **0.218 314ST** (miner 0.216, validator 0.002). From block 32 the validator output is a ps1; if `getblocktemplate` omits `validator`, that address is Foundation. v0.2.13 reuses one hw_proof challenge for the same tip, merkle root, and miner for 15 minutes. Difficulty starts at 4 bits and retargets in the band 2–24. Official Pi 2, 3, 4, and 5 can mine. Any CPU can validate.
+PiSecure is a low-power chain for Raspberry Pi. A new block pays **0.218 314ST** (miner 0.216, validator 0.002). From block 32 the validator output is a ps1; if `getblocktemplate` omits `validator`, that address is Foundation. v0.2.13 reuses one hw_proof challenge for the same tip, merkle root, and miner until that block is accepted or the work changes. Difficulty starts at 4 bits and retargets in the band 2–24. Official Pi 2, 3, 4, and 5 can mine. Any CPU can validate.
 
 ## Install
 

@@ -1060,31 +1060,20 @@ namespace pisecured
         }
 
         // One challenge per tip, merkle root, and miner. A poll of the same
-        // template reuses it. A new one is issued when the tip or merkle
-        // changes, or when this one is 15 minutes old. Accepting a block
-        // retires the challenge it carried.
-        constexpr uint64_t kChallengeTtlSeconds = 15 * 60;
-
-        struct IssuedChallenge
-        {
-            std::string hex;
-            uint64_t issued_at = 0;
-        };
-
+        // work returns it again. A new one is issued only when the tip or the
+        // merkle root changes. Accepting a block retires every challenge
+        // issued for that tip. There is no timer.
         std::mutex g_challenge_mu;
-        std::unordered_map<std::string, uint64_t> g_challenges;
-        std::unordered_map<std::string, IssuedChallenge> g_outstanding;
+        // challenge hex -> tip (prev-block hash) it was issued for
+        std::unordered_map<std::string, std::string> g_challenges;
+        // tip|merkle|miner -> challenge hex
+        std::unordered_map<std::string, std::string> g_outstanding;
 
-        bool challenge_expired(uint64_t issued_at, uint64_t now)
-        {
-            return now >= issued_at && now - issued_at >= kChallengeTtlSeconds;
-        }
-
-        void prune_challenges_locked(uint64_t now)
+        void forget_tip_locked(const std::string &tip)
         {
             for (auto it = g_challenges.begin(); it != g_challenges.end();)
             {
-                if (challenge_expired(it->second, now))
+                if (it->second == tip)
                 {
                     it = g_challenges.erase(it);
                 }
@@ -1093,9 +1082,10 @@ namespace pisecured
                     ++it;
                 }
             }
+            const std::string prefix = tip + "|";
             for (auto it = g_outstanding.begin(); it != g_outstanding.end();)
             {
-                if (challenge_expired(it->second.issued_at, now))
+                if (it->first.compare(0, prefix.size(), prefix) == 0)
                 {
                     it = g_outstanding.erase(it);
                 }
@@ -1108,14 +1098,12 @@ namespace pisecured
 
         std::string challenge_for_template(const std::string &tip, const std::string &merkle, const std::string &miner)
         {
-            const uint64_t now = now_seconds();
             const std::string key = tip + "|" + merkle + "|" + miner;
             std::lock_guard<std::mutex> lock(g_challenge_mu);
-            prune_challenges_locked(now);
             const auto found = g_outstanding.find(key);
             if (found != g_outstanding.end())
             {
-                return found->second.hex;
+                return found->second;
             }
             std::array<uint8_t, 32> raw{};
             if (RAND_bytes(raw.data(), static_cast<int>(raw.size())) != 1)
@@ -1123,34 +1111,28 @@ namespace pisecured
                 return {};
             }
             const std::string hex = to_hex(raw);
-            g_challenges[hex] = now;
-            g_outstanding.emplace(key, IssuedChallenge{hex, now});
+            g_challenges[hex] = tip;
+            g_outstanding.emplace(key, hex);
             return hex;
         }
 
-        bool challenge_was_issued(const std::string &hex)
+        bool challenge_was_issued(const std::string &hex, const std::string &tip)
         {
-            const uint64_t now = now_seconds();
             std::lock_guard<std::mutex> lock(g_challenge_mu);
-            prune_challenges_locked(now);
-            return g_challenges.find(hex) != g_challenges.end();
+            const auto found = g_challenges.find(hex);
+            return found != g_challenges.end() && found->second == tip;
         }
 
         void retire_challenge(const std::string &hex)
         {
             std::lock_guard<std::mutex> lock(g_challenge_mu);
-            g_challenges.erase(hex);
-            for (auto it = g_outstanding.begin(); it != g_outstanding.end();)
+            const auto found = g_challenges.find(hex);
+            if (found == g_challenges.end())
             {
-                if (it->second.hex == hex)
-                {
-                    it = g_outstanding.erase(it);
-                }
-                else
-                {
-                    ++it;
-                }
+                return;
             }
+            const std::string tip = found->second;
+            forget_tip_locked(tip);
         }
 
         bool pi_serial_text(const std::string &serial)
@@ -2586,7 +2568,7 @@ namespace pisecured
             }
             challenge_hex = lower_hex(proof["challenge"].get<std::string>());
             std::array<uint8_t, 32> challenge_raw{};
-            if (!from_hex(challenge_hex, challenge_raw) || (require_local_policy && !challenge_was_issued(challenge_hex)))
+            if (!from_hex(challenge_hex, challenge_raw) || (require_local_policy && !challenge_was_issued(challenge_hex, to_hex(prev))))
             {
                 return rejected("hw_proof challenge mismatch");
             }
