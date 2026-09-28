@@ -1,15 +1,15 @@
 # PiSecure
 
-PiSecure is a low-power chain for Raspberry Pi. A new block pays **0.218 314ST** (miner 0.216, validator 0.002). From block 32 the validator output is a ps1; if `getblocktemplate` omits `validator`, that address is Foundation. v0.2.15 keeps one hw_proof challenge for the same tip, merkle root, and miner until that block is accepted or the work changes. psminer keeps hashing the next nonce while that template stays the same. Difficulty starts at 4 bits and retargets in the band 2–24. Official Pi 2, 3, 4, and 5 can mine. Any CPU can validate.
+PiSecure is a low-power chain for Raspberry Pi. A new block pays **0.218 314ST** (miner 0.216, validator 0.002). From block 32 the validator output is a ps1; if `getblocktemplate` omits `validator`, that address is Foundation. v0.2.16 keeps one hw_proof challenge for the same tip, merkle root, and miner until that block is accepted or the work changes. A template is stamped one second after the parent when the node clock is still in that same second. psminer keeps hashing the next nonce while that template stays the same, and it opens a new socket when the node connection drops. Difficulty starts at 4 bits and retargets in the band 2–24. Official Pi 2, 3, 4, and 5 can mine. Any CPU can validate.
 
 ## Install
 
-Download the v0.2.15 archive from this repo's GitHub Releases and check the sha256 printed on that release:
+Download the v0.2.16 archive from this repo's GitHub Releases and check the sha256 printed on that release:
 
 ```bash
-curl -fL -O https://github.com/UnderhillForge/PiSecure/releases/download/v0.2.15/pisecure-pi5-v0.2.15-aarch64.tar.gz
-sha256sum pisecure-pi5-v0.2.15-aarch64.tar.gz
-tar -xzf pisecure-pi5-v0.2.15-aarch64.tar.gz
+curl -fL -O https://github.com/UnderhillForge/PiSecure/releases/download/v0.2.16/pisecure-pi5-v0.2.16-aarch64.tar.gz
+sha256sum pisecure-pi5-v0.2.16-aarch64.tar.gz
+tar -xzf pisecure-pi5-v0.2.16-aarch64.tar.gz
 sudo install -d /opt/pisecure
 sudo install -m 0755 pisecured pswallet psminer /opt/pisecure/
 sudo cp deploy/pisecured.service /etc/systemd/system/pisecured.service
@@ -20,7 +20,7 @@ sudo systemctl daemon-reload
 
 There is no Docker install and no mock-hardware mode.
 
-An x86_64 archive is [pisecure-v0.2.15-x86_64.tar.gz](https://github.com/UnderhillForge/PiSecure/releases/download/v0.2.15/pisecure-v0.2.15-x86_64.tar.gz). It contains `pisecured`, `pswallet`, and `psminer`. `psminer` exits unless the machine is an official Raspberry Pi. Run the daemon with `--validate-only`. The first start writes a new node id in the data directory. Do not copy that file, `/etc/pisecure/pisecure.env`, or `blk*.dat` onto another machine.
+An x86_64 archive is [pisecure-v0.2.16-x86_64.tar.gz](https://github.com/UnderhillForge/PiSecure/releases/download/v0.2.16/pisecure-v0.2.16-x86_64.tar.gz). It contains `pisecured`, `pswallet`, and `psminer`. `psminer` exits unless the machine is an official Raspberry Pi. Run the daemon with `--validate-only`. The first start writes a new node id in the data directory. Do not copy that file, `/etc/pisecure/pisecure.env`, or `blk*.dat` onto another machine.
 
 An extra node that can accept inbound port 3141 is dialed by nodes that already have the chain. Bootstrap only introduces addresses. Blocks are not downloaded over HTTPS.
 

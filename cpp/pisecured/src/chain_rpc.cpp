@@ -2321,11 +2321,29 @@ namespace pisecured
         const auto root = merkle_root(ids);
         json coinbase = coinbase_body(shown, next_height, emit, cb, cb_outs);
 
+        // Same-second templates are not strictly after the parent, and the miner
+        // keeps that stamp for the whole job. Step one second past the parent
+        // when the node clock still allows it.
+        uint64_t stamp = now_seconds();
+        if (tipped)
+        {
+            const auto parent = storage.get_header_by_hash(prev);
+            if (parent && stamp <= parent->timestamp)
+            {
+                const uint64_t next = parent->timestamp + 1;
+                if (next > stamp + 120)
+                {
+                    return rejected("clock behind tip");
+                }
+                stamp = next;
+            }
+        }
+
         return json{
             {"version", 1},
             {"height", next_height},
             {"prev_block_hash", to_hex(prev)},
-            {"timestamp", now_seconds()},
+            {"timestamp", stamp},
             {"difficulty", difficulty},
             {"subsidy_units", emit.subsidy},
             {"coinbase", coinbase},
