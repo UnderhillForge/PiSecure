@@ -16,7 +16,7 @@ sudo cp deploy/pisecured.service /etc/systemd/system/pisecured.service
 sudo systemctl daemon-reload
 ```
 
-`install-oneclick.sh` does the same download for the latest aarch64 or x86_64 release. It does not compile the tree and it does not copy a data directory.
+`install-oneclick.sh` does the same download for the latest aarch64 or x86_64 release. It installs ca-certificates, curl, python3, the OpenSSL and curl runtime libraries, and any shared library `ldd` still reports missing. It creates the `pisecure` user and `/var/lib/pisecure`. It does not compile the tree, copy a data directory, or start the daemon.
 
 There is no Docker install and no mock-hardware mode.
 
