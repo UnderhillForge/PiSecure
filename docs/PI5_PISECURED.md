@@ -347,7 +347,7 @@ Miner:
 - The daemon does not mine. Mining is the separate `psminer` release binary.
 - With no `--peer`, DNS still resolves `bootstrap.pisecure.org` onto P2P port 3141. Directory `p2p_host:p2p_port` values are hints. Blocks are not downloaded over HTTPS.
 
-Left untouched on purpose: PiHash2, hw_proof, Ed25519 spend checks, namelookup, and the `blk*.dat` layout. v0.2.12 keeps difficulty activation height 1. From block 32 the miner subsidy is 216 units and the validator 2 units go to a ps1, Foundation when `validator` is omitted. The 7% foundation fee share is paid to `ps1522db177e6452cbb6e48f296b19e6f2bdeb5b5e7a41a9552eb60a01464c3a5ba` only when that share is at least 1 unit. Accepted spends are reloaded from `mempool.json`. A mined block keeps those spends.
+Left untouched on purpose: PiHash2, hw_proof, Ed25519 spend checks, namelookup, and the `blk*.dat` layout. v0.2.13 keeps difficulty activation height 1. From block 32 the miner subsidy is 216 units and the validator 2 units go to a ps1, Foundation when `validator` is omitted. The 7% foundation fee share is paid to `ps1522db177e6452cbb6e48f296b19e6f2bdeb5b5e7a41a9552eb60a01464c3a5ba` only when that share is at least 1 unit. Accepted spends are reloaded from `mempool.json`. A mined block keeps those spends.
 
 ## Name backup
 

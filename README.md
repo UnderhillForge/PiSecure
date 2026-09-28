@@ -1,15 +1,15 @@
 # PiSecure
 
-PiSecure is a low-power chain for Raspberry Pi. A new block pays **0.218 314ST** (miner 0.216, validator 0.002). From block 32 the validator output is a ps1; if `getblocktemplate` omits `validator`, that address is Foundation. v0.2.12 starts difficulty at 4 bits and retargets in the band 2–24. Official Pi 2, 3, 4, and 5 can mine. Any CPU can validate.
+PiSecure is a low-power chain for Raspberry Pi. A new block pays **0.218 314ST** (miner 0.216, validator 0.002). From block 32 the validator output is a ps1; if `getblocktemplate` omits `validator`, that address is Foundation. v0.2.13 reuses one hw_proof challenge for the same tip, merkle root, and miner for 15 minutes. Difficulty starts at 4 bits and retargets in the band 2–24. Official Pi 2, 3, 4, and 5 can mine. Any CPU can validate.
 
 ## Install
 
-Download the v0.2.12 archive from this repo's GitHub Releases and check the sha256 printed on that release:
+Download the v0.2.13 archive from this repo's GitHub Releases and check the sha256 printed on that release:
 
 ```bash
-curl -fL -O https://github.com/UnderhillForge/PiSecure/releases/download/v0.2.12/pisecure-pi5-v0.2.12-aarch64.tar.gz
-sha256sum pisecure-pi5-v0.2.12-aarch64.tar.gz
-tar -xzf pisecure-pi5-v0.2.12-aarch64.tar.gz
+curl -fL -O https://github.com/UnderhillForge/PiSecure/releases/download/v0.2.13/pisecure-pi5-v0.2.13-aarch64.tar.gz
+sha256sum pisecure-pi5-v0.2.13-aarch64.tar.gz
+tar -xzf pisecure-pi5-v0.2.13-aarch64.tar.gz
 sudo install -d /opt/pisecure
 sudo install -m 0755 pisecured pswallet psminer /opt/pisecure/
 sudo cp deploy/pisecured.service /etc/systemd/system/pisecured.service
@@ -20,7 +20,7 @@ sudo systemctl daemon-reload
 
 There is no Docker install and no mock-hardware mode.
 
-An x86_64 archive is [pisecure-v0.2.12-x86_64.tar.gz](https://github.com/UnderhillForge/PiSecure/releases/download/v0.2.12/pisecure-v0.2.12-x86_64.tar.gz). It contains `pisecured` and `pswallet`. Run the daemon with `--validate-only`. The first start writes a new node id in the data directory. Do not copy that file, `/etc/pisecure/pisecure.env`, or `blk*.dat` onto another machine.
+An x86_64 archive is [pisecure-v0.2.13-x86_64.tar.gz](https://github.com/UnderhillForge/PiSecure/releases/download/v0.2.13/pisecure-v0.2.13-x86_64.tar.gz). It contains `pisecured` and `pswallet`. Run the daemon with `--validate-only`. The first start writes a new node id in the data directory. Do not copy that file, `/etc/pisecure/pisecure.env`, or `blk*.dat` onto another machine.
 
 An extra node that can accept inbound port 3141 is dialed by nodes that already have the chain. Bootstrap only introduces addresses. Blocks are not downloaded over HTTPS.
 
