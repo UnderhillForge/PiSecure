@@ -1,6 +1,7 @@
 #pragma once
 
 #include "storage.hpp"
+#include "amount.hpp"
 #include <nlohmann/json.hpp>
 #include <array>
 #include <string>
@@ -27,11 +28,125 @@ namespace pisecured
     constexpr uint32_t kMiner216ActivationHeight = 32;
     constexpr uint64_t kLegacyMinerSubsidy = 198;
 
-    // 1 unit = 0.001 314ST. From block 32 the subsidy is 0.218 314ST.
+    // 1 unit = 0.001 314ST = 1000 pi. From block 32 the subsidy is 0.218 314ST.
     // Miner receives subsidy minus the validator 2 units (216).
     constexpr uint64_t kSubsidyUnits = 200;
     constexpr uint64_t kSubsidyUnitsAfterActivation = 218;
     constexpr uint64_t kValidatorUnits = 2;
+
+    // Tip 674 on 2026-10-01. The next multiple of 1000 that is at least 2000
+    // blocks above that tip is 3000. Below this height a stored amount is the
+    // old unit. At and after it, a new block stores pi. 1 314ST = 1000000 pi.
+    // The 218-unit subsidy is 218000 pi: miner 216000, validator 2000.
+    constexpr uint32_t kPiActivationHeight = 3000;
+    constexpr uint64_t kPiPerOldUnit = 1000;
+    constexpr uint64_t kSubsidyPi = 218000;
+    constexpr uint64_t kValidatorPi = 2000;
+    constexpr uint64_t kMinFeePi = 314;
+
+    inline uint64_t subsidy_for_height(uint32_t height)
+    {
+        if (height >= kPiActivationHeight)
+        {
+            return kSubsidyPi;
+        }
+        if (height >= kMiner216ActivationHeight)
+        {
+            return kSubsidyUnitsAfterActivation;
+        }
+        return kSubsidyUnits;
+    }
+
+    inline uint64_t validator_for_height(uint32_t height)
+    {
+        return height >= kPiActivationHeight ? kValidatorPi : kValidatorUnits;
+    }
+
+    inline uint64_t miner_subsidy_for_height(uint32_t height)
+    {
+        return subsidy_for_height(height) - validator_for_height(height);
+    }
+
+    inline uint64_t min_fee_for_height(uint32_t height)
+    {
+        return height >= kPiActivationHeight ? kMinFeePi : 1;
+    }
+
+    // Scale of the next block. 1 while that block is below H, 1000 at and after H.
+    inline uint32_t amount_scale_for_next(uint32_t next_height)
+    {
+        return next_height >= kPiActivationHeight ? static_cast<uint32_t>(kPiPerOldUnit) : 1u;
+    }
+
+    // A pre-H output spends as stored * 1000 pi. A post-H output is already pi.
+    inline bool stored_to_pi(uint64_t stored, uint32_t created_height, uint64_t &pi)
+    {
+        if (created_height >= kPiActivationHeight)
+        {
+            pi = stored;
+            return true;
+        }
+        if (stored > UINT64_MAX / kPiPerOldUnit)
+        {
+            return false;
+        }
+        pi = stored * kPiPerOldUnit;
+        return true;
+    }
+
+    struct FeeShares
+    {
+        uint64_t miner = 0;
+        uint64_t stakers = 0;
+        uint64_t loans = 0;
+        uint64_t foundation = 0;
+        uint64_t burn = 0;
+    };
+
+    inline FeeShares fee_shares(uint64_t fee)
+    {
+        FeeShares shares;
+        shares.miner = fee * 60 / 100;
+        shares.stakers = fee * 20 / 100;
+        shares.loans = fee * 8 / 100;
+        shares.foundation = fee * 7 / 100;
+        shares.burn = fee - (shares.miner + shares.stakers + shares.loans + shares.foundation);
+        return shares;
+    }
+
+    // Post-H miner outputs of 216, 218, or 198 are the old unit and are rejected.
+    inline bool coinbase_subsidy_ok(uint32_t height, uint64_t fee, uint64_t paid_miner, uint64_t paid_validator, std::string &reason)
+    {
+        if (height >= kPiActivationHeight && (paid_miner == 216 || paid_miner == 218 || paid_miner == kLegacyMinerSubsidy))
+        {
+            reason = "coinbase subsidy mismatch";
+            return false;
+        }
+        if (paid_validator != validator_for_height(height))
+        {
+            reason = "coinbase validator amount";
+            return false;
+        }
+        const FeeShares shares = fee_shares(fee);
+        const uint64_t miner_due = miner_subsidy_for_height(height) + shares.miner;
+        if (height >= kMiner216ActivationHeight)
+        {
+            if (paid_miner != miner_due)
+            {
+                reason = "coinbase subsidy mismatch";
+                return false;
+            }
+            return true;
+        }
+        const uint64_t miner_legacy = kLegacyMinerSubsidy + shares.miner;
+        const uint64_t miner_full = (kSubsidyUnitsAfterActivation - kValidatorUnits) + shares.miner;
+        if (paid_miner != miner_legacy && paid_miner != miner_full)
+        {
+            reason = "coinbase subsidy mismatch";
+            return false;
+        }
+        return true;
+    }
 
     // 7% of transaction fees. Stakers, loans, and burn are unchanged.
     inline constexpr char kFoundationPayout[] = "ps1522db177e6452cbb6e48f296b19e6f2bdeb5b5e7a41a9552eb60a01464c3a5ba";
@@ -49,6 +164,7 @@ namespace pisecured
     // Reload headers and the UTXO set from blk*.dat. Safe on an empty chain.
     bool restore_chain(Storage &storage);
 
+    json rpc_getblockchaininfo(Storage &storage);
     json rpc_getblocktemplate(Storage &storage, const json &params);
     // require_local_policy: miner RPC. A coinbase-only block that pays a ps1 or a
     // registered name is valid here and on a peer. No wallet key is required.

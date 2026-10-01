@@ -1,4 +1,5 @@
 #include "release_update.hpp"
+#include "amount.hpp"
 
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -932,58 +934,75 @@ namespace
         return true;
     }
 
-    bool parse_314st(const std::string &text, uint64_t &units, std::string &err)
+    bool rpc(const std::string &method, const json &params, json &result, std::string &err);
+
+    struct Money
     {
-        if (text.empty() || text[0] == '-')
+        uint32_t activation = 0;
+        uint32_t scale = 0;
+    };
+
+    bool load_money(Money &money, std::string &err)
+    {
+        json info;
+        std::string rpc_err;
+        if (!rpc("getblockchaininfo", json::object(), info, rpc_err) || !info.is_object() ||
+            !info.contains("pi_activation_height") || !info["pi_activation_height"].is_number_unsigned())
         {
-            err = "amount must be 314ST, for example 0.050";
+            err = "daemon did not report pi_activation_height";
             return false;
         }
-        std::string whole;
-        std::string frac;
-        const auto dot = text.find('.');
-        if (dot == std::string::npos)
+        if (!info.contains("amount_scale") || !info["amount_scale"].is_number_unsigned())
         {
-            whole = text;
-        }
-        else
-        {
-            whole = text.substr(0, dot);
-            frac = text.substr(dot + 1);
-        }
-        if (whole.empty())
-        {
-            whole = "0";
-        }
-        if (frac.size() > 3)
-        {
-            err = "amount must be 314ST, for example 0.050";
+            err = "daemon did not report amount_scale";
             return false;
         }
-        while (frac.size() < 3)
+        const uint64_t scale = info["amount_scale"].get<uint64_t>();
+        const uint64_t activation = info["pi_activation_height"].get<uint64_t>();
+        if (scale != 1 && scale != 1000)
         {
-            frac.push_back('0');
+            err = "daemon did not report amount_scale";
+            return false;
         }
-        auto digits = [](const std::string &s)
+        if (activation == 0 || activation > 0xffffffffull)
         {
-            for (char c : s)
-            {
-                if (c < '0' || c > '9')
-                {
-                    return false;
-                }
-            }
+            err = "daemon did not report pi_activation_height";
+            return false;
+        }
+        money.activation = static_cast<uint32_t>(activation);
+        money.scale = static_cast<uint32_t>(scale);
+        return true;
+    }
+
+    bool parse_amount(const std::string &text, const Money &money, uint64_t &stored, uint64_t &pi, std::string &err)
+    {
+        if (!pisecure::parse_314st_pi(text, pi, err))
+        {
+            return false;
+        }
+        if (money.scale == 1000)
+        {
+            stored = pi;
             return true;
-        };
-        if (!digits(whole) || !digits(frac))
+        }
+        if (pi % 1000ull != 0)
         {
-            err = "amount must be 314ST, for example 0.050";
+            err = "amount must be a multiple of 0.001 314ST until height " + std::to_string(money.activation);
             return false;
         }
-        units = std::stoull(whole) * 1000ull + std::stoull(frac);
-        if (units == 0)
+        stored = pi / 1000ull;
+        return true;
+    }
+
+    bool parse_fee(const std::string &text, const Money &money, uint64_t &stored, uint64_t &pi, std::string &err)
+    {
+        if (!parse_amount(text, money, stored, pi, err))
         {
-            err = "amount must be greater than 0";
+            return false;
+        }
+        if (money.scale == 1000 && pi < 314ull)
+        {
+            err = "fee too low";
             return false;
         }
         return true;
@@ -1027,9 +1046,55 @@ namespace
         std::string txid;
         uint32_t vout = 0;
         uint64_t units = 0;
+        uint64_t worth = 0;
+        uint64_t pi = 0;
     };
 
-    bool coins_for(const std::string &address, std::vector<Coin> &coins, std::string &err, bool confirmed_only = false)
+    bool set_worth(uint64_t pi, const Money &money, Coin &coin, std::string &err)
+    {
+        coin.pi = pi;
+        if (money.scale == 1000)
+        {
+            coin.worth = pi;
+            return true;
+        }
+        if (pi % 1000ull != 0)
+        {
+            err = "amount must be a multiple of 0.001 314ST until height " + std::to_string(money.activation);
+            return false;
+        }
+        coin.worth = pi / 1000ull;
+        return true;
+    }
+
+    bool coin_from_row(const json &row, const Money &money, Coin &coin, std::string &err)
+    {
+        coin.txid = row.value("txid", "");
+        coin.vout = row.value("vout", 0u);
+        coin.units = row.value("units", 0ull);
+        if (coin.txid.empty() || coin.units == 0)
+        {
+            err = "transaction output invalid";
+            return false;
+        }
+        if (row.contains("pi") && row["pi"].is_number_unsigned())
+        {
+            return set_worth(row["pi"].get<uint64_t>(), money, coin, err);
+        }
+        if (money.scale != 1)
+        {
+            err = "utxo missing pi";
+            return false;
+        }
+        if (coin.units > UINT64_MAX / 1000ull)
+        {
+            err = "amount overflow";
+            return false;
+        }
+        return set_worth(coin.units * 1000ull, money, coin, err);
+    }
+
+    bool coins_for(const std::string &address, const Money &money, std::vector<Coin> &coins, std::string &err, bool confirmed_only = false)
     {
         json listed;
         if (!rpc("listunspent", json{{"address", address}}, listed, err))
@@ -1039,13 +1104,15 @@ namespace
         for (const auto &row : listed.value("utxos", json::array()))
         {
             Coin coin;
-            coin.txid = row.value("txid", "");
-            coin.vout = row.value("vout", 0u);
-            coin.units = row.value("units", 0ull);
-            if (!coin.txid.empty() && coin.units > 0)
+            if (!coin_from_row(row, money, coin, err))
             {
-                coins.push_back(coin);
+                if (row.value("units", 0ull) == 0)
+                {
+                    continue;
+                }
+                return false;
             }
+            coins.push_back(coin);
         }
         json pool;
         if (!rpc("getmempool", json::object(), pool, err))
@@ -1100,14 +1167,30 @@ namespace
                             used = true;
                         }
                     }
-                    if (!used)
+                    if (!used && !txid.empty())
                     {
                         Coin coin;
                         coin.txid = txid;
                         coin.vout = vout;
                         coin.units = out.value("value", 0ull);
-                        if (coin.units > 0 && !coin.txid.empty())
+                        if (coin.units == 0)
                         {
+                        }
+                        else if (money.scale == 1000)
+                        {
+                            coin.pi = coin.units;
+                            coin.worth = coin.units;
+                            coins.push_back(coin);
+                        }
+                        else if (coin.units > UINT64_MAX / 1000ull)
+                        {
+                            err = "amount overflow";
+                            return false;
+                        }
+                        else
+                        {
+                            coin.pi = coin.units * 1000ull;
+                            coin.worth = coin.units;
                             coins.push_back(coin);
                         }
                     }
@@ -1290,7 +1373,7 @@ namespace
             std::cerr << err << "\n";
             return 1;
         }
-        std::cout << result.value("amount", "0.000") << " 314ST\n";
+        std::cout << result.value("amount", "0.000000") << " 314ST\n";
         json pool;
         std::string pool_err;
         if (rpc("getmempool", json::object(), pool, pool_err))
@@ -1302,17 +1385,27 @@ namespace
                 {
                     if (out.value("address", "") == address)
                     {
-                        pending += out.value("value", 0ull);
+                        const uint64_t value = out.value("value", 0ull);
+                        if (pending > UINT64_MAX - value)
+                        {
+                            pending = UINT64_MAX;
+                            break;
+                        }
+                        pending += value;
                     }
                 }
             }
             if (pending > 0)
             {
-                char buf[32];
-                std::snprintf(buf, sizeof(buf), "%llu.%03llu",
-                              static_cast<unsigned long long>(pending / 1000),
-                              static_cast<unsigned long long>(pending % 1000));
-                std::cout << "unconfirmed " << buf << " 314ST\n";
+                Money money;
+                std::string money_err;
+                const bool as_pi = load_money(money, money_err) && money.scale == 1000;
+                uint64_t pending_pi = pending;
+                if (!as_pi)
+                {
+                    pending_pi = pending > UINT64_MAX / 1000ull ? UINT64_MAX : pending * 1000ull;
+                }
+                std::cout << "unconfirmed " << pisecure::format_314st_pi(pending_pi) << " 314ST\n";
             }
         }
         return 0;
@@ -1333,7 +1426,7 @@ namespace
             std::cerr << err << "\n";
             return 1;
         }
-        std::cout << address << " " << result.value("amount", "0.000") << " 314ST\n";
+        std::cout << address << " " << result.value("amount", "0.000000") << " 314ST\n";
         for (const auto &row : result.value("utxos", json::array()))
         {
             std::cout << row.value("txid", "") << " " << row.value("vout", 0) << " " << row.value("amount", "") << "\n";
@@ -1440,6 +1533,12 @@ namespace
             return 1;
         }
         std::string err;
+        Money money;
+        if (!load_money(money, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
         if (grant && !write_grant(name, ps1, err))
         {
             std::cerr << err << "\n";
@@ -1452,15 +1551,17 @@ namespace
             return 1;
         }
         std::vector<Coin> coins;
-        if (!coins_for(ps1, coins, err))
+        if (!coins_for(ps1, money, coins, err))
         {
             std::cerr << err << "\n";
             return 1;
         }
+        const uint64_t fee = money.scale == 1000 ? 1000ull : 1ull;
+        const uint64_t need = money.scale == 1000 ? 2000ull : 2ull;
         const Coin *chosen = nullptr;
         for (const auto &coin : coins)
         {
-            if (coin.units >= 2)
+            if (coin.worth >= need)
             {
                 chosen = &coin;
                 break;
@@ -1468,7 +1569,7 @@ namespace
         }
         if (chosen == nullptr)
         {
-            std::cerr << ps1 << " has no coin covering the 1 unit register fee\n";
+            std::cerr << ps1 << " has no coin covering the register fee " << pisecure::format_314st_pi(1000) << " 314ST\n";
             return 1;
         }
         json tx = {
@@ -1476,9 +1577,9 @@ namespace
             {"type", "register"},
             {"name", name},
             {"address", ps1},
-            {"fee", 1},
+            {"fee", fee},
             {"inputs", json::array({{{"prev_txid", chosen->txid}, {"vout", chosen->vout}}})},
-            {"outputs", json::array({{{"address", ps1}, {"value", chosen->units - 1}}})},
+            {"outputs", json::array({{{"address", ps1}, {"value", chosen->worth - fee}}})},
         };
         if (!sign_tx(tx, key, err))
         {
@@ -1503,9 +1604,17 @@ namespace
     int cmd_send(const std::string &src, const std::string &dst, const std::string &amount, const std::string &fee_text)
     {
         std::string err;
+        Money money;
+        if (!load_money(money, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
         uint64_t pay = 0;
         uint64_t fee = 0;
-        if (!parse_314st(amount, pay, err) || !parse_314st(fee_text, fee, err))
+        uint64_t pay_pi = 0;
+        uint64_t fee_pi = 0;
+        if (!parse_amount(amount, money, pay, pay_pi, err) || !parse_fee(fee_text, money, fee, fee_pi, err))
         {
             std::cerr << err << "\n";
             return 1;
@@ -1565,12 +1674,14 @@ namespace
         for (const auto &row : listed.value("utxos", json::array()))
         {
             Coin coin;
-            coin.txid = row.value("txid", "");
-            coin.vout = row.value("vout", 0u);
-            coin.units = row.value("units", 0ull);
-            if (coin.txid.empty() || coin.units == 0)
+            if (!coin_from_row(row, money, coin, err))
             {
-                continue;
+                if (row.value("units", 0ull) == 0)
+                {
+                    continue;
+                }
+                std::cerr << err << "\n";
+                return 1;
             }
             ++confirmed_count;
             if (reserved(coin.txid, coin.vout))
@@ -1586,24 +1697,35 @@ namespace
             return 1;
         }
         std::sort(available.begin(), available.end(), [](const Coin &a, const Coin &b)
-                  { return a.units > b.units; });
+                  { return a.worth > b.worth; });
         std::vector<Coin> chosen;
         uint64_t sum = 0;
+        if (pay > UINT64_MAX - fee)
+        {
+            std::cerr << "amount overflow\n";
+            return 1;
+        }
+        const uint64_t need = pay + fee;
         for (const auto &coin : available)
         {
-            if (sum >= pay + fee || chosen.size() >= 200)
+            if (sum >= need || chosen.size() >= 200)
             {
                 break;
             }
+            if (sum > UINT64_MAX - coin.worth)
+            {
+                std::cerr << "amount overflow\n";
+                return 1;
+            }
             chosen.push_back(coin);
-            sum += coin.units;
+            sum += coin.worth;
         }
-        if (sum < pay + fee)
+        if (sum < need)
         {
-            std::cerr << src << " has no coin covering " << amount << " 314ST plus fee " << fee_text << "\n";
+            std::cerr << src << " has no coin covering " << pisecure::format_314st_pi(pay_pi) << " 314ST plus fee " << pisecure::format_314st_pi(fee_pi) << "\n";
             return 1;
         }
-        const uint64_t change = sum - pay - fee;
+        const uint64_t change = sum - need;
         json inputs = json::array();
         for (const auto &coin : chosen)
         {
@@ -1627,6 +1749,7 @@ namespace
         }
         if (g_dry_run)
         {
+            std::cout << pisecure::format_314st_pi(pay_pi) << " 314ST\n";
             std::cout << "signed\n";
             return 0;
         }
@@ -1641,6 +1764,7 @@ namespace
             std::cerr << result.value("reason", "send rejected") << "\n";
             return 1;
         }
+        std::cout << pisecure::format_314st_pi(pay_pi) << " 314ST\n";
         std::cout << result.value("txid", "") << "\n";
         return 0;
     }
@@ -1648,8 +1772,15 @@ namespace
     int cmd_consolidate(const std::string &src, const std::string &fee_text)
     {
         std::string err;
+        Money money;
+        if (!load_money(money, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
         uint64_t fee = 0;
-        if (!parse_314st(fee_text, fee, err))
+        uint64_t fee_pi = 0;
+        if (!parse_fee(fee_text, money, fee, fee_pi, err))
         {
             std::cerr << err << "\n";
             return 1;
@@ -1667,7 +1798,7 @@ namespace
             return 1;
         }
         std::vector<Coin> coins;
-        if (!coins_for(src_addr, coins, err))
+        if (!coins_for(src_addr, money, coins, err))
         {
             std::cerr << err << "\n";
             return 1;
@@ -1678,19 +1809,25 @@ namespace
             return 0;
         }
         std::sort(coins.begin(), coins.end(), [](const Coin &a, const Coin &b)
-                  { return a.units < b.units; });
+                  { return a.worth < b.worth; });
         const size_t limit = std::min(coins.size(), static_cast<size_t>(200));
         // Same caps the node enforces: 200 inputs and 64 KB of signed JSON.
         for (size_t n = limit; n >= 2; --n)
         {
             uint64_t sum = 0;
             json inputs = json::array();
+            bool overflow = false;
             for (size_t i = 0; i < n; ++i)
             {
-                sum += coins[i].units;
+                if (sum > UINT64_MAX - coins[i].worth)
+                {
+                    overflow = true;
+                    break;
+                }
+                sum += coins[i].worth;
                 inputs.push_back({{"prev_txid", coins[i].txid}, {"vout", coins[i].vout}});
             }
-            if (sum <= fee)
+            if (overflow || sum <= fee)
             {
                 continue;
             }
@@ -1994,15 +2131,15 @@ namespace
         return found;
     }
 
-    bool take_units(const std::string &address, uint64_t need, std::vector<Coin> &chosen, uint64_t &change, std::string &err)
+    bool take_units(const std::string &address, const Money &money, uint64_t need, std::vector<Coin> &chosen, uint64_t &change, std::string &err)
     {
         std::vector<Coin> coins;
-        if (!coins_for(address, coins, err, true))
+        if (!coins_for(address, money, coins, err, true))
         {
             return false;
         }
         std::sort(coins.begin(), coins.end(), [](const Coin &a, const Coin &b)
-                  { return a.units > b.units; });
+                  { return a.worth > b.worth; });
         uint64_t sum = 0;
         chosen.clear();
         for (const auto &coin : coins)
@@ -2011,8 +2148,13 @@ namespace
             {
                 break;
             }
+            if (sum > UINT64_MAX - coin.worth)
+            {
+                err = "amount overflow";
+                return false;
+            }
             chosen.push_back(coin);
-            sum += coin.units;
+            sum += coin.worth;
         }
         if (sum < need)
         {
@@ -2028,6 +2170,12 @@ namespace
                         const std::string &note)
     {
         std::string err;
+        Money money;
+        if (!load_money(money, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
         if (note.size() > 80)
         {
             std::cerr << "malformed transaction\n";
@@ -2092,10 +2240,15 @@ namespace
             return 1;
         }
         const uint64_t lock = bounty * max_claims;
-        const uint64_t fee = 1;
+        const uint64_t fee = money.scale == 1000 ? 1000ull : 1ull;
+        if (lock > UINT64_MAX - fee)
+        {
+            std::cerr << "amount overflow\n";
+            return 1;
+        }
         std::vector<Coin> chosen;
         uint64_t change = 0;
-        if (!take_units(creator, lock + fee, chosen, change, err))
+        if (!take_units(creator, money, lock + fee, chosen, change, err))
         {
             std::cerr << err << "\n";
             return 1;
@@ -2147,6 +2300,12 @@ namespace
     int cmd_flag_claim(const std::string &id, const std::string &recipient_text)
     {
         std::string err;
+        Money money;
+        if (!load_money(money, err))
+        {
+            std::cerr << err << "\n";
+            return 1;
+        }
         const std::string recipient = normalize_ps1(recipient_text);
         if (recipient.empty())
         {
@@ -2185,10 +2344,10 @@ namespace
             return 1;
         }
         const uint64_t bounty = flag.value("bounty_units", 0ull);
-        const uint64_t fee = 1;
+        const uint64_t fee = money.scale == 1000 ? 1000ull : 1ull;
         std::vector<Coin> chosen;
         uint64_t change = 0;
-        if (!take_units(awards, fee, chosen, change, err))
+        if (!take_units(awards, money, fee, chosen, change, err))
         {
             std::cerr << err << "\n";
             return 1;
@@ -2254,10 +2413,11 @@ namespace
                   << "  info NAME|ps1\n"
                   << "  balance NAME|ps1\n"
                   << "  utxos NAME|ps1\n"
-                  << "  send SRC DST AMOUNT [--fee 0.001] [--dry-run]\n"
+                  << "  send SRC DST AMOUNT [--fee 0.000314] [--dry-run]\n"
                   << "  flag create ID COMMITMENT AWARDS MAX EXPIRES BOUNTY NOTE\n"
                   << "  flag claim ID RECIPIENT\n"
-                  << "Amounts are 314ST. 0.001 is 1 unit. Flag bounty is units.\n"
+                  << "Amounts are 314ST with six decimal places. 0.216000 is 216000 pi. 0.000314 is 314 pi.\n"
+                  << "Until the pi activation height an amount must be a multiple of 0.001 314ST. Flag bounty is units.\n"
                   << "A tty prompt or PISECURE_WALLET_PASS unlocks an encrypted wallet.\n";
     }
 }
@@ -2266,7 +2426,7 @@ int main(int argc, char **argv)
 {
     std::vector<std::string> positional;
     bool grant = false;
-    std::string fee = "0.001";
+    std::string fee = "0.000314";
     int history_limit = 20;
     for (int i = 1; i < argc; ++i)
     {

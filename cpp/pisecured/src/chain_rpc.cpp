@@ -410,7 +410,63 @@ namespace pisecured
             return "";
         }
 
-        bool parse_outputs(const json &arr, std::vector<TxOut> &outputs, std::string &reason)
+        // Unsigned JSON is the stored integer for this height. A string is a 314ST
+        // decimal, converted to pi and then to that height's stored unit. Floats are rejected.
+        bool stored_from_json_amount(const json &field, uint32_t height, bool fee, uint64_t &stored, std::string &reason)
+        {
+            if (field.is_number_float())
+            {
+                reason = "amount has more than six decimal places";
+                return false;
+            }
+            if (field.is_string())
+            {
+                uint64_t pi = 0;
+                if (!pisecure::parse_314st_pi(field.get<std::string>(), pi, reason))
+                {
+                    if (reason == "amount must be greater than 0")
+                    {
+                        reason = fee ? "fee too low" : "transaction output invalid";
+                    }
+                    return false;
+                }
+                if (height >= kPiActivationHeight)
+                {
+                    stored = pi;
+                }
+                else if (pi % kPiPerOldUnit != 0)
+                {
+                    reason = "amount must be a multiple of 0.001 314ST until height " + std::to_string(kPiActivationHeight);
+                    return false;
+                }
+                else
+                {
+                    stored = pi / kPiPerOldUnit;
+                }
+            }
+            else if (field.is_number_unsigned())
+            {
+                stored = field.get<uint64_t>();
+            }
+            else
+            {
+                reason = fee ? "fee too low" : "transaction output invalid";
+                return false;
+            }
+            if (stored == 0)
+            {
+                reason = fee ? "fee too low" : "transaction output invalid";
+                return false;
+            }
+            if (fee && stored < min_fee_for_height(height))
+            {
+                reason = "fee too low";
+                return false;
+            }
+            return true;
+        }
+
+        bool parse_outputs(const json &arr, std::vector<TxOut> &outputs, uint32_t height, std::string &reason)
         {
             if (!arr.is_array() || arr.empty())
             {
@@ -419,14 +475,21 @@ namespace pisecured
             }
             for (const auto &item : arr)
             {
-                if (!item.is_object() || !item.contains("address") || !item["address"].is_string() || !item.contains("value") || !item["value"].is_number_unsigned())
+                if (!item.is_object() || !item.contains("address") || !item["address"].is_string() || !item.contains("value"))
                 {
                     reason = "transaction output invalid";
                     return false;
                 }
                 TxOut out;
                 out.address = item["address"].get<std::string>();
-                out.value = item["value"].get<uint64_t>();
+                if (!stored_from_json_amount(item["value"], height, false, out.value, reason))
+                {
+                    if (reason.empty())
+                    {
+                        reason = "transaction output invalid";
+                    }
+                    return false;
+                }
                 if (out.address.empty() || out.address.size() > 256 || out.value == 0)
                 {
                     reason = "transaction output invalid";
@@ -529,7 +592,7 @@ namespace pisecured
             return doc;
         }
 
-        bool parse_user_tx(const json &obj, Tx &tx, std::string &reason)
+        bool parse_user_tx(const json &obj, Tx &tx, uint32_t height, std::string &reason)
         {
             if (!obj.is_object())
             {
@@ -548,7 +611,7 @@ namespace pisecured
                 reason = "malformed transaction";
                 return false;
             }
-            if (!obj.contains("fee") || !obj["fee"].is_number_unsigned())
+            if (!obj.contains("fee"))
             {
                 reason = "fee too low";
                 return false;
@@ -559,10 +622,8 @@ namespace pisecured
             tx.reg = false;
             tx.name.clear();
             tx.reg_address.clear();
-            tx.fee = obj["fee"].get<uint64_t>();
-            if (tx.fee < 1)
+            if (!stored_from_json_amount(obj["fee"], height, true, tx.fee, reason))
             {
-                reason = "fee too low";
                 return false;
             }
             if (obj.contains("type") && obj["type"].is_string())
@@ -662,7 +723,7 @@ namespace pisecured
             {
                 return false;
             }
-            if (!parse_outputs(obj["outputs"], tx.outputs, reason))
+            if (!parse_outputs(obj["outputs"], tx.outputs, height, reason))
             {
                 return false;
             }
@@ -680,6 +741,7 @@ namespace pisecured
         {
             uint64_t subsidy = kSubsidyUnits;
             uint64_t miner_subsidy = kSubsidyUnits - kValidatorUnits;
+            uint64_t validator = kValidatorUnits;
             uint64_t fee = 0;
             uint64_t miner_fee = 0;
             uint64_t stakers = 0;
@@ -690,22 +752,19 @@ namespace pisecured
             uint64_t miner_cap() const { return miner_subsidy + miner_fee; }
         };
 
-        uint64_t subsidy_units_for(uint32_t height)
-        {
-            return height >= kMiner216ActivationHeight ? kSubsidyUnitsAfterActivation : kSubsidyUnits;
-        }
-
         Emission emission_for(uint32_t height, uint64_t fee)
         {
             Emission e;
-            e.subsidy = subsidy_units_for(height);
-            e.miner_subsidy = e.subsidy - kValidatorUnits;
+            e.subsidy = subsidy_for_height(height);
+            e.validator = validator_for_height(height);
+            e.miner_subsidy = e.subsidy - e.validator;
             e.fee = fee;
-            e.miner_fee = fee * 60 / 100;
-            e.stakers = fee * 20 / 100;
-            e.loans = fee * 8 / 100;
-            e.foundation = fee * 7 / 100;
-            e.burn = fee - (e.miner_fee + e.stakers + e.loans + e.foundation);
+            const FeeShares shares = fee_shares(fee);
+            e.miner_fee = shares.miner;
+            e.stakers = shares.stakers;
+            e.loans = shares.loans;
+            e.foundation = shares.foundation;
+            e.burn = shares.burn;
             return e;
         }
 
@@ -742,7 +801,7 @@ namespace pisecured
         {
             std::vector<CbOut> outs;
             outs.push_back(CbOut{"miner", wallet, e.miner_cap()});
-            outs.push_back(CbOut{"validator", validator, kValidatorUnits});
+            outs.push_back(CbOut{"validator", validator, e.validator});
             if (e.stakers > 0)
             {
                 outs.push_back(CbOut{"stakers", "stakers", e.stakers});
@@ -758,13 +817,14 @@ namespace pisecured
             return outs;
         }
 
-        std::string units_314st(uint64_t units)
+        std::string units_314st(uint64_t stored, uint32_t created_height)
         {
-            char buf[32];
-            std::snprintf(buf, sizeof(buf), "%llu.%03llu",
-                          static_cast<unsigned long long>(units / 1000),
-                          static_cast<unsigned long long>(units % 1000));
-            return buf;
+            uint64_t pi = 0;
+            if (!stored_to_pi(stored, created_height, pi))
+            {
+                return "0.000000";
+            }
+            return pisecure::format_314st_pi(pi);
         }
 
         json coinbase_body(const std::string &wallet, uint32_t height, const Emission &e, const Tx &cb, const std::vector<CbOut> &outs)
@@ -779,14 +839,14 @@ namespace pisecured
                 outputs.push_back({{"role", o.role},
                                    {"address", o.address},
                                    {"units", o.units},
-                                   {"amount", units_314st(o.units)}});
+                                   {"amount", units_314st(o.units, height)}});
             }
             return json{
                 {"wallet", wallet},
                 {"height", height},
                 {"txid", to_hex(cb.txid)},
-                {"unit", "0.001 314ST"},
-                {"subsidy", units_314st(e.subsidy)},
+                {"unit", height >= kPiActivationHeight ? "0.000001 314ST" : "0.001 314ST"},
+                {"subsidy", units_314st(e.subsidy, height)},
                 {"subsidy_units", e.subsidy},
                 {"outputs", outputs},
                 {"fee_units", e.fee},
@@ -897,6 +957,7 @@ namespace pisecured
 
         std::vector<Tx> mempool_txs(Storage &storage)
         {
+            const uint32_t next_height = storage.has_tip() ? storage.get_best_height() + 1 : 1;
             std::vector<Tx> txs;
             for (const auto &stored : storage.get_mempool_transactions(1000))
             {
@@ -905,7 +966,7 @@ namespace pisecured
                     json obj = json::parse(stored.data.begin(), stored.data.end());
                     Tx tx;
                     std::string reason;
-                    if (!parse_user_tx(obj, tx, reason))
+                    if (!parse_user_tx(obj, tx, next_height, reason))
                     {
                         continue;
                     }
@@ -961,13 +1022,18 @@ namespace pisecured
             return ordered;
         }
 
-        bool find_outpoint(Storage &storage, const std::array<uint8_t, 32> &prev, uint32_t vout, uint64_t &value, std::string &owner, const std::vector<Tx> *prior);
+        bool find_outpoint(Storage &storage, const std::array<uint8_t, 32> &prev, uint32_t vout, uint64_t &value, std::string &owner, const std::vector<Tx> *prior, uint32_t *born = nullptr, uint32_t spend_height = 0);
 
-        bool check_spendable(Storage &storage, const Tx &tx, std::string &reason, const std::vector<Tx> *prior = nullptr, uint64_t release = 0)
+        bool check_spendable(Storage &storage, const Tx &tx, std::string &reason, uint32_t spend_height, const std::vector<Tx> *prior = nullptr, uint64_t release = 0)
         {
             if (tx.inputs.empty())
             {
                 reason = "transaction inputs missing";
+                return false;
+            }
+            if (tx.fee < min_fee_for_height(spend_height))
+            {
+                reason = "fee too low";
                 return false;
             }
             uint64_t input_value = 0;
@@ -989,12 +1055,28 @@ namespace pisecured
                 }
                 uint64_t value = 0;
                 std::string owner;
-                if (!find_outpoint(storage, in.prev, in.vout, value, owner, prior))
+                uint32_t born = spend_height;
+                if (!find_outpoint(storage, in.prev, in.vout, value, owner, prior, &born, spend_height))
                 {
                     reason = "unknown input";
                     return false;
                 }
-                input_value += value;
+                uint64_t worth = value;
+                if (spend_height >= kPiActivationHeight && born < kPiActivationHeight)
+                {
+                    if (value > UINT64_MAX / kPiPerOldUnit)
+                    {
+                        reason = "amount overflow";
+                        return false;
+                    }
+                    worth = value * kPiPerOldUnit;
+                }
+                if (input_value > UINT64_MAX - worth)
+                {
+                    reason = "amount overflow";
+                    return false;
+                }
+                input_value += worth;
             }
             uint64_t output_value = 0;
             for (const auto &o : tx.outputs)
@@ -1685,10 +1767,15 @@ namespace pisecured
             return true;
         }
 
-        bool find_outpoint(Storage &storage, const std::array<uint8_t, 32> &prev, uint32_t vout, uint64_t &value, std::string &owner, const std::vector<Tx> *prior)
+        bool find_outpoint(Storage &storage, const std::array<uint8_t, 32> &prev, uint32_t vout, uint64_t &value, std::string &owner, const std::vector<Tx> *prior, uint32_t *born, uint32_t spend_height)
         {
-            if (storage.utxo_available(prev, vout, value) && storage.utxo_address(prev, vout, owner))
+            uint32_t created = 0;
+            if (storage.utxo_lookup(prev, vout, value, owner, created))
             {
+                if (born != nullptr)
+                {
+                    *born = created == 0 ? spend_height : created;
+                }
                 return true;
             }
             if (prior == nullptr)
@@ -1703,6 +1790,10 @@ namespace pisecured
                 }
                 value = tx.outputs[vout].value;
                 owner = tx.outputs[vout].address;
+                if (born != nullptr)
+                {
+                    *born = spend_height;
+                }
                 return true;
             }
             return false;
@@ -2067,11 +2158,12 @@ namespace pisecured
                 return;
             }
             uint32_t kept = 0;
+            const uint32_t height = storage.has_tip() ? storage.get_best_height() + 1 : 1;
             for (const auto &obj : arr)
             {
                 Tx tx;
                 std::string reason;
-                if (!parse_user_tx(obj, tx, reason))
+                if (!parse_user_tx(obj, tx, height, reason))
                 {
                     continue;
                 }
@@ -2080,9 +2172,8 @@ namespace pisecured
                 {
                     continue;
                 }
-                const uint32_t height = storage.has_tip() ? storage.get_best_height() + 1 : 1;
                 const Flag *known = g_flags.find(tx.flag_id);
-                if (tx.inputs.empty() || !check_spendable(storage, tx, reason, nullptr, claim_release(tx, g_flags, nullptr)) || !verify_input_signatures(storage, tx, reason, true, nullptr) || !flag_outputs_ok(storage, tx, known, nullptr, reason) || !apply_flag_tx(g_flags, tx, height, reason))
+                if (tx.inputs.empty() || !check_spendable(storage, tx, reason, height, nullptr, claim_release(tx, g_flags, nullptr)) || !verify_input_signatures(storage, tx, reason, true, nullptr) || !flag_outputs_ok(storage, tx, known, nullptr, reason) || !apply_flag_tx(g_flags, tx, height, reason))
                 {
                     continue;
                 }
@@ -2267,14 +2358,14 @@ namespace pisecured
                                 uint64_t units = 0;
                                 if (o.is_object() && units_of(o, units) && units > 0)
                                 {
-                                    coinbase_credits.push_back(Storage::UtxoCredit{txid, vout, units, o.value("address", std::string())});
+                                    coinbase_credits.push_back(Storage::UtxoCredit{txid, vout, units, o.value("address", std::string()), item.height});
                                 }
                                 ++vout;
                             }
                         }
                         else
                         {
-                            coinbase_credits.push_back(Storage::UtxoCredit{txid, 0, cb.value("value", 0ull), cb.value("wallet", std::string())});
+                            coinbase_credits.push_back(Storage::UtxoCredit{txid, 0, cb.value("value", 0ull), cb.value("wallet", std::string()), item.height});
                         }
                     }
                 }
@@ -2289,7 +2380,7 @@ namespace pisecured
                     {
                         Tx tx;
                         std::string reason;
-                        if (!parse_user_tx(txj, tx, reason))
+                        if (!parse_user_tx(txj, tx, item.height, reason))
                         {
                             continue;
                         }
@@ -2302,7 +2393,7 @@ namespace pisecured
                         uint32_t vout = 0;
                         for (const auto &o : tx.outputs)
                         {
-                            credits.push_back(Storage::UtxoCredit{tx.txid, vout, o.value, o.address});
+                            credits.push_back(Storage::UtxoCredit{tx.txid, vout, o.value, o.address, item.height});
                             ++vout;
                         }
                         if (!storage.apply_utxos(spends, credits))
@@ -2450,6 +2541,19 @@ namespace pisecured
         return ok;
     }
 
+    json rpc_getblockchaininfo(Storage &storage)
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_chain_mu);
+        const uint32_t height = storage.get_best_height();
+        const uint32_t next_height = height + 1;
+        return json{
+            {"height", height},
+            {"bestblockhash", to_hex(storage.get_best_block_hash())},
+            {"pi_activation_height", kPiActivationHeight},
+            {"amount_scale", amount_scale_for_next(next_height)},
+        };
+    }
+
     json rpc_getblocktemplate(Storage &storage, const json &params)
     {
         rpc_note_template_request();
@@ -2572,9 +2676,10 @@ namespace pisecured
         {
             return rejected("malformed transaction");
         }
+        const uint32_t next_height = storage.has_tip() ? storage.get_best_height() + 1 : 1;
         Tx tx;
         std::string reason;
-        if (!parse_user_tx(obj, tx, reason))
+        if (!parse_user_tx(obj, tx, next_height, reason))
         {
             return rejected(reason);
         }
@@ -2585,7 +2690,6 @@ namespace pisecured
         }
         const std::vector<Tx> prior = mempool_txs(storage);
         FlagBook staged_flags = g_flags;
-        const uint32_t next_height = storage.has_tip() ? storage.get_best_height() + 1 : 1;
         for (const auto &earlier : prior)
         {
             std::string ignored;
@@ -2594,7 +2698,7 @@ namespace pisecured
         if (!tx.inputs.empty())
         {
             const Flag *known = staged_flags.find(tx.flag_id);
-            if (!check_spendable(storage, tx, reason, &prior, claim_release(tx, staged_flags, &prior)))
+            if (!check_spendable(storage, tx, reason, next_height, &prior, claim_release(tx, staged_flags, &prior)))
             {
                 return rejected(reason);
             }
@@ -2847,7 +2951,7 @@ namespace pisecured
             {
                 Tx tx;
                 std::string reason;
-                if (!parse_user_tx(txj, tx, reason))
+                if (!parse_user_tx(txj, tx, height, reason))
                 {
                     return rejected(reason);
                 }
@@ -2925,18 +3029,13 @@ namespace pisecured
         {
             return rejected("coinbase exceeds emission rules");
         }
-        if (paid_validator != kValidatorUnits)
+        std::string subsidy_reason;
+        if (!coinbase_subsidy_ok(height, fee_units, paid_miner, paid_validator, subsidy_reason))
         {
-            return rejected("coinbase validator amount");
+            return rejected(subsidy_reason);
         }
-        const uint64_t miner_full = (kSubsidyUnitsAfterActivation - kValidatorUnits) + emit.miner_fee;
-        const uint64_t miner_legacy = kLegacyMinerSubsidy + emit.miner_fee;
         if (height >= kMiner216ActivationHeight)
         {
-            if (paid_miner != miner_full)
-            {
-                return rejected("coinbase subsidy mismatch");
-            }
             for (const auto &o : cb_outs)
             {
                 if (o.role == "validator" && !is_ps1_payout(o.address))
@@ -2944,10 +3043,6 @@ namespace pisecured
                     return rejected("coinbase validator address");
                 }
             }
-        }
-        else if (paid_miner != miner_legacy && paid_miner != miner_full)
-        {
-            return rejected("coinbase subsidy mismatch");
         }
 
         Tx cb = coinbase_from(height, cb_outs);
@@ -2968,7 +3063,7 @@ namespace pisecured
         {
             std::string reason;
             const Flag *known = staged_flags.find(tx.flag_id);
-            if (!check_spendable(storage, tx, reason, &prior, claim_release(tx, staged_flags, &prior)))
+            if (!check_spendable(storage, tx, reason, height, &prior, claim_release(tx, staged_flags, &prior)))
             {
                 return rejected(reason);
             }
@@ -3088,7 +3183,7 @@ namespace pisecured
         uint32_t cb_vout = 0;
         for (const auto &o : cb.outputs)
         {
-            coinbase_credits.push_back(Storage::UtxoCredit{cb.txid, cb_vout, o.value, o.address});
+            coinbase_credits.push_back(Storage::UtxoCredit{cb.txid, cb_vout, o.value, o.address, height});
             ++cb_vout;
         }
         if (!coinbase_credits.empty() && !storage.apply_utxos({}, coinbase_credits))
@@ -3106,7 +3201,7 @@ namespace pisecured
             uint32_t vout = 0;
             for (const auto &o : tx.outputs)
             {
-                credits.push_back(Storage::UtxoCredit{tx.txid, vout, o.value, o.address});
+                credits.push_back(Storage::UtxoCredit{tx.txid, vout, o.value, o.address, height});
                 ++vout;
             }
             if (!storage.apply_utxos(spends, credits))
@@ -3319,16 +3414,25 @@ namespace pisecured
         }
         json rows = json::array();
         uint64_t total = 0;
+        uint64_t total_pi = 0;
         for (const auto &row : storage.list_utxos(address))
         {
+            uint64_t pi = 0;
+            if (!stored_to_pi(row.units, row.height, pi) || total_pi > UINT64_MAX - pi)
+            {
+                continue;
+            }
             total += row.units;
+            total_pi += pi;
             rows.push_back({{"txid", row.txid_hex},
                             {"vout", row.vout},
                             {"units", row.units},
+                            {"pi", pi},
+                            {"height", row.height},
                             {"address", row.address},
-                            {"amount", units_314st(row.units)}});
+                            {"amount", pisecure::format_314st_pi(pi)}});
         }
-        json result = {{"address", address}, {"units", total}, {"amount", units_314st(total)}, {"utxos", rows}};
+        json result = {{"address", address}, {"units", total}, {"pi", total_pi}, {"amount", pisecure::format_314st_pi(total_pi)}, {"utxos", rows}};
         if (!shown.empty())
         {
             result["name"] = shown;

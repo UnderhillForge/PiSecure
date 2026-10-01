@@ -492,6 +492,12 @@ namespace pisecured
                     throw std::runtime_error("storage not available");
                 result = rpc_listflags(*storage, params);
             }
+            else if (method == "getblockchaininfo")
+            {
+                if (!storage)
+                    throw std::runtime_error("storage not available");
+                result = rpc_getblockchaininfo(*storage);
+            }
             else if (method == "getblocktemplate")
             {
                 if (!storage)

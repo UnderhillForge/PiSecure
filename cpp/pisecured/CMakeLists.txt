@@ -67,6 +67,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_executable(retarget_test tests/retarget_test.cpp)
     add_executable(flag_test tests/flag_test.cpp)
     target_include_directories(flag_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_executable(pi_amount_test tests/pi_amount_test.cpp)
+    target_include_directories(pi_amount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/../common)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")

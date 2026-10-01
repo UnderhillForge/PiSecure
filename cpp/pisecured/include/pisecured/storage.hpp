@@ -9,6 +9,7 @@
 #include <map>
 #include <array>
 #include <unordered_map>
+#include <utility>
 
 namespace pisecured
 {
@@ -107,9 +108,15 @@ namespace pisecured
             uint32_t vout = 0;
             uint64_t value = 0;
             std::string address;
+            uint32_t height = 0;
+
+            UtxoCredit() = default;
+            UtxoCredit(std::array<uint8_t, 32> txid_in, uint32_t vout_in, uint64_t value_in, std::string address_in, uint32_t height_in)
+                : txid(txid_in), vout(vout_in), value(value_in), address(std::move(address_in)), height(height_in) {}
         };
         bool utxo_available(const std::array<uint8_t, 32> &txid, uint32_t vout, uint64_t &value) const;
         bool utxo_address(const std::array<uint8_t, 32> &txid, uint32_t vout, std::string &address) const;
+        bool utxo_lookup(const std::array<uint8_t, 32> &txid, uint32_t vout, uint64_t &value, std::string &address, uint32_t &height) const;
         std::filesystem::path datadir() const { return datadir_; }
         // Apply every spend and credit, or leave the set unchanged.
         bool apply_utxos(const std::vector<UtxoSpend> &spends, const std::vector<UtxoCredit> &credits);
@@ -120,6 +127,7 @@ namespace pisecured
             uint32_t vout = 0;
             uint64_t units = 0;
             std::string address;
+            uint32_t height = 0;
         };
         std::vector<UtxoEntry> list_utxos(const std::string &address) const;
         std::optional<uint64_t> block_index(const std::array<uint8_t, 32> &hash) const;
@@ -145,8 +153,15 @@ namespace pisecured
         // Mempool
         std::unordered_map<std::array<uint8_t, 32>, Transaction, Hash256> mempool_;
 
-        // txid-hex + ':' + vout → (value, address)
-        std::map<std::string, std::pair<uint64_t, std::string>> utxo_;
+        struct UtxoRecord
+        {
+            uint64_t value = 0;
+            std::string address;
+            uint32_t height = 0;
+        };
+        // txid-hex + ':' + vout → stored value, address, and the block that created it.
+        // The value stays in the unit of that block. A pre-activation spend scales it in memory.
+        std::map<std::string, UtxoRecord> utxo_;
         mutable std::mutex utxo_mutex_;
 
         bool rotate_if_needed(uint64_t upcoming_bytes);

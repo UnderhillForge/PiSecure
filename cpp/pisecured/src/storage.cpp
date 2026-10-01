@@ -518,7 +518,7 @@ namespace pisecured
         {
             return false;
         }
-        value = it->second.first;
+        value = it->second.value;
         return true;
     }
 
@@ -530,7 +530,21 @@ namespace pisecured
         {
             return false;
         }
-        address = it->second.second;
+        address = it->second.address;
+        return true;
+    }
+
+    bool Storage::utxo_lookup(const std::array<uint8_t, 32> &txid, uint32_t vout, uint64_t &value, std::string &address, uint32_t &height) const
+    {
+        std::lock_guard<std::mutex> lock(utxo_mutex_);
+        auto it = utxo_.find(utxo_key(txid, vout));
+        if (it == utxo_.end())
+        {
+            return false;
+        }
+        value = it->second.value;
+        address = it->second.address;
+        height = it->second.height;
         return true;
     }
 
@@ -557,7 +571,7 @@ namespace pisecured
         }
         for (const auto &credit : credits)
         {
-            utxo_[utxo_key(credit.txid, credit.vout)] = {credit.value, credit.address};
+            utxo_[utxo_key(credit.txid, credit.vout)] = UtxoRecord{credit.value, credit.address, credit.height};
         }
         return true;
     }
@@ -568,7 +582,7 @@ namespace pisecured
         std::vector<UtxoEntry> rows;
         for (const auto &item : utxo_)
         {
-            if (!address.empty() && item.second.second != address)
+            if (!address.empty() && item.second.address != address)
             {
                 continue;
             }
@@ -580,8 +594,9 @@ namespace pisecured
             UtxoEntry row;
             row.txid_hex = item.first.substr(0, colon);
             row.vout = static_cast<uint32_t>(std::stoul(item.first.substr(colon + 1)));
-            row.units = item.second.first;
-            row.address = item.second.second;
+            row.units = item.second.value;
+            row.address = item.second.address;
+            row.height = item.second.height;
             rows.push_back(row);
         }
         return rows;

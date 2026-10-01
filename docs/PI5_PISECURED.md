@@ -106,7 +106,9 @@ From height 32 the miner output must be exactly 216 plus the miner's fee share. 
 
 The blocks already stored on this Pi were mined before this schedule. Reloading them does not rewrite `blk*.dat`. A new chain starts at height 1 with these rules.
 
-`getblocktemplate` returns the `difficulty` and `subsidy_units` (200 or 218) that `submitblock` will enforce for the height it is building. A miner-supplied difficulty that disagrees is `difficulty mismatch`.
+At height **3000**, new blocks store pi. 1 314ST is 1000000 pi, and one old stored unit is 1000 pi, so the 218-unit subsidy is **218000 pi**: miner **216000** and validator **2000**. That is the same 0.216 and 0.002 314ST. The minimum fee is **314 pi**. Fee shares stay 60/20/8/7 on that integer, and the remainder is burned. A spend of an output created before height 3000 is worth the stored amount times 1000. `blk*.dat` is not rewritten, and the signatures already stored stay valid. A coinbase at or after height 3000 that still pays 216 or 218 of the old units is rejected. `getblockchaininfo` reports `pi_activation_height` 3000 and `amount_scale` (1 while the next block is below 3000, 1000 at and after it). Amounts are decimal strings of at most six places. 0.000314 314ST is 314 pi.
+
+`getblocktemplate` returns the `difficulty` and `subsidy_units` (200, 218, or 218000) that `submitblock` will enforce for the height it is building. A miner-supplied difficulty that disagrees is `difficulty mismatch`.
 
 ### getblocktemplate
 
@@ -165,7 +167,7 @@ u64 fee              (0 for coinbase, >= 1 otherwise)
 u32 height           (coinbase height, else 0)
 ```
 
-Coinbase has no inputs. Its outputs are the non-zero emission outputs, in role order `miner`, `validator`, `stakers`, `loans`, `foundation`. Burn is not an output. With no fees the outputs are miner 216 units and validator 2 units to a ps1. The height-1 sample above is an earlier template: from height 32, `subsidy_units` is 218 and the validator address is not the word `validator`.
+Coinbase has no inputs. Its outputs are the non-zero emission outputs, in role order `miner`, `validator`, `stakers`, `loans`, `foundation`. Burn is not an output. With no fees the outputs are miner 216 units and validator 2 units to a ps1 until height 3000, then 216000 pi and 2000 pi. The height-1 sample above is an earlier template: from height 32, `subsidy_units` is 218 and the validator address is not the word `validator`.
 
 Merkle root: start with `coinbase_txid`, then each included `txid`. While more than one id remains, if the count is odd duplicate the last id, then replace the list with `SHA256(left || right)` for each pair. One id is itself the root.
 
@@ -261,7 +263,7 @@ Register is a helper. On startup this miner POSTs `https://bootstrap.pisecure.or
 
 Block `0fbe305838fbb59e4ec010d7319a3461a2513663f3643959da3d39c23265fecf` is height 1. Its coinbase txid is `f67580eb5438505cdd19d0cbff2f4370d888be8acfed91d8b212af189db4b9d7`. Miner output vout **0** pays 198 units to `operator`. Validator output vout 1 pays 2 units to `validator`.
 
-`pisecure wallet utxos` and `pisecure wallet send` talk to `ws://127.0.0.1:3144` and use this UTXO map. CLI amounts are **314ST**. `0.050` is 50 units, because 1 unit is 0.001 314ST. The default fee `0.001` is 1 unit.
+`pisecure wallet utxos` and `pisecure wallet send` talk to `ws://127.0.0.1:3144` and use this UTXO map. CLI amounts are **314ST** with six decimal places. `0.216000` is 216000 pi. `0.000314` is 314 pi and is the default fee. Until height 3000 an amount has to be a multiple of 0.001 314ST, because those blocks still store the old unit. After height 3000 a fee below 0.000314 is rejected.
 
 Spend accepted into the mempool, not yet in a block:
 
@@ -347,7 +349,7 @@ Miner:
 - The daemon does not mine. Mining is the separate `psminer` release binary.
 - With no `--peer`, DNS still resolves `bootstrap.pisecure.org` onto P2P port 3141. Directory `p2p_host:p2p_port` values are hints. Blocks are not downloaded over HTTPS.
 
-Left untouched on purpose: PiHash2, hw_proof, Ed25519 spend checks, namelookup, and the `blk*.dat` layout. v0.2.16 keeps difficulty activation height 1. From block 32 the miner subsidy is 216 units and the validator 2 units go to a ps1, Foundation when `validator` is omitted. The 7% foundation fee share is paid to `ps1522db177e6452cbb6e48f296b19e6f2bdeb5b5e7a41a9552eb60a01464c3a5ba` only when that share is at least 1 unit. Accepted spends are reloaded from `mempool.json`. A mined block keeps those spends. `getblocktemplate` stamps one second past the parent when the node clock is still in that same second. If the parent is more than 120 seconds ahead, the call returns `clock behind tip`. A coinbase-only block paying a ps1 or a registered name needs no key. A timestamp must follow the parent and stay within 120 seconds, and a strictly taller peer chain replaces the local tip. psminer 0.2.16 keeps hashing the next nonce while the previous hash, merkle root, difficulty, and challenge stay the same, and it opens a new socket when that connection drops.
+Left untouched on purpose: PiHash2, hw_proof, Ed25519 spend checks, namelookup, and the `blk*.dat` layout. At height 3000 the stored unit becomes pi. PiHash2, the difficulty window, and the 0.218 314ST subsidy stay as they are. v0.2.16 keeps difficulty activation height 1. From block 32 the miner subsidy is 216 units and the validator 2 units go to a ps1, Foundation when `validator` is omitted. The 7% foundation fee share is paid to `ps1522db177e6452cbb6e48f296b19e6f2bdeb5b5e7a41a9552eb60a01464c3a5ba` only when that share is at least 1 unit. Accepted spends are reloaded from `mempool.json`. A mined block keeps those spends. `getblocktemplate` stamps one second past the parent when the node clock is still in that same second. If the parent is more than 120 seconds ahead, the call returns `clock behind tip`. A coinbase-only block paying a ps1 or a registered name needs no key. A timestamp must follow the parent and stay within 120 seconds, and a strictly taller peer chain replaces the local tip. psminer 0.2.16 keeps hashing the next nonce while the previous hash, merkle root, difficulty, and challenge stay the same, and it opens a new socket when that connection drops.
 
 ## Name backup
 

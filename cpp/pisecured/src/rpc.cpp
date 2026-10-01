@@ -204,6 +204,8 @@ namespace pisecured
                 return success_response(method_getbucketstatus(params), id);
             else if (method == "submitblock")
                 return success_response(method_submitblock(params), id);
+            else if (method == "getblockchaininfo")
+                return success_response(storage_ ? rpc_getblockchaininfo(*storage_) : json::object(), id);
             else if (method == "getblocktemplate")
                 return success_response(method_getblocktemplate(params), id);
             else if (method == "checkupdate")
