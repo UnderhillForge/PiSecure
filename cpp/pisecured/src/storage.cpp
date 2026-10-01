@@ -494,6 +494,22 @@ namespace pisecured
         return true;
     }
 
+    void Storage::reset_active_chain()
+    {
+        {
+            std::lock_guard<std::mutex> lock(utxo_mutex_);
+            utxo_.clear();
+        }
+        {
+            std::lock_guard<std::mutex> lock(mempool_mutex_);
+            mempool_.clear();
+        }
+        std::lock_guard<std::mutex> lock(io_mutex_);
+        height_to_hash_.clear();
+        best_block_hash_ = {};
+        best_height_ = 0;
+    }
+
     bool Storage::utxo_available(const std::array<uint8_t, 32> &txid, uint32_t vout, uint64_t &value) const
     {
         std::lock_guard<std::mutex> lock(utxo_mutex_);

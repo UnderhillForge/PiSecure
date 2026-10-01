@@ -2,7 +2,9 @@
 
 #include "storage.hpp"
 #include <nlohmann/json.hpp>
+#include <array>
 #include <string>
+#include <vector>
 
 namespace pisecured
 {
@@ -48,9 +50,19 @@ namespace pisecured
     bool restore_chain(Storage &storage);
 
     json rpc_getblocktemplate(Storage &storage, const json &params);
-    // require_local_policy: miner RPC. Synced blocks still check PiHash, model,
-    // and the serial commitment equation, but not this process's challenge cache.
+    // require_local_policy: miner RPC. A coinbase-only block that pays a ps1 or a
+    // registered name is valid here and on a peer. No wallet key is required.
+    // Synced blocks still check PiHash, model, and the serial commitment, but not
+    // this process's challenge cache.
     json rpc_submitblock(Storage &storage, P2PServer *p2p, const json &params, bool require_local_policy = true);
+    // True for 10 minutes after getblocktemplate is called.
+    void rpc_note_template_request();
+    bool rpc_mining_active();
+    // Rebuild the in-memory tip from the on-disk chain that ends at tip_hash.
+    bool rpc_replay_chain(Storage &storage, const std::array<uint8_t, 32> &tip_hash);
+    // Switch to blocks when their tip is taller than the local one. On failure
+    // the previous tip is restored from disk.
+    bool rpc_adopt_peer_chain(Storage &storage, P2PServer *p2p, const std::array<uint8_t, 32> &ancestor, const std::vector<json> &blocks);
     json rpc_sendtransaction(Storage &storage, const json &params);
     json rpc_getmempool(Storage &storage);
     json rpc_getblock(Storage &storage, const json &params);

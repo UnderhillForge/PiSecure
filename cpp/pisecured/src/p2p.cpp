@@ -19,6 +19,8 @@
 #include <random>
 #include <chrono>
 #include <algorithm>
+#include <unordered_map>
+#include <unordered_set>
 #include <openssl/sha.h>
 #include <poll.h>
 
@@ -1222,7 +1224,7 @@ namespace pisecured
         bootstrapHeartbeatThread_ = std::thread(&P2PServer::bootstrapHeartbeatLoop, this);
         threatDetectionThread_ = std::thread(&P2PServer::threatDetectionLoop, this);
 
-        std::cout << "P2P server started on port " << cfg.p2p_port << std::endl;
+        std::cout << "P2P listening on " << config_.p2p_bind << ":" << cfg.p2p_port << std::endl;
         const AdvertisedP2P advertised = advertisedP2P();
         std::cout << "advertising p2p at " << advertised.host << ":" << advertised.port
                   << " source=" << advertised.source << std::endl;
@@ -1998,8 +2000,13 @@ namespace pisecured
             else
             {
                 std::cout << "Header does not connect to local tip" << std::endl;
-                peer->recvBuffer.clear();
-                disconnectPeer(peer, "invalid header chain");
+                if (!peer->askedFromStart)
+                {
+                    peer->askedFromStart = true;
+                    std::vector<std::array<uint8_t, 32>> locator;
+                    std::array<uint8_t, 32> hashStop{};
+                    peer->sendMessage(P2PMsgType::GETHEADERS, MessageSerializer::serializeGetHeaders(locator, hashStop));
+                }
                 return;
             }
 
@@ -2086,10 +2093,29 @@ namespace pisecured
                 {
                     const std::string reason = result.value("reason", "");
                     const std::string hash = result.value("hash", block.value("hash", ""));
-                    std::cout << "Rejected synced block hash " << hash << " reason " << reason << std::endl;
-                    if (reason.find("does not link") == std::string::npos && reason.find("does not extend") == std::string::npos && reason.find("pihash") == std::string::npos && reason.find("PoW") == std::string::npos && reason.find("hw_proof") == std::string::npos)
+                    const bool off_tip = reason.find("does not link") != std::string::npos || reason.find("does not extend") != std::string::npos;
+                    if (off_tip)
                     {
-                        peer->increaseBanScore(20);
+                        noteOffTipBlock(block);
+                        adoptLaterPeerChain();
+                        if (storage_->has_tip())
+                        {
+                            bestHeight_ = storage_->get_best_height();
+                        }
+                        if (peer->startHeight > bestHeight_)
+                        {
+                            std::vector<std::array<uint8_t, 32>> locator = storage_->get_block_locator_hashes();
+                            std::array<uint8_t, 32> hashStop{};
+                            peer->sendMessage(P2PMsgType::GETHEADERS, MessageSerializer::serializeGetHeaders(locator, hashStop));
+                        }
+                    }
+                    else
+                    {
+                        std::cout << "Rejected synced block hash " << hash << " reason " << reason << std::endl;
+                        if (reason.find("pihash") == std::string::npos && reason.find("PoW") == std::string::npos && reason.find("hw_proof") == std::string::npos)
+                        {
+                            peer->increaseBanScore(20);
+                        }
                     }
                 }
             }
@@ -2349,6 +2375,22 @@ namespace pisecured
         std::vector<InvVect> invs = {inv};
         auto payload = MessageSerializer::serializeInv(invs);
         sendToAll(P2PMsgType::INV, payload);
+    }
+
+    void P2PServer::gossipBlock(const std::vector<uint8_t> &raw, const std::array<uint8_t, 32> &hash)
+    {
+        if (storage_ != nullptr && storage_->has_tip())
+        {
+            bestHeight_ = storage_->get_best_height();
+        }
+        InvVect inv;
+        inv.type = static_cast<uint32_t>(InvType::BLOCK);
+        inv.hash = hash;
+        broadcastInv(inv);
+        if (!raw.empty())
+        {
+            sendToAll(P2PMsgType::BLOCK, MessageSerializer::serializeBlock(raw));
+        }
     }
 
     void P2PServer::requestBlock(const std::array<uint8_t, 32> &blockHash)
@@ -2820,6 +2862,10 @@ namespace pisecured
 
     bool P2PServer::shouldAcceptConnection() const
     {
+        if (!probeReachable_.load())
+        {
+            return false;
+        }
         std::lock_guard<std::mutex> lock(peersMutex_);
         return peers_.size() < static_cast<size_t>(MAX_PEERS);
     }
@@ -2909,6 +2955,44 @@ namespace pisecured
             return out;
         }
 
+        bool parse_hex32(const std::string &text, std::array<uint8_t, 32> &out)
+        {
+            if (text.size() != 64)
+            {
+                return false;
+            }
+            auto nybble = [](char c) -> int
+            {
+                if (c >= '0' && c <= '9')
+                    return c - '0';
+                if (c >= 'a' && c <= 'f')
+                    return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F')
+                    return c - 'A' + 10;
+                return -1;
+            };
+            for (size_t i = 0; i < 32; ++i)
+            {
+                const int hi = nybble(text[i * 2]);
+                const int lo = nybble(text[i * 2 + 1]);
+                if (hi < 0 || lo < 0)
+                {
+                    return false;
+                }
+                out[i] = static_cast<uint8_t>((hi << 4) | lo);
+            }
+            return true;
+        }
+
+        std::string lower_copy(std::string text)
+        {
+            for (char &ch : text)
+            {
+                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            }
+            return text;
+        }
+
         bool foreignGenesis(const json &node)
         {
             std::string genesis;
@@ -2927,7 +3011,7 @@ namespace pisecured
         if (!advertised.host.empty())
         {
             const char *base = config_.testnet ? "https://bootstrap-testnet.pisecure.org" : "https://bootstrap.pisecure.org";
-            const json body = {{"host", advertised.host}, {"port", 3141}};
+            const json body = {{"host", advertised.host}, {"port", config_.p2p_port > 0 ? config_.p2p_port : 3141}};
             std::string response;
             const int code = bootstrapHttp("POST", std::string(base) + "/api/v1/nodes/probe", body.dump(), response);
             if (code == 200)
@@ -2967,8 +3051,8 @@ namespace pisecured
                 {"p2p_host", advertised.host},
                 {"p2p_port", advertised.port},
                 {"rpc_port", config_.ws_port},
-                {"inbound", probeReachable_},
-                {"accepts_inbound", probeReachable_},
+                {"inbound", probeReachable_.load()},
+                {"accepts_inbound", probeReachable_.load()},
                 {"height", bestHeight_},
                 {"tip", tip},
             };
@@ -3015,10 +3099,10 @@ namespace pisecured
                 {"height", bestHeight_},
                 {"tip", tip},
                 {"status", "active"},
-                {"mining_active", false},
+                {"mining_active", rpc_mining_active()},
                 {"peers_connected", static_cast<int>(getPeerCount())},
-                {"inbound", probeReachable_},
-                {"accepts_inbound", probeReachable_},
+                {"inbound", probeReachable_.load()},
+                {"accepts_inbound", probeReachable_.load()},
             };
             std::string response;
             int code = bootstrapHttp("POST", std::string(base) + "/api/v1/nodes/status", body.dump(), response);
@@ -3305,21 +3389,322 @@ namespace pisecured
         }
     }
 
+    void P2PServer::noteOffTipBlock(const nlohmann::json &block)
+    {
+        try
+        {
+            if (!block.is_object() || !block.contains("hash") || !block["hash"].is_string())
+            {
+                return;
+            }
+            if (!block.contains("prev_block_hash") || !block["prev_block_hash"].is_string())
+            {
+                return;
+            }
+            if (!block.contains("height") || !block["height"].is_number_unsigned())
+            {
+                return;
+            }
+            const std::string hash = lower_copy(block["hash"].get<std::string>());
+            const std::string prev = lower_copy(block["prev_block_hash"].get<std::string>());
+            const uint32_t height = block["height"].get<uint32_t>();
+            if (height == 0)
+            {
+                return;
+            }
+            std::array<uint8_t, 32> raw{};
+            std::array<uint8_t, 32> prev_raw{};
+            if (!parse_hex32(hash, raw) || !parse_hex32(prev, prev_raw))
+            {
+                return;
+            }
+            std::lock_guard<std::mutex> lock(heldMutex_);
+            for (auto &held : heldBlocks_)
+            {
+                if (held.hash == hash)
+                {
+                    held.body = block;
+                    held.prev = prev;
+                    held.height = height;
+                    return;
+                }
+            }
+            if (heldBlocks_.size() >= 4000)
+            {
+                heldBlocks_.erase(heldBlocks_.begin());
+            }
+            HeldBlock item;
+            item.body = block;
+            item.hash = hash;
+            item.prev = prev;
+            item.height = height;
+            heldBlocks_.push_back(std::move(item));
+        }
+        catch (const std::exception &)
+        {
+        }
+    }
+
+    void P2PServer::adoptLaterPeerChain()
+    {
+        if (storage_ == nullptr)
+        {
+            return;
+        }
+        std::unique_lock<std::mutex> adopt_lock(adoptMutex_, std::try_to_lock);
+        if (!adopt_lock.owns_lock())
+        {
+            return;
+        }
+
+        std::unordered_set<std::array<uint8_t, 32>, Hash256> canonical;
+        const uint32_t local = storage_->has_tip() ? storage_->get_best_height() : 0;
+        if (storage_->has_tip())
+        {
+            std::array<uint8_t, 32> cursor = storage_->get_best_block_hash();
+            uint32_t guard = local + 2;
+            while (guard-- > 0)
+            {
+                canonical.insert(cursor);
+                auto header = storage_->get_header_by_hash(cursor);
+                if (!header || header->prevBlockHash == std::array<uint8_t, 32>{})
+                {
+                    break;
+                }
+                cursor = header->prevBlockHash;
+            }
+        }
+
+        std::vector<HeldBlock> held;
+        std::vector<std::string> refused;
+        {
+            std::lock_guard<std::mutex> lock(heldMutex_);
+            if (!canonical.empty())
+            {
+                heldBlocks_.erase(std::remove_if(heldBlocks_.begin(), heldBlocks_.end(), [&](const HeldBlock &item)
+                                                 {
+                                                     std::array<uint8_t, 32> raw{};
+                                                     return parse_hex32(item.hash, raw) && canonical.count(raw) != 0; }),
+                                  heldBlocks_.end());
+            }
+            held = heldBlocks_;
+            refused = refusedTips_;
+        }
+        if (held.empty())
+        {
+            return;
+        }
+
+        std::unordered_map<std::string, size_t> by_hash;
+        for (size_t i = 0; i < held.size(); ++i)
+        {
+            by_hash[held[i].hash] = i;
+        }
+
+        struct Candidate
+        {
+            uint32_t height = 0;
+            std::string tip;
+            std::array<uint8_t, 32> ancestor{};
+            std::vector<json> bodies;
+        };
+        bool have = false;
+        Candidate best;
+        const uint64_t now = static_cast<uint64_t>(std::chrono::system_clock::now().time_since_epoch().count() / 1000000000LL);
+
+        for (size_t i = 0; i < held.size(); ++i)
+        {
+            if (held[i].height <= local)
+            {
+                continue;
+            }
+            if (std::find(refused.begin(), refused.end(), held[i].hash) != refused.end())
+            {
+                continue;
+            }
+
+            std::vector<size_t> rev;
+            std::array<uint8_t, 32> ancestor{};
+            bool found = false;
+            size_t cursor = i;
+            std::unordered_set<std::string> seen;
+            for (size_t guard = 0; guard < held.size() + 1; ++guard)
+            {
+                if (!seen.insert(held[cursor].hash).second)
+                {
+                    break;
+                }
+                rev.push_back(cursor);
+                std::array<uint8_t, 32> prev{};
+                if (!parse_hex32(held[cursor].prev, prev) || prev == std::array<uint8_t, 32>{})
+                {
+                    break;
+                }
+                if (canonical.count(prev) != 0)
+                {
+                    ancestor = prev;
+                    found = true;
+                    break;
+                }
+                auto link = by_hash.find(held[cursor].prev);
+                if (link == by_hash.end())
+                {
+                    break;
+                }
+                cursor = link->second;
+            }
+            if (!found || rev.empty())
+            {
+                continue;
+            }
+
+            auto ancestor_header = storage_->get_header_by_hash(ancestor);
+            if (!ancestor_header)
+            {
+                continue;
+            }
+            std::vector<json> bodies;
+            bodies.reserve(rev.size());
+            std::array<uint8_t, 32> expect_prev = ancestor;
+            uint32_t expect_height = ancestor_header->height + 1;
+            bool linked = true;
+            for (auto it = rev.rbegin(); it != rev.rend(); ++it)
+            {
+                const HeldBlock &block = held[*it];
+                std::array<uint8_t, 32> prev{};
+                std::array<uint8_t, 32> hash{};
+                if (!parse_hex32(block.prev, prev) || !parse_hex32(block.hash, hash) || prev != expect_prev || block.height != expect_height)
+                {
+                    linked = false;
+                    break;
+                }
+                bodies.push_back(block.body);
+                expect_prev = hash;
+                ++expect_height;
+            }
+            if (!linked || bodies.empty())
+            {
+                continue;
+            }
+
+            bool ahead = false;
+            uint64_t parent_time = ancestor_header->timestamp;
+            for (const auto &body : bodies)
+            {
+                if (!body.contains("timestamp") || !body["timestamp"].is_number_unsigned())
+                {
+                    break;
+                }
+                const uint64_t stamp = body["timestamp"].get<uint64_t>();
+                if (stamp > now + 120)
+                {
+                    std::cerr << "timestamp invalid parent=" << parent_time << " block=" << stamp << " node=" << now << "\n";
+                    ahead = true;
+                    break;
+                }
+                parent_time = stamp;
+            }
+            if (ahead)
+            {
+                continue;
+            }
+            if (!have || held[i].height > best.height)
+            {
+                have = true;
+                best.height = held[i].height;
+                best.tip = held[i].hash;
+                best.ancestor = ancestor;
+                best.bodies = std::move(bodies);
+            }
+        }
+        if (!have)
+        {
+            return;
+        }
+
+        bool ok = false;
+        try
+        {
+            ok = rpc_adopt_peer_chain(*storage_, this, best.ancestor, best.bodies);
+        }
+        catch (const std::exception &ex)
+        {
+            std::cerr << "peer chain rejected " << ex.what() << "\n";
+            ok = false;
+        }
+        if (!ok)
+        {
+            const uint32_t after = storage_->has_tip() ? storage_->get_best_height() : 0;
+            if (best.height > after)
+            {
+                std::lock_guard<std::mutex> lock(heldMutex_);
+                if (std::find(refusedTips_.begin(), refusedTips_.end(), best.tip) == refusedTips_.end())
+                {
+                    if (refusedTips_.size() >= 256)
+                    {
+                        refusedTips_.erase(refusedTips_.begin());
+                    }
+                    refusedTips_.push_back(best.tip);
+                }
+            }
+            return;
+        }
+
+        if (storage_->has_tip())
+        {
+            bestHeight_ = storage_->get_best_height();
+        }
+        std::unordered_set<std::string> applied;
+        for (const auto &body : best.bodies)
+        {
+            if (body.contains("hash") && body["hash"].is_string())
+            {
+                applied.insert(lower_copy(body["hash"].get<std::string>()));
+            }
+        }
+        std::lock_guard<std::mutex> lock(heldMutex_);
+        heldBlocks_.erase(std::remove_if(heldBlocks_.begin(), heldBlocks_.end(), [&](const HeldBlock &item)
+                                         { return applied.count(item.hash) != 0; }),
+                          heldBlocks_.end());
+        refusedTips_.erase(std::remove(refusedTips_.begin(), refusedTips_.end(), best.tip), refusedTips_.end());
+    }
+
+    void P2PServer::syncLaterPeers()
+    {
+        if (storage_ == nullptr)
+        {
+            return;
+        }
+        if (storage_->has_tip())
+        {
+            bestHeight_ = storage_->get_best_height();
+        }
+        std::vector<std::shared_ptr<Peer>> current;
+        {
+            std::lock_guard<std::mutex> lock(peersMutex_);
+            current = peers_;
+        }
+        for (const auto &peer : current)
+        {
+            if (!peer->handshakeComplete || peer->fd < 0 || peer->startHeight <= bestHeight_)
+            {
+                continue;
+            }
+            std::vector<std::array<uint8_t, 32>> locator = storage_->get_block_locator_hashes();
+            std::array<uint8_t, 32> hashStop{};
+            peer->sendMessage(P2PMsgType::GETHEADERS, MessageSerializer::serializeGetHeaders(locator, hashStop));
+        }
+        adoptLaterPeerChain();
+    }
+
     void P2PServer::bootstrapHeartbeatLoop()
     {
-        // An explicit --peer is a sync client. It must not publish under this
-        // process id or it would overwrite the primary host and ports.
-        const bool publish = config_.peers.empty();
-        if (publish)
-        {
-            probeAdvertisedP2P();
-        }
+        // Probe the listen port before registering. A failed probe still dials
+        // the directory's inbound peers and still posts this node.
+        probeAdvertisedP2P();
         refreshBootstrapHints();
-        if (publish)
-        {
-            registerBootstrapNode();
-            reportBootstrapChain();
-        }
+        registerBootstrapNode();
+        reportBootstrapChain();
         auto nextStatus = std::chrono::steady_clock::now() + std::chrono::seconds(300);
         auto nextProbe = std::chrono::steady_clock::now() + std::chrono::seconds(3600);
         auto nextExchange = std::chrono::steady_clock::now() + std::chrono::seconds(60);
@@ -3330,6 +3715,7 @@ namespace pisecured
             {
                 break;
             }
+            syncLaterPeers();
             if (std::chrono::steady_clock::now() >= nextExchange)
             {
                 exchangeAddresses();
@@ -3339,20 +3725,14 @@ namespace pisecured
             {
                 probeAdvertisedP2P();
                 nextProbe = std::chrono::steady_clock::now() + std::chrono::seconds(3600);
-                if (publish)
-                {
-                    postBootstrapStatus();
-                }
+                postBootstrapStatus();
             }
             refreshBootstrapHints();
-            if (publish)
+            reportBootstrapChain();
+            if (std::chrono::steady_clock::now() >= nextStatus)
             {
-                reportBootstrapChain();
-                if (std::chrono::steady_clock::now() >= nextStatus)
-                {
-                    postBootstrapStatus();
-                    nextStatus = std::chrono::steady_clock::now() + std::chrono::seconds(300);
-                }
+                postBootstrapStatus();
+                nextStatus = std::chrono::steady_clock::now() + std::chrono::seconds(300);
             }
 
             if (bootstrapWs_ && bootstrapWs_->isConnected())

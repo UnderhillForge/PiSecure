@@ -92,6 +92,9 @@ namespace pisecured
         uint32_t tip_difficulty() const;
         // Index a frame already present in blk*.dat (used on startup).
         bool index_existing_block(uint64_t index, const BlockHeader &header);
+        // Drop the active tip, height index, UTXO set, and mempool.
+        // blk*.dat and the byte index of stored blocks stay.
+        void reset_active_chain();
 
         struct UtxoSpend
         {

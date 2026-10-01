@@ -9,6 +9,7 @@
 #include <openssl/sha.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -135,6 +136,9 @@ namespace pisecured
         {
             return static_cast<uint64_t>(std::chrono::system_clock::now().time_since_epoch().count() / 1000000000LL);
         }
+
+        std::recursive_mutex g_chain_mu;
+        std::atomic<uint64_t> g_template_unix{0};
 
         bool official_pi_model(const std::string &model)
         {
@@ -2103,160 +2107,353 @@ namespace pisecured
                 std::cout << "mempool restored " << kept << "\n";
             }
         }
+
+        struct FoundBlock
+        {
+            uint64_t index = 0;
+            uint32_t height = 0;
+            std::array<uint8_t, 32> prev{};
+            std::array<uint8_t, 32> hash{};
+            json obj;
+        };
+
+        std::vector<FoundBlock> load_found_blocks(Storage &storage)
+        {
+            std::vector<FoundBlock> found;
+            const uint64_t count = storage.next_index();
+            for (uint64_t i = 0; i < count; ++i)
+            {
+                auto raw = storage.read_block(i);
+                if (!raw)
+                {
+                    continue;
+                }
+                try
+                {
+                    const std::string text(raw->begin(), raw->end());
+                    json obj = json::parse(text);
+                    if (!obj.is_object() || !obj.contains("height") || !obj.contains("hash") || !obj.contains("prev_block_hash"))
+                    {
+                        continue;
+                    }
+                    FoundBlock item;
+                    item.index = i;
+                    item.height = obj["height"].get<uint32_t>();
+                    if (!from_hex(obj.value("prev_block_hash", ""), item.prev) || !from_hex(obj.value("hash", ""), item.hash))
+                    {
+                        continue;
+                    }
+                    item.obj = std::move(obj);
+                    found.push_back(std::move(item));
+                }
+                catch (const std::exception &)
+                {
+                }
+            }
+            return found;
+        }
+
+        std::vector<FoundBlock> chain_ending_at(const std::vector<FoundBlock> &found, const std::array<uint8_t, 32> &tip)
+        {
+            std::unordered_map<std::array<uint8_t, 32>, size_t, Hash256> by_hash;
+            for (size_t i = 0; i < found.size(); ++i)
+            {
+                auto it = by_hash.find(found[i].hash);
+                if (it == by_hash.end() || found[i].index < found[it->second].index)
+                {
+                    by_hash[found[i].hash] = i;
+                }
+            }
+            std::vector<size_t> rev;
+            std::array<uint8_t, 32> cursor = tip;
+            for (size_t guard = 0; guard < found.size() + 1; ++guard)
+            {
+                auto it = by_hash.find(cursor);
+                if (it == by_hash.end())
+                {
+                    return {};
+                }
+                rev.push_back(it->second);
+                if (is_zero(found[it->second].prev))
+                {
+                    break;
+                }
+                cursor = found[it->second].prev;
+                if (guard + 1 == found.size() + 1)
+                {
+                    return {};
+                }
+            }
+            if (rev.empty() || !is_zero(found[rev.back()].prev))
+            {
+                return {};
+            }
+            std::vector<FoundBlock> chain;
+            chain.reserve(rev.size());
+            uint32_t expect = 1;
+            std::array<uint8_t, 32> expect_prev{};
+            for (auto it = rev.rbegin(); it != rev.rend(); ++it)
+            {
+                const FoundBlock &block = found[*it];
+                if (block.height != expect || block.prev != expect_prev)
+                {
+                    return {};
+                }
+                chain.push_back(block);
+                expect_prev = block.hash;
+                ++expect;
+            }
+            return chain;
+        }
+
+        std::vector<FoundBlock> choose_longest_chain(const std::vector<FoundBlock> &found)
+        {
+            size_t best = found.size();
+            uint32_t best_height = 0;
+            uint64_t best_index = 0;
+            for (size_t i = 0; i < found.size(); ++i)
+            {
+                auto chain = chain_ending_at(found, found[i].hash);
+                if (chain.empty() || chain.back().height != chain.size())
+                {
+                    continue;
+                }
+                const uint32_t height = chain.back().height;
+                if (best == found.size() || height > best_height || (height == best_height && found[i].index < best_index))
+                {
+                    best = i;
+                    best_height = height;
+                    best_index = found[i].index;
+                }
+            }
+            if (best == found.size())
+            {
+                return {};
+            }
+            return chain_ending_at(found, found[best].hash);
+        }
+
+        bool apply_chain(Storage &storage, const std::vector<FoundBlock> &chosen)
+        {
+            for (const auto &item : chosen)
+            {
+                BlockHeader header{};
+                header.version = item.obj.value("version", 1u);
+                header.prevBlockHash = item.prev;
+                from_hex(item.obj.value("merkle_root", std::string(64, '0')), header.merkleRoot);
+                header.timestamp = item.obj.value("timestamp", 0ull);
+                header.difficulty = item.obj.value("difficulty", 0u);
+                header.nonce = item.obj.value("nonce", 0ull);
+                header.hash = item.hash;
+                header.height = item.height;
+                if (!storage.index_existing_block(item.index, header))
+                {
+                    std::cerr << "Failed to index block at height " << item.height << "\n";
+                    return false;
+                }
+
+                std::vector<Storage::UtxoCredit> coinbase_credits;
+                if (item.obj.contains("coinbase") && item.obj["coinbase"].is_object())
+                {
+                    const auto &cb = item.obj["coinbase"];
+                    std::array<uint8_t, 32> txid{};
+                    if (cb.contains("txid") && cb["txid"].is_string() && from_hex(cb["txid"].get<std::string>(), txid))
+                    {
+                        if (cb.contains("outputs") && cb["outputs"].is_array())
+                        {
+                            uint32_t vout = 0;
+                            for (const auto &o : cb["outputs"])
+                            {
+                                uint64_t units = 0;
+                                if (o.is_object() && units_of(o, units) && units > 0)
+                                {
+                                    coinbase_credits.push_back(Storage::UtxoCredit{txid, vout, units, o.value("address", std::string())});
+                                }
+                                ++vout;
+                            }
+                        }
+                        else
+                        {
+                            coinbase_credits.push_back(Storage::UtxoCredit{txid, 0, cb.value("value", 0ull), cb.value("wallet", std::string())});
+                        }
+                    }
+                }
+                if (!coinbase_credits.empty() && !storage.apply_utxos({}, coinbase_credits))
+                {
+                    std::cerr << "UTXO replay failed at height " << item.height << "\n";
+                    return false;
+                }
+                if (item.obj.contains("txs") && item.obj["txs"].is_array())
+                {
+                    for (const auto &txj : item.obj["txs"])
+                    {
+                        Tx tx;
+                        std::string reason;
+                        if (!parse_user_tx(txj, tx, reason))
+                        {
+                            continue;
+                        }
+                        std::vector<Storage::UtxoSpend> spends;
+                        std::vector<Storage::UtxoCredit> credits;
+                        for (const auto &in : tx.inputs)
+                        {
+                            spends.push_back(Storage::UtxoSpend{in.prev, in.vout});
+                        }
+                        uint32_t vout = 0;
+                        for (const auto &o : tx.outputs)
+                        {
+                            credits.push_back(Storage::UtxoCredit{tx.txid, vout, o.value, o.address});
+                            ++vout;
+                        }
+                        if (!storage.apply_utxos(spends, credits))
+                        {
+                            std::cerr << "UTXO replay failed at height " << item.height << "\n";
+                            return false;
+                        }
+                        std::string flag_reason;
+                        if (!apply_flag_tx(g_flags, tx, item.height, flag_reason))
+                        {
+                            std::cerr << "flag replay failed at height " << item.height << "\n";
+                            return false;
+                        }
+                    }
+                }
+                absorb_block_names(item.obj);
+            }
+            return true;
+        }
     }
 
     bool restore_chain(Storage &storage)
     {
+        std::lock_guard<std::recursive_mutex> lock(g_chain_mu);
         g_flags = FlagBook();
         load_names_file(storage.datadir());
-        const uint64_t count = storage.next_index();
-        struct Found
-        {
-            uint64_t index = 0;
-            uint32_t height = 0;
-            json obj;
-        };
-        std::vector<Found> found;
-        for (uint64_t i = 0; i < count; ++i)
-        {
-            auto raw = storage.read_block(i);
-            if (!raw)
-            {
-                continue;
-            }
-            try
-            {
-                const std::string text(raw->begin(), raw->end());
-                json obj = json::parse(text);
-                if (!obj.is_object() || !obj.contains("height") || !obj.contains("hash") || !obj.contains("prev_block_hash"))
-                {
-                    continue;
-                }
-                found.push_back(Found{i, obj["height"].get<uint32_t>(), obj});
-            }
-            catch (const std::exception &)
-            {
-            }
-        }
-        std::sort(found.begin(), found.end(), [](const Found &a, const Found &b)
-                  { return a.height < b.height; });
-
-        std::array<uint8_t, 32> expected_prev{};
-        uint32_t expected_height = 1;
-        uint32_t restored = 0;
-        for (const auto &item : found)
-        {
-            std::array<uint8_t, 32> prev{};
-            std::array<uint8_t, 32> hash{};
-            if (!from_hex(item.obj.value("prev_block_hash", ""), prev) || !from_hex(item.obj.value("hash", ""), hash))
-            {
-                continue;
-            }
-            if (item.height != expected_height || prev != expected_prev)
-            {
-                continue;
-            }
-
-            BlockHeader header{};
-            header.version = item.obj.value("version", 1u);
-            header.prevBlockHash = prev;
-            from_hex(item.obj.value("merkle_root", std::string(64, '0')), header.merkleRoot);
-            header.timestamp = item.obj.value("timestamp", 0ull);
-            header.difficulty = item.obj.value("difficulty", 0u);
-            header.nonce = item.obj.value("nonce", 0ull);
-            header.hash = hash;
-            header.height = item.height;
-            if (!storage.index_existing_block(item.index, header))
-            {
-                std::cerr << "Failed to index block at height " << item.height << "\n";
-                return false;
-            }
-
-            std::vector<Storage::UtxoCredit> coinbase_credits;
-            if (item.obj.contains("coinbase") && item.obj["coinbase"].is_object())
-            {
-                const auto &cb = item.obj["coinbase"];
-                std::array<uint8_t, 32> txid{};
-                if (cb.contains("txid") && cb["txid"].is_string() && from_hex(cb["txid"].get<std::string>(), txid))
-                {
-                    if (cb.contains("outputs") && cb["outputs"].is_array())
-                    {
-                        uint32_t vout = 0;
-                        for (const auto &o : cb["outputs"])
-                        {
-                            uint64_t units = 0;
-                            if (o.is_object() && units_of(o, units) && units > 0)
-                            {
-                                coinbase_credits.push_back(Storage::UtxoCredit{txid, vout, units, o.value("address", std::string())});
-                            }
-                            ++vout;
-                        }
-                    }
-                    else
-                    {
-                        coinbase_credits.push_back(Storage::UtxoCredit{txid, 0, cb.value("value", 0ull), cb.value("wallet", std::string())});
-                    }
-                }
-            }
-            if (!coinbase_credits.empty() && !storage.apply_utxos({}, coinbase_credits))
-            {
-                std::cerr << "UTXO replay failed at height " << item.height << "\n";
-                return false;
-            }
-            if (item.obj.contains("txs") && item.obj["txs"].is_array())
-            {
-                for (const auto &txj : item.obj["txs"])
-                {
-                    Tx tx;
-                    std::string reason;
-                    if (!parse_user_tx(txj, tx, reason))
-                    {
-                        continue;
-                    }
-                    std::vector<Storage::UtxoSpend> spends;
-                    std::vector<Storage::UtxoCredit> credits;
-                    for (const auto &in : tx.inputs)
-                    {
-                        spends.push_back(Storage::UtxoSpend{in.prev, in.vout});
-                    }
-                    uint32_t vout = 0;
-                    for (const auto &o : tx.outputs)
-                    {
-                        credits.push_back(Storage::UtxoCredit{tx.txid, vout, o.value, o.address});
-                        ++vout;
-                    }
-                    if (!storage.apply_utxos(spends, credits))
-                    {
-                        std::cerr << "UTXO replay failed at height " << item.height << "\n";
-                        return false;
-                    }
-                    std::string flag_reason;
-                    if (!apply_flag_tx(g_flags, tx, item.height, flag_reason))
-                    {
-                        std::cerr << "flag replay failed at height " << item.height << "\n";
-                        return false;
-                    }
-                }
-            }
-            absorb_block_names(item.obj);
-            expected_prev = hash;
-            expected_height = item.height + 1;
-            ++restored;
-        }
-        if (restored == 0)
+        const auto chosen = choose_longest_chain(load_found_blocks(storage));
+        storage.reset_active_chain();
+        if (chosen.empty())
         {
             std::cout << "Chain restore: no linked blocks on disk\n";
+            load_mempool(storage);
+            return true;
         }
-        else
+        if (!apply_chain(storage, chosen))
         {
-            std::cout << "Chain restore: tip height " << storage.get_best_height() << "\n";
+            return false;
         }
+        std::cout << "Chain restore: tip height " << storage.get_best_height()
+                  << " hash " << to_hex(storage.get_best_block_hash()) << "\n";
         load_mempool(storage);
         return true;
     }
 
+    void rpc_note_template_request()
+    {
+        g_template_unix.store(now_seconds());
+    }
+
+    bool rpc_mining_active()
+    {
+        const uint64_t at = g_template_unix.load();
+        if (at == 0)
+        {
+            return false;
+        }
+        const uint64_t now = now_seconds();
+        return now >= at && now - at <= 600;
+    }
+
+    bool rpc_replay_chain(Storage &storage, const std::array<uint8_t, 32> &tip_hash)
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_chain_mu);
+        const auto chosen = chain_ending_at(load_found_blocks(storage), tip_hash);
+        if (chosen.empty() || chosen.back().hash != tip_hash)
+        {
+            return false;
+        }
+        g_flags = FlagBook();
+        storage.reset_active_chain();
+        if (!apply_chain(storage, chosen))
+        {
+            return false;
+        }
+        load_mempool(storage);
+        std::cout << "replayed chain height " << storage.get_best_height()
+                  << " hash " << to_hex(tip_hash) << "\n";
+        return true;
+    }
+
+    bool rpc_adopt_peer_chain(Storage &storage, P2PServer *p2p, const std::array<uint8_t, 32> &ancestor, const std::vector<json> &blocks)
+    {
+        std::vector<std::vector<uint8_t>> gossip_raw;
+        std::vector<std::array<uint8_t, 32>> gossip_hash;
+        bool ok = false;
+        {
+            std::lock_guard<std::recursive_mutex> lock(g_chain_mu);
+            if (blocks.empty() || !blocks.back().is_object())
+            {
+                return false;
+            }
+            const uint32_t peer_height = blocks.back().value("height", 0u);
+            const uint32_t local_height = storage.has_tip() ? storage.get_best_height() : 0;
+            // Equal height stays on the local tip. Only a strictly taller chain moves it.
+            if (peer_height <= local_height)
+            {
+                return false;
+            }
+            const bool had = storage.has_tip();
+            const std::array<uint8_t, 32> old_tip = had ? storage.get_best_block_hash() : std::array<uint8_t, 32>{};
+            const bool ancestor_is_tip = had && old_tip == ancestor;
+            if (!ancestor_is_tip && !rpc_replay_chain(storage, ancestor))
+            {
+                std::cerr << "peer chain replay failed\n";
+                return false;
+            }
+            for (const auto &block : blocks)
+            {
+                // Gossip only after every block in the chain has been accepted.
+                const json result = rpc_submitblock(storage, nullptr, block, false);
+                if (result.value("status", "") != "accepted")
+                {
+                    std::cout << "peer chain rejected " << result.value("reason", "") << "\n";
+                    if (had && !rpc_replay_chain(storage, old_tip))
+                    {
+                        std::cerr << "replay of previous tip failed\n";
+                    }
+                    return false;
+                }
+            }
+            gossip_raw.reserve(blocks.size());
+            gossip_hash.reserve(blocks.size());
+            for (const auto &block : blocks)
+            {
+                std::array<uint8_t, 32> digest{};
+                if (!from_hex(block.value("hash", ""), digest))
+                {
+                    continue;
+                }
+                const std::string dumped = block.dump();
+                gossip_raw.emplace_back(dumped.begin(), dumped.end());
+                gossip_hash.push_back(digest);
+            }
+            std::cout << "adopted peer chain height " << storage.get_best_height()
+                      << " hash " << to_hex(storage.get_best_block_hash()) << "\n";
+            ok = true;
+        }
+        if (ok && p2p != nullptr)
+        {
+            for (size_t i = 0; i < gossip_raw.size() && i < gossip_hash.size(); ++i)
+            {
+                p2p->gossipBlock(gossip_raw[i], gossip_hash[i]);
+            }
+        }
+        return ok;
+    }
+
     json rpc_getblocktemplate(Storage &storage, const json &params)
     {
+        rpc_note_template_request();
+        std::lock_guard<std::recursive_mutex> lock(g_chain_mu);
         const std::string wallet = wallet_from_params(params);
         std::string shown;
         std::string payout;
@@ -2470,6 +2667,7 @@ namespace pisecured
 
     json rpc_submitblock(Storage &storage, P2PServer *p2p, const json &params, bool require_local_policy)
     {
+        std::lock_guard<std::recursive_mutex> lock(g_chain_mu);
         json block = as_object_param(params);
         if (!block.is_object() || block.empty())
         {
@@ -2505,6 +2703,7 @@ namespace pisecured
         }
         if (!block.contains("timestamp") || !block["timestamp"].is_number_unsigned())
         {
+            std::cerr << "timestamp invalid parent=none block=missing node=" << now_seconds() << "\n";
             return rejected("timestamp invalid");
         }
         if (!block.contains("difficulty") || !block["difficulty"].is_number_unsigned())
@@ -2610,17 +2809,26 @@ namespace pisecured
         }
         const uint64_t timestamp = block["timestamp"].get<uint64_t>();
         const uint64_t now = now_seconds();
-        if (timestamp == 0 || timestamp > now + 120)
-        {
-            return rejected("timestamp invalid");
-        }
+        uint64_t parent_time = 0;
+        bool have_parent = false;
         if (tipped)
         {
             auto prev_header = storage.get_header_by_hash(expect_prev);
-            if (prev_header && timestamp <= prev_header->timestamp)
+            if (!prev_header)
             {
+                std::cerr << "timestamp invalid parent=none block=" << timestamp << " node=" << now << "\n";
                 return rejected("timestamp invalid");
             }
+            parent_time = prev_header->timestamp;
+            have_parent = true;
+        }
+        // Valid only after the parent and no more than 120 seconds ahead of this node.
+        // Height 1 has no parent, so its time has to be after 0.
+        if (timestamp <= parent_time || timestamp > now + 120)
+        {
+            std::cerr << "timestamp invalid parent=" << (have_parent ? std::to_string(parent_time) : std::string("none"))
+                      << " block=" << timestamp << " node=" << now << "\n";
+            return rejected("timestamp invalid");
         }
         const uint64_t nonce = block["nonce"].get<uint64_t>();
         if (coinbase.value("height", 0u) != height)
@@ -2647,14 +2855,6 @@ namespace pisecured
                 txs.push_back(tx);
             }
         }
-        // A block this node mines must fold a confirmed output into the purse.
-        // Historical blocks, including ones learned from a peer, are accepted
-        // as stored. Restore does not run this check.
-        if (require_local_policy && txs.empty() && !storage.list_utxos(payout).empty())
-        {
-            return rejected("purse missing");
-        }
-
         uint64_t fee_units = 0;
         for (const auto &tx : txs)
         {
@@ -2870,6 +3070,11 @@ namespace pisecured
         header.height = height;
 
         std::vector<uint8_t> raw(dumped.begin(), dumped.end());
+        if (storage.block_index(digest))
+        {
+            const auto have = storage.get_header_by_hash(digest);
+            return json{{"status", "accepted"}, {"hash", to_hex(digest)}, {"height", have ? have->height : height}, {"duplicate", true}};
+        }
         if (!storage.store_block_with_header(digest, header, raw))
         {
             return rejected("block too large");
@@ -2923,12 +3128,9 @@ namespace pisecured
             save_mempool(storage);
         }
 
-        if (p2p != nullptr && p2p->getPeerCount() > 0)
+        if (p2p != nullptr)
         {
-            InvVect inv;
-            inv.type = static_cast<uint32_t>(InvType::BLOCK);
-            inv.hash = digest;
-            p2p->broadcastInv(inv);
+            p2p->gossipBlock(raw, digest);
         }
 
         std::cout << "Accepted block height " << height << " hash " << to_hex(digest) << "\n";

@@ -2,6 +2,7 @@
 
 #include "config.hpp"
 #include "storage.hpp"
+#include <nlohmann/json.hpp>
 #include <thread>
 #include <atomic>
 #include <vector>
@@ -198,6 +199,7 @@ namespace pisecured
         uint32_t version;
         uint32_t services;
         uint32_t startHeight;
+        bool askedFromStart = false;
         std::string userAgent;
         uint64_t pingNonce;
         std::set<InvVect> knownInv;
@@ -291,6 +293,8 @@ namespace pisecured
         void connectToPeers();
         void sendToAll(P2PMsgType type, const std::vector<uint8_t> &payload);
         void broadcastInv(const InvVect &inv);
+        // Tell every handshake-complete peer about a block that was just accepted.
+        void gossipBlock(const std::vector<uint8_t> &raw, const std::array<uint8_t, 32> &hash);
         void requestBlock(const std::array<uint8_t, 32> &blockHash);
         void requestHeaders(uint32_t startHeight);
         size_t getPeerCount() const;
@@ -328,7 +332,21 @@ namespace pisecured
         std::vector<std::pair<std::string, int>> bootstrapHints_;
         std::string bootstrapNodeId_;
         bool bootstrapIdOwned_ = false;
-        bool probeReachable_ = false;
+        std::atomic<bool> probeReachable_{false};
+        std::mutex adoptMutex_;
+        struct HeldBlock
+        {
+            nlohmann::json body;
+            std::string hash;
+            std::string prev;
+            uint32_t height = 0;
+        };
+        std::mutex heldMutex_;
+        std::vector<HeldBlock> heldBlocks_;
+        std::vector<std::string> refusedTips_;
+        void noteOffTipBlock(const nlohmann::json &block);
+        void adoptLaterPeerChain();
+        void syncLaterPeers();
         std::vector<std::pair<std::string, int>> rememberedPublic_;
         struct AdvertisedP2P
         {
