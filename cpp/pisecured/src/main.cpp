@@ -48,13 +48,13 @@ int main(int argc, char *argv[])
         {
             return report.kind == pisecure_update::Report::Kind::Skipped ? 0 : 0;
         }
+        pisecure_update::set_restart_args(argc, argv);
         std::string err;
-        if (!pisecure_update::download_member(report, "pisecured", "/tmp/pisecured", err))
+        if (!pisecure_update::apply_user_update(report, nullptr, err))
         {
             std::cerr << err << std::endl;
             return 1;
         }
-        pisecure_update::print_daemon_install(report.tag);
         return 0;
     }
 

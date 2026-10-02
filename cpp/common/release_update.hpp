@@ -45,6 +45,10 @@ namespace pisecure_update
     // systemd: schedule systemctl restart. Otherwise exec /opt/pisecure/pisecured.
     bool restart_after_apply(std::string &err);
 
+    // Download the release, run its update.sh, and exec relaunch when it is set.
+    // A null relaunch leaves the restarted daemon running and returns.
+    bool apply_user_update(const Report &report, const char *relaunch, std::string &err);
+
     void print_daemon_install(const std::string &tag);
     void print_wallet_install();
 }

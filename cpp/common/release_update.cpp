@@ -11,6 +11,9 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
@@ -613,6 +616,101 @@ namespace pisecure_update
         args.push_back(nullptr);
         ::execv("/opt/pisecure/pisecured", args.data());
         err = "update installed; could not exec pisecured";
+        return false;
+    }
+
+    bool apply_user_update(const Report &report, const char *relaunch, std::string &err)
+    {
+        if (report.url.empty() || !https_url(report.url) || report.kind != Report::Kind::Newer)
+        {
+            err = "update check skipped";
+            return false;
+        }
+        char tar_path[] = "/tmp/pisecure-ota-XXXXXX";
+        const int fd = mkstemp(tar_path);
+        if (fd < 0)
+        {
+            err = "could not store the release download";
+            return false;
+        }
+        ::close(fd);
+        std::string curl_err;
+        if (curl_status(report.url, tar_path, curl_err) != 200)
+        {
+            std::remove(tar_path);
+            err = "update check skipped";
+            return false;
+        }
+        if (!report.sha256.empty() && file_sha256(tar_path) != report.sha256)
+        {
+            std::remove(tar_path);
+            err = "release sha256 does not match";
+            return false;
+        }
+        char dir[] = "/tmp/pisecure-apply-XXXXXX";
+        if (mkdtemp(dir) == nullptr)
+        {
+            std::remove(tar_path);
+            err = "could not store the release download";
+            return false;
+        }
+        const std::string extract = "tar -xzf " + shell_single(tar_path) + " -C " + shell_single(dir);
+        if (std::system(extract.c_str()) != 0)
+        {
+            std::remove(tar_path);
+            err = "could not read the release archive";
+            return false;
+        }
+        std::remove(tar_path);
+        const std::string script = std::string(dir) + "/update.sh";
+        if (::access(script.c_str(), F_OK) != 0)
+        {
+            err = "release archive has no update.sh";
+            return false;
+        }
+        ::chmod(script.c_str(), 0755);
+        const std::string cmd = geteuid() == 0 ? shell_single(script) : "sudo " + shell_single(script);
+        if (std::system(cmd.c_str()) != 0)
+        {
+            err = "could not install the release";
+            return false;
+        }
+        if (relaunch == nullptr || relaunch[0] == '\0')
+        {
+            return true;
+        }
+        for (int i = 0; i < 20; ++i)
+        {
+            const int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+            if (sock >= 0)
+            {
+                sockaddr_in addr{};
+                addr.sin_family = AF_INET;
+                addr.sin_port = htons(3144);
+                ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+                const int rc = ::connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+                ::close(sock);
+                if (rc == 0)
+                {
+                    break;
+                }
+            }
+            ::sleep(1);
+        }
+        if (restart_argv == nullptr || restart_argc < 1)
+        {
+            err = std::string("update installed; start ") + relaunch;
+            return false;
+        }
+        std::vector<char *> args;
+        args.push_back(const_cast<char *>(relaunch));
+        for (int i = 1; i < restart_argc; ++i)
+        {
+            args.push_back(restart_argv[i]);
+        }
+        args.push_back(nullptr);
+        ::execv(relaunch, args.data());
+        err = std::string("update installed; could not start ") + relaunch;
         return false;
     }
 }

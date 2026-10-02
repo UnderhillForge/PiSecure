@@ -81,13 +81,15 @@ namespace
                 return;
             }
             std::string err;
-            if (!pisecure_update::install_member(report, "pswallet", "/opt/pisecure/pswallet", err))
+            if (!pisecure_update::apply_user_update(report, "/opt/pisecure/pswallet", err))
             {
                 std::cerr << err << "\n";
-                pisecure_update::print_wallet_install();
+                if (err.compare(0, 16, "update installed") == 0)
+                {
+                    std::exit(1);
+                }
                 return;
             }
-            std::cerr << "installed pswallet " << report.tag << "\n";
         }
         catch (const std::exception &)
         {
@@ -2446,6 +2448,7 @@ namespace
 
 int main(int argc, char **argv)
 {
+    pisecure_update::set_restart_args(argc, argv);
     std::vector<std::string> positional;
     bool grant = false;
     std::string fee;

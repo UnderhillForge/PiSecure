@@ -1,8 +1,7 @@
 #!/bin/sh
 # Install the binaries next to this script and start pisecured.
-# aarch64 installs pisecured, psminer, and pswallet.
-# x86_64 installs psminer and pswallet only. The x86 pisecured binary stays
-# in the archive for the daemon's own update check.
+# aarch64 installs pisecured, pswallet, and psminer.
+# x86_64 installs pisecured and pswallet.
 # Does not copy or replace a node id, env file, wallet, or blk*.dat.
 set -eu
 
@@ -15,12 +14,10 @@ here=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 
 case "$(uname -m)" in
   aarch64|arm64)
-    replace_daemon=1
     set -- pisecured pswallet psminer
     ;;
   x86_64|amd64)
-    replace_daemon=0
-    set -- pswallet psminer
+    set -- pisecured pswallet
     ;;
   *)
     echo "unsupported architecture $(uname -m)" >&2
@@ -82,21 +79,19 @@ for bin in "$@"; do
   install -m 0755 -o pisecure -g pisecure "$here/$bin" "/opt/pisecure/$bin"
 done
 
-if [ "$replace_daemon" -eq 1 ]; then
-  if [ ! -f "$here/VERSION" ]; then
-    echo "missing VERSION next to update.sh" >&2
-    exit 1
-  fi
-  ver=$(tr -d ' \t\r\n' <"$here/VERSION")
-  case "$ver" in
-    ""|*[!0-9.]*)
-      echo "VERSION is not a release number" >&2
-      exit 1
-      ;;
-  esac
-  printf '%s\n' "$ver" >/etc/pisecure/pisecured.version
-  chmod 0644 /etc/pisecure/pisecured.version
+if [ ! -f "$here/VERSION" ]; then
+  echo "missing VERSION next to update.sh" >&2
+  exit 1
 fi
+ver=$(tr -d ' \t\r\n' <"$here/VERSION")
+case "$ver" in
+  ""|*[!0-9.]*)
+    echo "VERSION is not a release number" >&2
+    exit 1
+    ;;
+esac
+printf '%s\n' "$ver" >/etc/pisecure/pisecured.version
+chmod 0644 /etc/pisecure/pisecured.version
 
 if [ "$unit_installed" -eq 0 ]; then
   service=$here/deploy/pisecured.service
@@ -127,6 +122,3 @@ fi
 
 echo "Installed into /opt/pisecure."
 echo "pisecured is enabled at boot and the service is active."
-if [ "$replace_daemon" -eq 0 ]; then
-  echo "The x86_64 pisecured binary was left in place."
-fi
