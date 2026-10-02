@@ -73,6 +73,18 @@ int main()
     {
         return fail("0.216 should be 216000 pi");
     }
+    if (!pisecure::parse_314st_pi("2.35", pi, reason) || pi != 2350000 || pi / 1000 != 2350)
+    {
+        return fail("2.35 should be 2350 old units");
+    }
+    if (!pisecure::parse_314st_pi("2.350", pi, reason) || pi != 2350000)
+    {
+        return fail("2.350 should be the same as 2.35");
+    }
+    if (!pisecure::parse_314st_pi("2.3501", pi, reason) || pi % 1000 == 0)
+    {
+        return fail("2.3501 is not a multiple of 0.001");
+    }
     if (pisecure::parse_314st_pi("0.0003141", pi, reason) || reason != "amount has more than six decimal places")
     {
         return fail("seven decimal places should be rejected");

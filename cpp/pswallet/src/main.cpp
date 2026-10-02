@@ -974,6 +974,22 @@ namespace
         return true;
     }
 
+    // Trailing zeros do not add a decimal place. 2.350 is 2.35. A fourth digit, as in 2.3501, is not.
+    bool within_milli(const std::string &text)
+    {
+        const auto dot = text.find('.');
+        if (dot == std::string::npos)
+        {
+            return true;
+        }
+        std::string frac = text.substr(dot + 1);
+        while (!frac.empty() && frac.back() == '0')
+        {
+            frac.pop_back();
+        }
+        return frac.size() <= 3;
+    }
+
     bool parse_amount(const std::string &text, const Money &money, uint64_t &stored, uint64_t &pi, std::string &err)
     {
         if (!pisecure::parse_314st_pi(text, pi, err))
@@ -985,7 +1001,7 @@ namespace
             stored = pi;
             return true;
         }
-        if (pi % 1000ull != 0)
+        if (!within_milli(text) || pi % 1000ull != 0)
         {
             err = "amount must be a multiple of 0.001 314ST until height " + std::to_string(money.activation);
             return false;
@@ -1614,10 +1630,15 @@ namespace
         uint64_t fee = 0;
         uint64_t pay_pi = 0;
         uint64_t fee_pi = 0;
-        if (!parse_amount(amount, money, pay, pay_pi, err) || !parse_fee(fee_text, money, fee, fee_pi, err))
+        const std::string fee_used = fee_text.empty() ? (money.scale == 1000 ? "0.000314" : "0.001") : fee_text;
+        if (!parse_amount(amount, money, pay, pay_pi, err) || !parse_fee(fee_used, money, fee, fee_pi, err))
         {
             std::cerr << err << "\n";
             return 1;
+        }
+        if (g_dry_run)
+        {
+            std::cout << pay << " units\n";
         }
         const std::string src_addr = resolve_address(src, err);
         if (src_addr.empty())
@@ -1780,7 +1801,8 @@ namespace
         }
         uint64_t fee = 0;
         uint64_t fee_pi = 0;
-        if (!parse_fee(fee_text, money, fee, fee_pi, err))
+        const std::string fee_used = fee_text.empty() ? (money.scale == 1000 ? "0.000314" : "0.001") : fee_text;
+        if (!parse_fee(fee_used, money, fee, fee_pi, err))
         {
             std::cerr << err << "\n";
             return 1;
@@ -2413,11 +2435,11 @@ namespace
                   << "  info NAME|ps1\n"
                   << "  balance NAME|ps1\n"
                   << "  utxos NAME|ps1\n"
-                  << "  send SRC DST AMOUNT [--fee 0.000314] [--dry-run]\n"
+                  << "  send SRC DST AMOUNT [--fee FEE] [--dry-run]\n"
                   << "  flag create ID COMMITMENT AWARDS MAX EXPIRES BOUNTY NOTE\n"
                   << "  flag claim ID RECIPIENT\n"
                   << "Amounts are 314ST with six decimal places. 0.216000 is 216000 pi. 0.000314 is 314 pi.\n"
-                  << "Until the pi activation height an amount must be a multiple of 0.001 314ST. Flag bounty is units.\n"
+                  << "Until height 3000 an amount must be a multiple of 0.001 314ST, and the default fee is 0.001. After that the default fee is 0.000314. Flag bounty is units.\n"
                   << "A tty prompt or PISECURE_WALLET_PASS unlocks an encrypted wallet.\n";
     }
 }
@@ -2426,7 +2448,7 @@ int main(int argc, char **argv)
 {
     std::vector<std::string> positional;
     bool grant = false;
-    std::string fee = "0.000314";
+    std::string fee;
     int history_limit = 20;
     for (int i = 1; i < argc; ++i)
     {

@@ -263,7 +263,7 @@ Register is a helper. On startup this miner POSTs `https://bootstrap.pisecure.or
 
 Block `0fbe305838fbb59e4ec010d7319a3461a2513663f3643959da3d39c23265fecf` is height 1. Its coinbase txid is `f67580eb5438505cdd19d0cbff2f4370d888be8acfed91d8b212af189db4b9d7`. Miner output vout **0** pays 198 units to `operator`. Validator output vout 1 pays 2 units to `validator`.
 
-`pisecure wallet utxos` and `pisecure wallet send` talk to `ws://127.0.0.1:3144` and use this UTXO map. CLI amounts are **314ST** with six decimal places. `0.216000` is 216000 pi. `0.000314` is 314 pi and is the default fee. Until height 3000 an amount has to be a multiple of 0.001 314ST, because those blocks still store the old unit. After height 3000 a fee below 0.000314 is rejected.
+`pisecure wallet utxos` and `pisecure wallet send` talk to `ws://127.0.0.1:3144` and use this UTXO map. CLI amounts are **314ST** with six decimal places. `0.216000` is 216000 pi. `0.000314` is 314 pi. Until height 3000 an amount has to be a multiple of 0.001 314ST, because those blocks still store the old unit, and the default fee is 0.001. After height 3000 the default fee is 0.000314 and a smaller fee is rejected.
 
 Spend accepted into the mempool, not yet in a block:
 
